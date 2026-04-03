@@ -1,0 +1,1 @@
+# Auto Shorts Generator\n\nGeracao automatizada de Shorts/Reels/TikTok com IA.\n\n## Stack\n- FastAPI + Celery (backend)\n- XTTS v2 (TTS pt-BR) + Whisper (legendas)\n- FFmpeg + MoviePy (composicao)\n- Claude API (roteiros) + SDXL (imagens)\n- RTX 3090 para renderizacao e inferencia
