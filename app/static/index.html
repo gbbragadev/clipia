@@ -1,0 +1,519 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="description" content="Gere videos curtos para Shorts, Reels e TikTok automaticamente com IA. Escolha um tema e receba um video narrado, legendado e editado em segundos." />
+  <title>Auto Shorts — Videos curtos com IA</title>
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+
+  <!-- NAV -->
+  <nav>
+    <div class="nav-inner">
+      <a class="nav-logo" href="/">Auto Shorts</a>
+      <ul class="nav-links">
+        <li><a href="#demo">Demonstracao</a></li>
+        <li><a href="#how-it-works">Como funciona</a></li>
+        <li><a href="#waitlist" class="btn btn-outline" style="padding: 7px 18px; font-size: 0.85rem;">Acesso antecipado</a></li>
+      </ul>
+    </div>
+  </nav>
+
+  <!-- HERO -->
+  <section id="hero">
+    <div class="hero-bg-glow" aria-hidden="true"></div>
+    <div class="container animate-in">
+      <div class="hero-badge">
+        <span class="badge-dot" aria-hidden="true"></span>
+        Beta privado
+      </div>
+      <h1 class="hero-title">
+        <span class="gradient-text">Auto Shorts</span>
+      </h1>
+      <p class="hero-subtitle">
+        Gere videos curtos com IA em segundos. Roteiro, narracao, legendas e edicao — totalmente automatizados.
+      </p>
+      <div class="hero-cta-group">
+        <a href="#demo" class="btn btn-primary btn-lg">Experimentar agora</a>
+        <a href="#how-it-works" class="btn btn-outline btn-lg">Como funciona</a>
+      </div>
+      <p class="hero-note">Compativel com YouTube Shorts, Instagram Reels e TikTok</p>
+    </div>
+  </section>
+
+  <!-- DEMO -->
+  <section id="demo">
+    <div class="container">
+      <div class="section-header">
+        <h2>Gere seu primeiro video</h2>
+        <p>Digite um tema, escolha o estilo e deixe a IA fazer o trabalho.</p>
+      </div>
+
+      <div class="demo-card">
+
+        <div class="form-group">
+          <label for="topic">Tema do video</label>
+          <input
+            type="text"
+            id="topic"
+            maxlength="500"
+            placeholder="Ex: 5 curiosidades sobre o oceano profundo"
+            autocomplete="off"
+          />
+        </div>
+
+        <div class="form-row">
+          <div class="form-group" style="margin-bottom: 0;">
+            <label for="style">Estilo</label>
+            <select id="style">
+              <option value="educational">Educativo</option>
+              <option value="curiosity">Curiosidades</option>
+              <option value="storytelling">Narrativa</option>
+              <option value="news">Noticias</option>
+            </select>
+          </div>
+
+          <div class="form-group" style="margin-bottom: 0;">
+            <label for="duration">
+              Duracao
+              <span class="slider-value" id="duration-display">45s</span>
+            </label>
+            <div class="slider-wrapper">
+              <input
+                type="range"
+                id="duration"
+                min="20"
+                max="60"
+                value="45"
+                step="5"
+              />
+              <div class="slider-labels">
+                <span>20s</span>
+                <span>60s</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div style="margin-top: 28px;">
+          <button class="btn btn-primary" id="btn-generate" style="width: 100%;" onclick="startGeneration()">
+            Gerar video
+          </button>
+        </div>
+
+        <div id="progress-area" role="status" aria-live="polite">
+          <div class="progress-header">
+            <span class="progress-step-name" id="step-name">Iniciando...</span>
+            <span class="progress-pct" id="progress-pct">0%</span>
+          </div>
+          <div class="progress-track">
+            <div class="progress-bar" id="progress-bar"></div>
+          </div>
+          <div class="progress-steps-list" id="steps-list">
+            <span class="step-pill" data-step="scripting">Roteiro</span>
+            <span class="step-pill" data-step="tts">Narracao</span>
+            <span class="step-pill" data-step="transcribing">Legendas</span>
+            <span class="step-pill" data-step="media">Midia</span>
+            <span class="step-pill" data-step="compositing">Montagem</span>
+            <span class="step-pill" data-step="finalizing">Finalizando</span>
+          </div>
+        </div>
+
+        <div class="error-box" id="error-box" role="alert"></div>
+
+        <div id="video-area">
+          <div class="video-success-badge">
+            <span class="checkmark" aria-hidden="true"></span>
+            Video gerado com sucesso!
+          </div>
+          <video id="video-player" controls preload="metadata"></video>
+          <div class="video-actions">
+            <a id="btn-download" class="btn btn-primary" download>
+              Baixar video
+            </a>
+            <button class="btn btn-outline" onclick="resetForm()">
+              Gerar outro
+            </button>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </section>
+
+  <!-- HOW IT WORKS -->
+  <section id="how-it-works">
+    <div class="container">
+      <div class="section-header">
+        <h2>Como funciona</h2>
+        <p>Tres passos simples para ter seu video pronto para publicar.</p>
+      </div>
+
+      <div class="steps-grid stagger">
+        <div class="step-card">
+          <div class="step-number" aria-hidden="true">1</div>
+          <h3>Escolha o tema</h3>
+          <p>Digite qualquer assunto — historia, ciencia, entretenimento, negocios. A IA entende o contexto e adapta o conteudo.</p>
+        </div>
+        <div class="step-card">
+          <div class="step-number" aria-hidden="true">2</div>
+          <h3>IA gera o video</h3>
+          <p>Roteiro automatico, narracao natural em pt-BR, busca de imagens, legendas sincronizadas e edicao — tudo em segundos.</p>
+        </div>
+        <div class="step-card">
+          <div class="step-number" aria-hidden="true">3</div>
+          <h3>Publique nas redes</h3>
+          <p>Baixe o arquivo MP4 otimizado para formato vertical 9:16, pronto para YouTube Shorts, Instagram Reels ou TikTok.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- WAITLIST -->
+  <section id="waitlist">
+    <div class="waitlist-glow" aria-hidden="true"></div>
+    <div class="container">
+      <div class="waitlist-card">
+
+        <div id="waitlist-form-wrapper">
+          <h2>Quero acesso antecipado</h2>
+          <p>Seja um dos primeiros a usar a plataforma completa quando lancarmos. Sem spam.</p>
+          <form class="waitlist-form" onsubmit="joinWaitlist(event)">
+            <input
+              type="email"
+              id="waitlist-email"
+              placeholder="seu@email.com"
+              required
+              autocomplete="email"
+            />
+            <button type="submit" class="btn btn-primary" id="btn-waitlist">
+              Quero acesso antecipado
+            </button>
+          </form>
+        </div>
+
+        <div class="waitlist-success" id="waitlist-success">
+          <div class="waitlist-success-icon" aria-hidden="true"></div>
+          <h3>Voce esta na lista!</h3>
+          <p>Avisaremos assim que o acesso estiver disponivel.</p>
+        </div>
+
+      </div>
+    </div>
+  </section>
+
+  <!-- FOOTER -->
+  <footer>
+    <div class="container">
+      <div class="footer-inner">
+        <span class="footer-logo">Auto Shorts</span>
+        <span class="footer-copy">
+          &copy; <span id="footer-year"></span> Auto Shorts. Todos os direitos reservados.
+        </span>
+        <span class="footer-tag">Powered by IA</span>
+      </div>
+    </div>
+  </footer>
+
+  <script>
+    // Footer year
+    document.getElementById('footer-year').textContent = new Date().getFullYear();
+
+    // Duration slider
+    var durationInput   = document.getElementById('duration');
+    var durationDisplay = document.getElementById('duration-display');
+    durationInput.addEventListener('input', function () {
+      durationDisplay.textContent = durationInput.value + 's';
+    });
+
+    // Step label map
+    var STEP_LABELS = {
+      scripting:    'Gerando roteiro...',
+      tts:          'Narrando com IA...',
+      transcribing: 'Criando legendas...',
+      media:        'Buscando midia...',
+      compositing:  'Montando video...',
+      finalizing:   'Finalizando...'
+    };
+
+    // State
+    var pollTimer       = null;
+    var currentJobId    = null;
+    var completedSteps  = [];
+    var lastActiveStep  = null;
+
+    // DOM refs
+    var btnGenerate  = document.getElementById('btn-generate');
+    var progressArea = document.getElementById('progress-area');
+    var stepNameEl   = document.getElementById('step-name');
+    var progressPct  = document.getElementById('progress-pct');
+    var progressBar  = document.getElementById('progress-bar');
+    var stepsList    = document.getElementById('steps-list');
+    var errorBox     = document.getElementById('error-box');
+    var videoArea    = document.getElementById('video-area');
+    var videoPlayer  = document.getElementById('video-player');
+    var btnDownload  = document.getElementById('btn-download');
+
+    function setButtonLoading(loading) {
+      if (loading) {
+        btnGenerate.disabled = true;
+        btnGenerate.textContent = 'Processando...';
+        // Add spinner node
+        var sp = document.createElement('span');
+        sp.className = 'spinner';
+        sp.id = 'btn-spinner';
+        btnGenerate.prepend(sp);
+      } else {
+        btnGenerate.disabled = false;
+        var sp = document.getElementById('btn-spinner');
+        if (sp) sp.remove();
+        btnGenerate.textContent = 'Gerar video';
+      }
+    }
+
+    function showError(msg) {
+      errorBox.textContent = msg;
+      errorBox.classList.add('visible');
+    }
+
+    function hideError() {
+      errorBox.textContent = '';
+      errorBox.classList.remove('visible');
+    }
+
+    function updateProgressUI(progress, step) {
+      var pct = Math.round(progress);
+      progressBar.style.width = pct + '%';
+      progressPct.textContent = pct + '%';
+      var label = (step && STEP_LABELS[step]) ? STEP_LABELS[step] : (step || 'Processando...');
+      stepNameEl.textContent = label;
+
+      var pills = stepsList.querySelectorAll('.step-pill');
+      for (var i = 0; i < pills.length; i++) {
+        var p = pills[i];
+        var s = p.getAttribute('data-step');
+        if (completedSteps.indexOf(s) !== -1) {
+          p.className = 'step-pill done';
+        } else if (s === step) {
+          p.className = 'step-pill active';
+        } else {
+          p.className = 'step-pill';
+        }
+      }
+    }
+
+    function markStepDone(step) {
+      if (step && completedSteps.indexOf(step) === -1) {
+        completedSteps.push(step);
+      }
+    }
+
+    function stopPolling() {
+      if (pollTimer) {
+        clearInterval(pollTimer);
+        pollTimer = null;
+      }
+    }
+
+    function showVideoPlayer(jobId) {
+      var url = '/api/v1/jobs/' + jobId + '/download';
+      videoPlayer.src = url;
+      btnDownload.href = url;
+      videoArea.classList.add('visible');
+      videoArea.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
+
+    function resetForm() {
+      stopPolling();
+      currentJobId   = null;
+      completedSteps = [];
+      lastActiveStep = null;
+
+      progressArea.classList.remove('visible');
+      videoArea.classList.remove('visible');
+      hideError();
+
+      progressBar.style.width = '0%';
+      progressPct.textContent = '0%';
+      stepNameEl.textContent = 'Iniciando...';
+
+      var pills = stepsList.querySelectorAll('.step-pill');
+      for (var i = 0; i < pills.length; i++) {
+        pills[i].className = 'step-pill';
+      }
+
+      videoPlayer.src = '';
+      btnDownload.href = '#';
+      setButtonLoading(false);
+    }
+
+    function pollJob(jobId) {
+      fetch('/api/v1/jobs/' + jobId)
+        .then(function (res) {
+          if (!res.ok) {
+            if (res.status === 404) {
+              stopPolling();
+              setButtonLoading(false);
+              showError('Job nao encontrado. Tente gerar novamente.');
+            }
+            return null;
+          }
+          return res.json();
+        })
+        .then(function (data) {
+          if (!data) return;
+
+          var status      = data.status;
+          var progress    = data.progress || 0;
+          var currentStep = data.current_step || null;
+          var errorMsg    = data.error || null;
+
+          // When step changes, mark previous as done
+          if (currentStep && currentStep !== lastActiveStep) {
+            if (lastActiveStep) markStepDone(lastActiveStep);
+            lastActiveStep = currentStep;
+          }
+
+          updateProgressUI(progress, currentStep);
+
+          if (status === 'completed') {
+            stopPolling();
+            setButtonLoading(false);
+
+            // All pills done
+            var pills = stepsList.querySelectorAll('.step-pill');
+            for (var i = 0; i < pills.length; i++) {
+              pills[i].className = 'step-pill done';
+            }
+            progressBar.style.width = '100%';
+            progressPct.textContent = '100%';
+            stepNameEl.textContent = 'Concluido!';
+
+            showVideoPlayer(jobId);
+            return;
+          }
+
+          if (status === 'failed') {
+            stopPolling();
+            setButtonLoading(false);
+            progressArea.classList.remove('visible');
+            showError('Falha na geracao: ' + (errorMsg || 'erro desconhecido. Tente novamente.'));
+            return;
+          }
+        })
+        .catch(function (err) {
+          // Network error — keep polling silently
+          console.warn('Erro ao consultar status:', err.message);
+        });
+    }
+
+    function startGeneration() {
+      var topic    = document.getElementById('topic').value.trim();
+      var style    = document.getElementById('style').value;
+      var duration = parseInt(durationInput.value, 10);
+
+      if (topic.length < 5) {
+        showError('O tema precisa ter pelo menos 5 caracteres.');
+        return;
+      }
+
+      resetForm();
+      hideError();
+      setButtonLoading(true);
+      completedSteps  = [];
+      lastActiveStep  = null;
+
+      progressArea.classList.add('visible');
+      updateProgressUI(0, 'scripting');
+
+      fetch('/api/v1/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          topic:           topic,
+          style:           style,
+          duration_target: duration
+        })
+      })
+      .then(function (res) {
+        if (!res.ok) {
+          return res.json().then(function (body) {
+            var detail = 'Erro ao iniciar geracao.';
+            if (body && body.detail) {
+              detail = typeof body.detail === 'string' ? body.detail : JSON.stringify(body.detail);
+            }
+            throw new Error(detail);
+          }).catch(function (err) {
+            // body parse failed — rethrow the error we already have or generic
+            throw err;
+          });
+        }
+        return res.json();
+      })
+      .then(function (data) {
+        var jobId = data.job_id;
+        currentJobId = jobId;
+        // Poll immediately then every 2s
+        pollJob(jobId);
+        pollTimer = setInterval(function () { pollJob(jobId); }, 2000);
+      })
+      .catch(function (err) {
+        setButtonLoading(false);
+        progressArea.classList.remove('visible');
+        showError(err.message || 'Nao foi possivel conectar ao servidor.');
+      });
+    }
+
+    // Waitlist
+    function joinWaitlist(e) {
+      e.preventDefault();
+      var email = document.getElementById('waitlist-email').value.trim();
+      if (!email) return;
+
+      try {
+        var existing = JSON.parse(localStorage.getItem('as_waitlist') || '[]');
+        if (existing.indexOf(email) === -1) {
+          existing.push(email);
+          localStorage.setItem('as_waitlist', JSON.stringify(existing));
+        }
+      } catch (_) {}
+
+      document.getElementById('waitlist-form-wrapper').style.display = 'none';
+      document.getElementById('waitlist-success').classList.add('visible');
+    }
+
+    // Restore waitlist state
+    (function () {
+      try {
+        var existing = JSON.parse(localStorage.getItem('as_waitlist') || '[]');
+        if (existing.length > 0) {
+          document.getElementById('waitlist-form-wrapper').style.display = 'none';
+          document.getElementById('waitlist-success').classList.add('visible');
+        }
+      } catch (_) {}
+    })();
+
+    // Enter key submits generation
+    document.getElementById('topic').addEventListener('keydown', function (e) {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        startGeneration();
+      }
+    });
+
+    // Smooth scroll
+    document.querySelectorAll('a[href^="#"]').forEach(function (anchor) {
+      anchor.addEventListener('click', function (e) {
+        var target = document.querySelector(this.getAttribute('href'));
+        if (target) {
+          e.preventDefault();
+          target.scrollIntoView({ behavior: 'smooth' });
+        }
+      });
+    });
+  </script>
+
+</body>
+</html>

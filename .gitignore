@@ -1,0 +1,9 @@
+__pycache__/
+*.pyc
+.env
+storage/
+*.egg-info/
+dist/
+.venv/
+.pytest_cache/
+reference_voices/*.wav
