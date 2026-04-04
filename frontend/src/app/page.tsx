@@ -2,6 +2,7 @@ import Navbar from '@/components/Navbar'
 import HeroSection from '@/components/hero/HeroSection'
 import { WipeDivider, FilmstripDivider } from '@/components/SectionDivider'
 import SocialProofBar from '@/components/SocialProofBar'
+import ShowcaseSection from '@/components/ShowcaseSection'
 import DemoSection from '@/components/demo/DemoSection'
 import HowItWorks from '@/components/HowItWorks'
 import WaitlistForm from '@/components/WaitlistForm'
@@ -16,6 +17,8 @@ export default function Home() {
         <WipeDivider />
         <SocialProofBar />
         <FilmstripDivider />
+        <ShowcaseSection />
+        <WipeDivider />
         <DemoSection />
         <WipeDivider />
         <HowItWorks />

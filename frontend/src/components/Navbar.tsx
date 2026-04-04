@@ -27,7 +27,10 @@ export default function Navbar() {
             <a href="#demo" className="hover:text-white transition">Demo</a>
             <a href="#como-funciona" className="hover:text-white transition">Como funciona</a>
             {user ? (
-              <div className="flex items-center gap-3">
+              <div className="flex items-center gap-4">
+                <a href="/dashboard" className="text-white font-medium hover:text-purple-300 transition">
+                  Dashboard
+                </a>
                 <span className="text-slate-300">
                   <span className="text-purple-400 font-semibold">{user.credits}</span> créditos
                 </span>
