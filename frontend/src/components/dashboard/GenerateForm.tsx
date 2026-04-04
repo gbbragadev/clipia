@@ -13,6 +13,7 @@ import StyleSelector, { type StyleValue } from './StyleSelector'
 import WpmSlider from './WpmSlider'
 import OpticalBalancePreview from './OpticalBalancePreview'
 import ScriptDensityHeatmap from './ScriptDensityHeatmap'
+import NarrationTimelineRuler from './NarrationTimelineRuler'
 
 const STEP_LABELS: Record<string, string> = {
   scripting: 'Escrevendo roteiro...',
@@ -191,6 +192,10 @@ export default function GenerateForm({ onJobComplete }: GenerateFormProps) {
 
             {script.trim() && (
               <ScriptDensityHeatmap script={script} duration={duration} wpm={wpm} />
+            )}
+
+            {script.trim() && (
+              <NarrationTimelineRuler script={script} duration={duration} wpm={wpm} />
             )}
           </div>
         )}
