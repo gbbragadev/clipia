@@ -2,7 +2,6 @@
 
 import { useAuth } from '@/contexts/AuthContext'
 import Logo from '@/components/brand/Logo'
-import ThemeToggle from '@/components/ThemeToggle'
 import CreditsBadge from './CreditsBadge'
 import UserDropdown from './UserDropdown'
 
@@ -19,7 +18,6 @@ export default function DashboardNavbar() {
 
           {user && (
             <div className="flex items-center gap-3">
-              <ThemeToggle />
               <CreditsBadge credits={user.credits} />
               <UserDropdown name={user.name} onLogout={logout} />
             </div>

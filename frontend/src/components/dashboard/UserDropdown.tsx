@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect, useRef } from 'react'
+import ThemeToggle from '@/components/ThemeToggle'
 
 interface UserDropdownProps {
   name: string
@@ -35,20 +36,26 @@ export default function UserDropdown({ name, onLogout }: UserDropdownProps) {
       </button>
 
       {open && (
-        <div className="absolute right-0 mt-2 w-48 rounded-xl backdrop-blur-lg shadow-xl py-1 z-50" style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-subtle)' }}>
-          <div className="px-4 py-2" style={{ borderBottom: '1px solid var(--border-subtle)' }}>
+        <div className="absolute right-0 mt-2 w-52 rounded-xl backdrop-blur-lg shadow-xl py-1 z-50" style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-subtle)' }}>
+          <div className="px-4 py-2.5" style={{ borderBottom: '1px solid var(--border-subtle)' }}>
             <p className="text-sm font-medium truncate" style={{ color: 'var(--text-primary)' }}>{name}</p>
           </div>
           <a
             href="/dashboard"
-            className="block px-4 py-2 text-sm transition hover:opacity-80" style={{ color: 'var(--text-secondary)' }}
+            className="block px-4 py-2 text-sm transition hover:opacity-80"
+            style={{ color: 'var(--text-secondary)' }}
           >
             Dashboard
           </a>
-          <div style={{ borderTop: '1px solid var(--border-subtle)' }} className="mt-1">
+          <div className="flex items-center justify-between px-4 py-2" style={{ borderTop: '1px solid var(--border-subtle)' }}>
+            <span className="text-xs" style={{ color: 'var(--text-tertiary)' }}>Tema</span>
+            <ThemeToggle />
+          </div>
+          <div style={{ borderTop: '1px solid var(--border-subtle)' }}>
             <button
               onClick={() => { setOpen(false); onLogout() }}
-              className="w-full text-left px-4 py-2 text-sm hover:text-red-400 transition cursor-pointer" style={{ color: 'var(--text-tertiary)' }}
+              className="w-full text-left px-4 py-2 text-sm hover:text-red-400 transition cursor-pointer"
+              style={{ color: 'var(--text-tertiary)' }}
             >
               Sair
             </button>

@@ -105,13 +105,13 @@ export default function GenerateForm({ onJobComplete }: GenerateFormProps) {
 
       {/* Template */}
       <div className="mb-5">
-        <label className="block text-xs text-gray-500 mb-2">Template</label>
+        <label className="block text-xs text-[var(--text-tertiary)] mb-2">Template</label>
         <TemplateSelector selected={templateId} onSelect={setTemplateId} disabled={generating} />
       </div>
 
       {/* Topic */}
       <div className="mb-4">
-        <label className="block text-xs text-gray-500 mb-1.5">Tema do vídeo</label>
+        <label className="block text-xs text-[var(--text-tertiary)] mb-1.5">Tema do vídeo</label>
         <input
           type="text"
           value={topic}
@@ -119,20 +119,20 @@ export default function GenerateForm({ onJobComplete }: GenerateFormProps) {
           onKeyDown={(e) => { if (e.key === 'Enter') handleGenerate() }}
           placeholder="Ex: 5 curiosidades sobre o oceano profundo"
           disabled={generating}
-          className="w-full px-4 py-3 text-sm rounded-xl border border-[var(--border-default)] bg-[var(--bg-surface)] text-[var(--text-primary)] placeholder:text-gray-600 outline-none focus:border-purple-500/50 transition disabled:opacity-50"
+          className="w-full px-4 py-3 text-sm rounded-xl border border-[var(--border-default)] bg-[var(--bg-surface)] text-[var(--text-primary)] placeholder:text-[var(--text-tertiary)] outline-none focus:border-purple-500/50 transition disabled:opacity-50"
         />
       </div>
 
       {/* Style */}
       <div className="mb-4">
-        <label className="block text-xs text-gray-500 mb-1.5">Estilo</label>
+        <label className="block text-xs text-[var(--text-tertiary)] mb-1.5">Estilo</label>
         <StyleSelector selected={style} onSelect={setStyle} disabled={generating} />
       </div>
 
       {/* Duration */}
       <div className="mb-5">
-        <label className="block text-xs text-gray-500 mb-1.5">
-          Duração: <span className="text-gray-300 font-medium">{duration}s</span>
+        <label className="block text-xs text-[var(--text-tertiary)] mb-1.5">
+          Duração: <span className="font-medium" style={{ color: 'var(--text-primary)' }}>{duration}s</span>
         </label>
         <input
           type="range"
@@ -143,7 +143,7 @@ export default function GenerateForm({ onJobComplete }: GenerateFormProps) {
           disabled={generating}
           className="w-full accent-purple-600"
         />
-        <div className="flex justify-between text-[10px] text-gray-600 mt-0.5">
+        <div className="flex justify-between text-[10px] text-[var(--text-tertiary)] mt-0.5">
           <span>20s</span>
           <span>60s</span>
         </div>
@@ -160,7 +160,7 @@ export default function GenerateForm({ onJobComplete }: GenerateFormProps) {
               {Math.round(activeJob.progress * 100)}%
             </span>
           </div>
-          <div className="h-1.5 bg-[#222] rounded-full overflow-hidden">
+          <div className="h-1.5 rounded-full overflow-hidden" style={{ background: 'var(--bg-surface-hover)' }}>
             <div
               className="h-full bg-purple-600 rounded-full transition-all duration-500 ease-out"
               style={{ width: `${Math.max(5, activeJob.progress * 100)}%` }}
@@ -182,7 +182,7 @@ export default function GenerateForm({ onJobComplete }: GenerateFormProps) {
         disabled={generating || !topic.trim()}
         className={`w-full py-3.5 rounded-xl border-none text-base font-semibold transition cursor-pointer ${
           generating || !topic.trim()
-            ? 'bg-[#333] text-gray-600 cursor-not-allowed'
+            ? 'bg-[var(--bg-surface-hover)] text-[var(--text-tertiary)] cursor-not-allowed'
             : 'bg-gradient-to-r from-purple-600 to-blue-600 text-white hover:opacity-90'
         }`}
       >
@@ -203,7 +203,7 @@ export default function GenerateForm({ onJobComplete }: GenerateFormProps) {
             <div className="text-4xl mb-4">💰</div>
             <h3 className="text-lg font-bold mb-2">Seus créditos acabaram</h3>
             <p className="text-sm text-gray-400 mb-1">Plano: <span className="text-gray-300 capitalize">{user?.plan || 'free'}</span></p>
-            <p className="text-xs text-gray-500 mb-6">Cada vídeo consome 1 crédito</p>
+            <p className="text-xs text-[var(--text-tertiary)] mb-6">Cada vídeo consome 1 crédito</p>
             <button
               disabled
               className="w-full py-3 rounded-xl bg-purple-600/30 text-purple-300 font-medium text-sm cursor-not-allowed opacity-50 mb-3"

@@ -3,7 +3,7 @@ from pydantic import BaseModel, Field
 
 class GenerateRequest(BaseModel):
     topic: str = Field(..., min_length=5, max_length=500)
-    style: str = Field(default="educational", pattern="^(educational|curiosity|storytelling|news)$")
+    style: str = Field(default="educational")
     duration_target: int = Field(default=45, ge=20, le=60)
     template_id: str = Field(default="stock_narration")
 

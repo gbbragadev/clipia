@@ -29,10 +29,10 @@ export default function TemplateSelector({ selected, onSelect, disabled }: Templ
         >
           <span className="text-3xl flex-shrink-0 mt-0.5">{t.icon}</span>
           <div className="min-w-0">
-            <div className={`text-sm font-semibold ${selected === t.id ? 'text-gray-100' : 'text-gray-300'}`}>
+            <div className="text-sm font-semibold" style={{ color: selected === t.id ? 'var(--text-primary)' : 'var(--text-secondary)' }}>
               {t.name}
             </div>
-            <div className="text-xs text-gray-500 mt-0.5">{t.desc}</div>
+            <div className="text-xs mt-0.5" style={{ color: 'var(--text-tertiary)' }}>{t.desc}</div>
           </div>
         </button>
       ))}

@@ -93,7 +93,7 @@ export async function fetchJobs(): Promise<JobSummary[]> {
 
 export interface GenerateParams {
   topic: string
-  style: 'educational' | 'curiosity' | 'storytelling' | 'news'
+  style: string
   duration_target: number
   template_id: string
 }
