@@ -1,137 +1,135 @@
 'use client'
 
-import { useInView } from '@/hooks/useInView'
+import { useEffect, useRef, useState } from 'react'
 
-const panels = [
+const steps = [
   {
-    timecode: '00:01',
+    number: '01',
     title: 'Escolha o tema',
-    description: 'Digite qualquer assunto — de curiosidades cientificas a noticias do dia.',
+    description: 'Digite qualquer assunto e a IA gera um roteiro envolvente em pt-BR.',
+    gradient: 'linear-gradient(135deg, #7c3aed, #3b82f6)',
+    icon: 'edit',
   },
   {
-    timecode: '00:02',
-    title: 'IA gera o video',
-    description: 'Roteiro, narracao em pt-BR, selecao de midia e legendas sincronizadas automaticamente.',
+    number: '02',
+    title: 'IA cria o video',
+    description: 'Narracao com voz natural, legendas sincronizadas e midia selecionada automaticamente.',
+    gradient: 'linear-gradient(135deg, #d946ef, #7c3aed)',
+    icon: 'play',
   },
   {
-    timecode: '00:03',
+    number: '03',
     title: 'Publique',
-    description: 'Baixe o video pronto em formato 9:16 e publique no YouTube Shorts, Reels ou TikTok.',
+    description: 'Baixe em 9:16 e publique direto no YouTube Shorts, Reels ou TikTok.',
+    gradient: 'linear-gradient(135deg, #22d3ee, #3b82f6)',
+    icon: 'upload',
   },
 ]
 
-function ThumbnailInput() {
+function StepIcon({ type }: { type: string }) {
+  const size = 32
+  if (type === 'edit') {
+    return (
+      <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+        <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
+      </svg>
+    )
+  }
+  if (type === 'play') {
+    return (
+      <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <polygon points="5 3 19 12 5 21 5 3" fill="rgba(255,255,255,0.3)" />
+      </svg>
+    )
+  }
   return (
-    <div className="w-full rounded-xl bg-[#0a0a14] border border-gray-800 p-4 flex flex-col gap-2" style={{ aspectRatio: '9/16' }}>
-      <div className="flex-1 flex flex-col justify-center gap-3 px-2">
-        <div className="h-3 w-3/4 rounded bg-gray-700/50" />
-        <div className="h-3 w-1/2 rounded bg-gray-700/50" />
-        <div className="flex items-center gap-1 mt-2">
-          <div className="h-4 w-full rounded bg-purple-500/20 border border-purple-500/30 flex items-center px-2">
-            <span className="text-[10px] text-purple-300 font-mono">5 fatos sobre...</span>
-            <span className="ml-auto w-0.5 h-3 bg-purple-400" style={{ animation: 'cursor-blink 1s infinite' }} />
-          </div>
-        </div>
-      </div>
-    </div>
-  )
-}
-
-function ThumbnailTimeline() {
-  return (
-    <div className="w-full rounded-xl bg-[#0a0a14] border border-gray-800 p-4 flex flex-col justify-center gap-3" style={{ aspectRatio: '9/16' }}>
-      <div className="space-y-3 px-2">
-        <div className="flex items-center gap-2">
-          <span className="text-[9px] text-gray-600 font-mono w-6">AUD</span>
-          <div className="flex-1 h-3 rounded bg-blue-500/30 border border-blue-500/20" />
-        </div>
-        <div className="flex items-center gap-2">
-          <span className="text-[9px] text-gray-600 font-mono w-6">VID</span>
-          <div className="flex-1 h-3 rounded bg-purple-500/30 border border-purple-500/20 animate-pulse" />
-        </div>
-        <div className="flex items-center gap-2">
-          <span className="text-[9px] text-gray-600 font-mono w-6">TXT</span>
-          <div className="flex-1 h-3 rounded bg-fuchsia-500/30 border border-fuchsia-500/20" />
-        </div>
-      </div>
-      <div className="mt-2 h-px bg-gradient-to-r from-transparent via-purple-500/40 to-transparent" />
-      <div className="flex justify-between text-[8px] text-gray-600 font-mono px-2">
-        <span>00:00</span>
-        <span>00:15</span>
-        <span>00:30</span>
-      </div>
-    </div>
-  )
-}
-
-function ThumbnailPublish() {
-  return (
-    <div className="w-full rounded-xl bg-[#0a0a14] border border-gray-800 p-4 flex flex-col justify-center items-center gap-4" style={{ aspectRatio: '9/16' }}>
-      <div className="flex gap-4 items-center">
-        {/* YouTube circle */}
-        <div className="w-12 h-12 rounded-full bg-red-500/20 border-2 border-red-500/40 flex items-center justify-center">
-          <div className="w-0 h-0 border-t-[6px] border-t-transparent border-b-[6px] border-b-transparent border-l-[10px] border-l-red-400 ml-1" />
-        </div>
-        {/* Instagram circle */}
-        <div className="w-12 h-12 rounded-full bg-pink-500/20 border-2 border-pink-500/40 flex items-center justify-center">
-          <div className="w-5 h-5 rounded-md border-2 border-pink-400">
-            <div className="w-1.5 h-1.5 rounded-full bg-pink-400 mx-auto mt-0.5" />
-          </div>
-        </div>
-        {/* TikTok circle */}
-        <div className="w-12 h-12 rounded-full bg-cyan-500/20 border-2 border-cyan-500/40 flex items-center justify-center">
-          <div className="relative">
-            <div className="w-3 h-4 border-2 border-cyan-400 rounded-sm" />
-            <div className="absolute -top-1 -right-1 w-2 h-2 rounded-full bg-cyan-400" />
-          </div>
-        </div>
-      </div>
-      <div className="h-2 w-20 rounded-full bg-green-500/30 border border-green-500/20" />
-      <span className="text-[10px] text-gray-500 font-mono">Pronto para publicar</span>
-    </div>
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+      <polyline points="17 8 12 3 7 8" />
+      <line x1="12" y1="3" x2="12" y2="15" />
+    </svg>
   )
 }
 
 export default function HowItWorks() {
-  const { ref, inView } = useInView(0.15)
+  const [visible, setVisible] = useState(false)
+  const ref = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    const el = ref.current
+    if (!el) return
+    const obs = new IntersectionObserver(([e]) => { if (e.isIntersecting) setVisible(true) }, { threshold: 0.1 })
+    obs.observe(el)
+    return () => obs.disconnect()
+  }, [])
 
   return (
-    <section id="como-funciona" className="py-20 px-4" ref={ref}>
-      <div className="max-w-5xl mx-auto">
-        <h2 className="text-sm font-mono text-gray-500 text-center mb-2 tracking-wider">
-          Cena 03 &middot; Storyboard
+    <section id="como-funciona" style={{ padding: '80px 16px' }} ref={ref}>
+      <div style={{ maxWidth: 1000, margin: '0 auto' }}>
+        <p style={{ textAlign: 'center', fontSize: 13, fontWeight: 500, color: '#7c3aed', letterSpacing: '0.1em', textTransform: 'uppercase', marginBottom: 8 }}>
+          Como funciona
+        </p>
+        <h2 style={{ textAlign: 'center', fontSize: 'clamp(1.8rem, 3vw, 2.5rem)', fontWeight: 800, color: 'white', marginBottom: 56 }}>
+          Do tema ao video em 3 passos
         </h2>
-        <h3 className="text-2xl font-bold text-center mb-12">Como funciona</h3>
 
-        <div className="grid md:grid-cols-[1fr_auto_1fr_auto_1fr] gap-4 md:gap-6 items-start">
-          {panels.map((panel, i) => (
-            <div key={panel.timecode} className="contents">
-              <div
-                className={`p-5 rounded-2xl bg-[var(--bg-card)] border border-gray-800 hover:border-purple-500/30 transition-all duration-700 group ${
-                  inView ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-8'
-                }`}
-                style={{ transitionDelay: `${i * 200}ms` }}
-              >
-                <span className="text-[10px] font-mono text-gray-600 block mb-3">{panel.timecode}</span>
-                <div className="mb-4">
-                  {i === 0 && <ThumbnailInput />}
-                  {i === 1 && <ThumbnailTimeline />}
-                  {i === 2 && <ThumbnailPublish />}
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 24 }}>
+          {steps.map((step, i) => (
+            <div
+              key={step.number}
+              style={{
+                borderRadius: 20,
+                overflow: 'hidden',
+                opacity: 1,
+              }}
+            >
+              {/* Gradient header with icon */}
+              <div style={{
+                background: step.gradient,
+                padding: '40px 28px 32px',
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                gap: 16,
+                position: 'relative',
+              }}>
+                <div style={{
+                  width: 64,
+                  height: 64,
+                  borderRadius: 16,
+                  background: 'rgba(255,255,255,0.15)',
+                  backdropFilter: 'blur(8px)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                }}>
+                  <StepIcon type={step.icon} />
                 </div>
-                <h4 className="text-lg font-semibold mb-2 group-hover:text-purple-300 transition">
-                  {panel.title}
-                </h4>
-                <p className="text-gray-400 text-sm leading-relaxed">{panel.description}</p>
+                <span style={{ fontSize: 48, fontWeight: 900, color: 'rgba(255,255,255,0.15)', position: 'absolute', top: 12, right: 20 }}>
+                  {step.number}
+                </span>
               </div>
-              {/* Arrow connector (desktop only, not after last panel) */}
-              {i < panels.length - 1 && (
-                <div className="hidden md:flex items-center justify-center self-center">
-                  <div className="w-0 h-0 border-t-[8px] border-t-transparent border-b-[8px] border-b-transparent border-l-[12px] border-l-purple-500/40" />
-                </div>
-              )}
+
+              {/* Text content */}
+              <div style={{
+                background: 'rgba(255,255,255,0.03)',
+                border: '1px solid rgba(255,255,255,0.06)',
+                borderTop: 'none',
+                padding: '24px 28px 32px',
+                borderRadius: '0 0 20px 20px',
+              }}>
+                <h3 style={{ fontSize: 20, fontWeight: 700, color: 'white', marginBottom: 8 }}>
+                  {step.title}
+                </h3>
+                <p style={{ fontSize: 14, lineHeight: 1.7, color: '#94a3b8' }}>
+                  {step.description}
+                </p>
+              </div>
             </div>
           ))}
         </div>
+
       </div>
     </section>
   )

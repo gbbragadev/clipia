@@ -1,46 +1,135 @@
 @import "tailwindcss";
 
-:root {
-  --background: #06060b;
-  --foreground: #f1f5f9;
-  --bg-card: #0e0e18;
-  --bg-card-hover: #14142a;
-  --accent-purple: #8b5cf6;
-  --accent-blue: #3b82f6;
-  --accent-magenta: #d946ef;
-  --accent-cyan: #22d3ee;
-}
-
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
+  --color-background: #050509;
+  --color-foreground: #f1f5f9;
   --font-sans: var(--font-inter);
 }
 
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: var(--font-sans), system-ui, sans-serif;
-}
-
+* { box-sizing: border-box; }
 html { scroll-behavior: smooth; }
 
-.filmstrip-border {
-  background: repeating-linear-gradient(
-    90deg, #1a1a2e 0px, #1a1a2e 10px, transparent 10px, transparent 14px
-  );
-  height: 16px;
+body {
+  background: #0a0a12;
+  color: #f1f5f9;
+  font-family: var(--font-sans), system-ui, -apple-system, sans-serif;
+  overflow-x: hidden;
 }
 
-.glow-purple { box-shadow: 0 0 60px rgba(139, 92, 246, 0.15); }
-.glow-blue { box-shadow: 0 0 60px rgba(59, 130, 246, 0.1); }
+/* Page ambient gradient - not pure black */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  background:
+    radial-gradient(ellipse 80% 40% at 50% 0%, rgba(88, 28, 135, 0.12), transparent 70%),
+    radial-gradient(ellipse 60% 40% at 100% 60%, rgba(37, 99, 235, 0.06), transparent 70%),
+    radial-gradient(ellipse 50% 30% at 0% 100%, rgba(139, 92, 246, 0.05), transparent 70%),
+    #0a0a12;
+  pointer-events: none;
+}
+
+/* Hero mesh gradient background */
+.hero-bg {
+  background:
+    radial-gradient(ellipse 90% 60% at 50% -10%, rgba(120, 60, 220, 0.3), transparent),
+    radial-gradient(ellipse 70% 50% at 80% 40%, rgba(37, 99, 235, 0.2), transparent),
+    radial-gradient(ellipse 60% 50% at 20% 70%, rgba(139, 92, 246, 0.12), transparent),
+    transparent;
+}
+
+/* Glass cards */
+.card {
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 16px;
+  backdrop-filter: blur(8px);
+  transition: all 0.2s;
+}
+.card:hover {
+  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(139, 92, 246, 0.2);
+}
+
+/* Buttons */
+.btn-primary {
+  background: linear-gradient(135deg, #7c3aed, #3b82f6);
+  color: white;
+  font-weight: 600;
+  padding: 14px 28px;
+  border-radius: 12px;
+  transition: all 0.2s;
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 15px;
+}
+.btn-primary:hover { opacity: 0.9; transform: translateY(-1px); }
+
+.btn-outline {
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: #94a3b8;
+  padding: 14px 28px;
+  border-radius: 12px;
+  transition: all 0.2s;
+  text-decoration: none;
+  font-size: 15px;
+}
+.btn-outline:hover { border-color: rgba(255, 255, 255, 0.25); color: white; }
+
+/* Filmstrip */
+.filmstrip-border {
+  background: repeating-linear-gradient(
+    90deg, rgba(139,92,246,0.15) 0px, rgba(139,92,246,0.15) 10px, transparent 10px, transparent 14px
+  );
+  height: 14px;
+}
+
+/* Animations */
+@keyframes pulse-glow {
+  0%, 100% { opacity: 0.6; }
+  50% { opacity: 1; }
+}
+
+@keyframes cursor-blink {
+  0%, 50% { opacity: 1; }
+  51%, 100% { opacity: 0; }
+}
 
 @keyframes float {
   0%, 100% { transform: translateY(0); }
   50% { transform: translateY(-10px); }
 }
 
-@keyframes cursor-blink {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0; }
+@keyframes progress-fill {
+  0% { width: 0%; }
+  100% { width: 100%; }
+}
+
+/* Phone feed scroll */
+.phone-scroll {
+  overflow-y: auto;
+  scroll-snap-type: y mandatory;
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+.phone-scroll::-webkit-scrollbar { display: none; }
+
+.reel {
+  scroll-snap-align: start;
+  flex-shrink: 0;
+}
+
+@keyframes gradient-shift {
+  0% { background-position: 0% 0%; }
+  50% { background-position: 100% 100%; }
+  100% { background-position: 0% 0%; }
+}
+
+@keyframes float-particle {
+  0% { transform: translateY(0) scale(1); opacity: 0.3; }
+  50% { transform: translateY(-30px) scale(1.2); opacity: 0.6; }
+  100% { transform: translateY(0) scale(1); opacity: 0.3; }
 }

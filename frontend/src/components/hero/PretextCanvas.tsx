@@ -1,25 +1,20 @@
 'use client'
 
-import { useEffect, useRef, useCallback } from 'react'
+import { useEffect, useRef } from 'react'
 import { prepareWithSegments, layoutWithLines } from '@chenglou/pretext'
 
-interface Particle {
-  x: number
-  y: number
-  targetX: number
-  targetY: number
-  alpha: number
-  vx: number
-  vy: number
-}
+const PHRASES = [
+  'Voce sabia que o oceano cobre mais de 70% da Terra?',
+  'O cafe foi descoberto na Etiopia no seculo IX.',
+  'Gatos ronronam entre 25 e 150 hertz de frequencia.',
+  'O Sol tem 4.6 bilhoes de anos de idade.',
+]
 
 export default function PretextCanvas() {
   const canvasRef = useRef<HTMLCanvasElement>(null)
-  const particlesRef = useRef<Particle[]>([])
   const animRef = useRef<number>(0)
-  const mouseRef = useRef({ x: -1000, y: -1000 })
 
-  const initParticles = useCallback(() => {
+  useEffect(() => {
     const canvas = canvasRef.current
     if (!canvas) return
 
@@ -28,133 +23,97 @@ export default function PretextCanvas() {
     canvas.width = rect.width * dpr
     canvas.height = rect.height * dpr
 
-    const font = '700 64px Inter, system-ui, sans-serif'
-    const text = 'Auto Shorts'
-    const prepared = prepareWithSegments(text, font)
-    const result = layoutWithLines(prepared, rect.width - 40, 72)
+    const ctx = canvas.getContext('2d')!
+    ctx.scale(dpr, dpr)
 
-    // Render text to offscreen canvas to sample pixel positions
-    const offscreen = document.createElement('canvas')
-    offscreen.width = rect.width
-    offscreen.height = rect.height
-    const offCtx = offscreen.getContext('2d')!
-    offCtx.font = font
-    offCtx.fillStyle = '#fff'
-    offCtx.textBaseline = 'top'
-
-    const lines = result.lines
-    const startY = rect.height / 2 - (lines.length * 72) / 2
-    for (let i = 0; i < lines.length; i++) {
-      const line = lines[i]
-      const textWidth = offCtx.measureText(line.text).width
-      const x = (rect.width - textWidth) / 2
-      offCtx.fillText(line.text, x, startY + i * 72)
-    }
-
-    // Sample pixels
-    const imageData = offCtx.getImageData(0, 0, rect.width, rect.height)
-    const particles: Particle[] = []
-    const step = 5
-
-    for (let y = 0; y < rect.height; y += step) {
-      for (let x = 0; x < rect.width; x += step) {
-        const idx = (y * rect.width + x) * 4
-        if (imageData.data[idx + 3] > 128) {
-          particles.push({
-            x: Math.random() * rect.width,
-            y: Math.random() * rect.height,
-            targetX: x,
-            targetY: y,
-            alpha: 0.3 + Math.random() * 0.7,
-            vx: 0,
-            vy: 0,
-          })
-        }
-      }
-    }
-    particlesRef.current = particles
-  }, [])
-
-  useEffect(() => {
-    const canvas = canvasRef.current
-    if (!canvas) return
-
-    const handleMouseMove = (e: MouseEvent) => {
-      const rect = canvas.getBoundingClientRect()
-      mouseRef.current = { x: e.clientX - rect.left, y: e.clientY - rect.top }
-    }
-    const handleMouseLeave = () => {
-      mouseRef.current = { x: -1000, y: -1000 }
-    }
-
-    canvas.addEventListener('mousemove', handleMouseMove)
-    canvas.addEventListener('mouseleave', handleMouseLeave)
-
-    if (document.fonts?.ready) {
-      document.fonts.ready.then(initParticles)
-    } else {
-      setTimeout(initParticles, 200)
-    }
+    const font = '600 15px Inter, system-ui, sans-serif'
+    let startTime = Date.now()
+    let phraseIdx = 0
 
     const animate = () => {
-      const ctx = canvas.getContext('2d')!
-      const dpr = window.devicePixelRatio || 1
-      const w = canvas.width / dpr
-      const h = canvas.height / dpr
+      const elapsed = Date.now() - startTime
+      const w = rect.width
+      const h = rect.height
 
-      ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
       ctx.clearRect(0, 0, w, h)
 
-      const mouse = mouseRef.current
-      const particles = particlesRef.current
+      const phrase = PHRASES[phraseIdx]
+      const prepared = prepareWithSegments(phrase, font)
+      const result = layoutWithLines(prepared, w - 24, 22)
 
-      for (const p of particles) {
-        const dx = p.x - mouse.x
-        const dy = p.y - mouse.y
-        const dist = Math.sqrt(dx * dx + dy * dy)
-        if (dist < 80 && dist > 0) {
-          const force = (80 - dist) / 80
-          p.vx += (dx / dist) * force * 2
-          p.vy += (dy / dist) * force * 2
+      const words = phrase.split(' ')
+      const totalDur = 3000
+      const wordsVisible = Math.floor((elapsed / totalDur) * words.length * 1.5)
+
+      let wordIdx = 0
+      let yOff = 8
+      for (const line of result.lines) {
+        const lineWords = line.text.split(' ')
+        let xOff = 12
+
+        for (const word of lineWords) {
+          if (!word) continue
+          const show = wordIdx < wordsVisible
+
+          if (show) {
+            const isHighlighted = wordIdx === wordsVisible - 1
+            ctx.font = font
+
+            if (isHighlighted) {
+              const metrics = ctx.measureText(word)
+              ctx.fillStyle = 'rgba(124, 58, 237, 0.4)'
+              ctx.beginPath()
+              ctx.roundRect(xOff - 3, yOff, metrics.width + 6, 20, 4)
+              ctx.fill()
+              ctx.fillStyle = 'rgba(255, 255, 255, 1)'
+            } else {
+              ctx.fillStyle = 'rgba(255, 255, 255, 0.7)'
+            }
+
+            ctx.fillText(word, xOff, yOff + 15)
+          }
+
+          ctx.font = font
+          const metrics = ctx.measureText(word + ' ')
+          xOff += metrics.width
+          wordIdx++
         }
+        yOff += 22
+      }
 
-        p.vx += (p.targetX - p.x) * 0.05
-        p.vy += (p.targetY - p.y) * 0.05
-        p.vx *= 0.85
-        p.vy *= 0.85
-        p.x += p.vx
-        p.y += p.vy
-
-        const gradient = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, 2)
-        gradient.addColorStop(0, `rgba(139, 92, 246, ${p.alpha})`)
-        gradient.addColorStop(1, `rgba(59, 130, 246, ${p.alpha * 0.3})`)
-        ctx.fillStyle = gradient
-        ctx.beginPath()
-        ctx.arc(p.x, p.y, 1.5, 0, Math.PI * 2)
-        ctx.fill()
+      if (elapsed > totalDur + 800) {
+        phraseIdx = (phraseIdx + 1) % PHRASES.length
+        startTime = Date.now()
       }
 
       animRef.current = requestAnimationFrame(animate)
     }
 
-    animate()
-
-    const handleResize = () => initParticles()
-    window.addEventListener('resize', handleResize)
-
-    return () => {
-      cancelAnimationFrame(animRef.current)
-      canvas.removeEventListener('mousemove', handleMouseMove)
-      canvas.removeEventListener('mouseleave', handleMouseLeave)
-      window.removeEventListener('resize', handleResize)
+    const init = () => animate()
+    if (document.fonts?.ready) {
+      document.fonts.ready.then(init)
+    } else {
+      setTimeout(init, 200)
     }
-  }, [initParticles])
+
+    return () => cancelAnimationFrame(animRef.current)
+  }, [])
 
   return (
-    <canvas
-      ref={canvasRef}
-      className="w-full h-[120px] md:h-[160px] cursor-crosshair"
-      style={{ touchAction: 'none' }}
-    />
+    <div style={{
+      borderRadius: 12,
+      background: 'rgba(255,255,255,0.03)',
+      border: '1px solid rgba(255,255,255,0.06)',
+      overflow: 'hidden',
+    }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 12px', borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
+        <span style={{ fontSize: 10, color: '#7c3aed', fontWeight: 600, letterSpacing: '0.05em' }}>LEGENDAS AO VIVO</span>
+        <span style={{ width: 5, height: 5, borderRadius: '50%', background: '#22c55e', animation: 'pulse-glow 1.5s infinite' }} />
+      </div>
+      <canvas
+        ref={canvasRef}
+        style={{ width: '100%', height: 72, display: 'block' }}
+      />
+    </div>
   )
 }
