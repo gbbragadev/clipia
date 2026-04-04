@@ -10,6 +10,7 @@ import {
 } from '@/lib/editor-api'
 import TemplateSelector from './TemplateSelector'
 import StyleSelector, { type StyleValue } from './StyleSelector'
+import WpmSlider from './WpmSlider'
 
 const STEP_LABELS: Record<string, string> = {
   scripting: 'Escrevendo roteiro...',
@@ -35,6 +36,9 @@ export default function GenerateForm({ onJobComplete }: GenerateFormProps) {
   const [genError, setGenError] = useState<string | null>(null)
   const [activeJob, setActiveJob] = useState<JobStatusResponse | null>(null)
   const [showCreditsModal, setShowCreditsModal] = useState(false)
+  const [script, setScript] = useState('')
+  const [wpm, setWpm] = useState(150)
+  const [showAdvancedScript, setShowAdvancedScript] = useState(false)
 
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
@@ -147,6 +151,41 @@ export default function GenerateForm({ onJobComplete }: GenerateFormProps) {
           <span>20s</span>
           <span>60s</span>
         </div>
+      </div>
+
+      {/* Advanced Script Section */}
+      <div className="mb-5">
+        <button
+          type="button"
+          onClick={() => setShowAdvancedScript(!showAdvancedScript)}
+          disabled={generating}
+          className="flex items-center gap-1.5 text-xs text-[var(--text-tertiary)] hover:text-[var(--text-secondary)] transition cursor-pointer disabled:opacity-50"
+        >
+          <span className="transition-transform" style={{ transform: showAdvancedScript ? 'rotate(90deg)' : 'rotate(0deg)' }}>
+            ▶
+          </span>
+          Roteiro avancado
+        </button>
+
+        {showAdvancedScript && (
+          <div className="mt-3 space-y-4">
+            <div>
+              <label className="block text-xs text-[var(--text-tertiary)] mb-1.5">
+                Roteiro (separe cenas com linha em branco)
+              </label>
+              <textarea
+                value={script}
+                onChange={(e) => setScript(e.target.value)}
+                disabled={generating}
+                rows={6}
+                placeholder={"O oceano profundo esconde segredos incriveis.\nVoce sabia que existem criaturas bioluminescentes?\n\nA fossa das Marianas tem mais de 11 mil metros.\nNenhum raio de sol chega ate la."}
+                className="w-full px-4 py-3 text-sm rounded-xl border border-[var(--border-default)] bg-[var(--bg-surface)] text-[var(--text-primary)] placeholder:text-[var(--text-tertiary)] outline-none focus:border-purple-500/50 transition disabled:opacity-50 resize-y font-mono"
+              />
+            </div>
+
+            <WpmSlider value={wpm} onChange={setWpm} disabled={generating} />
+          </div>
+        )}
       </div>
 
       {/* Progress */}
