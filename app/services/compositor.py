@@ -41,9 +41,10 @@ def _has_nvenc() -> bool:
 
 
 def _prepare_scene(media_path: str, duration: float, output_path: str) -> str:
-    """Prepare a single scene clip: resize to 1080x1920, pad to fill, set duration."""
+    """Prepare a single scene clip: resize to 1080x1920, loop if needed, set exact duration."""
     cmd = [
         "ffmpeg", "-y",
+        "-stream_loop", "-1",  # loop input if shorter than duration
         "-i", media_path,
         "-vf", (
             f"scale=1080:1920:force_original_aspect_ratio=increase,"
@@ -52,7 +53,7 @@ def _prepare_scene(media_path: str, duration: float, output_path: str) -> str:
         ),
         "-t", str(duration),
         "-an",  # no audio
-        "-c:v", "libx264", "-preset", "ultrafast", "-crf", "18",
+        "-c:v", "libx264", "-preset", "ultrafast", "-crf", "23",
         "-r", str(settings.VIDEO_FPS),
         "-pix_fmt", "yuv420p",
         output_path,
@@ -117,7 +118,11 @@ def compose_short(
     # 6. Final compose: video + subtitles + audio with NVENC
     use_nvenc = _has_nvenc()
     encoder = "h264_nvenc" if use_nvenc else "libx264"
-    encoder_opts = ["-preset", "p4", "-rc", "vbr", "-cq", "23"] if use_nvenc else ["-preset", "veryfast", "-crf", "23"]
+    encoder_opts = (
+        ["-preset", "p4", "-rc", "vbr", "-cq", "28", "-maxrate", "3000k", "-bufsize", "6000k"]
+        if use_nvenc
+        else ["-preset", "veryfast", "-crf", "28", "-maxrate", "3000k", "-bufsize", "6000k"]
+    )
 
     logger.info(f"Encoding with {encoder}")
 

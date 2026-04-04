@@ -91,6 +91,7 @@ def task_generate_script(self, job_id: str, topic: str, style: str, duration_tar
         logger.info(f"Script: {len(scenes)} scenes, {total_dur}s total, {len(script.get('narration', '').split())} words")
 
         _update_job(job_id, "processing", "scripting", 0.16)
+        script["_duration_target"] = duration_target
         return script
     except Exception as e:
         _fail_job(job_id, f"Script generation failed: {e}")
@@ -103,7 +104,8 @@ def task_synthesize_audio(self, script: dict, job_id: str) -> str:
         _update_job(job_id, "processing", "tts", 0.2)
         job_dir = get_job_dir(job_id)
         output_path = str(job_dir / "narration.wav")
-        synthesize_narration(text=script["narration"], output_path=output_path)
+        duration_target = script.get("_duration_target", 0)
+        synthesize_narration(text=script["narration"], output_path=output_path, duration_target=duration_target)
 
         # Validate audio exists and has reasonable duration
         from pathlib import Path
@@ -210,7 +212,32 @@ def task_finalize(self, video_path: str, job_id: str) -> str:
         output_dir = get_output_dir()
         final_path = str(output_dir / f"{job_id}.mp4")
         shutil.copy2(video_path, final_path)
-        cleanup_job_dir(job_id)
+
+        # Save script to PostgreSQL for the editor (keep job dir for editing)
+        try:
+            from sqlalchemy import update
+            from app.db.engine import async_session
+            from app.db.models import Job
+
+            job_dir = get_job_dir(job_id)
+            script_path = job_dir / "script.json"
+            script_data = json.loads(script_path.read_text()) if script_path.exists() else None
+
+            async def _save_script():
+                async with async_session() as session:
+                    await session.execute(
+                        update(Job).where(Job.id == job_id).values(
+                            script=script_data,
+                            status="editable",
+                            video_url=final_path,
+                        )
+                    )
+                    await session.commit()
+
+            asyncio.run(_save_script())
+        except Exception as e:
+            logger.warning(f"Could not save script to DB: {e}")
+
         _update_job(job_id, "completed", None, 1.0)
         return final_path
     except Exception as e:

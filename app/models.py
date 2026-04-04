@@ -15,3 +15,36 @@ class JobStatus(BaseModel):
     error: str | None = None
     created_at: str
     download_url: str | None = None
+
+
+class CompositionResponse(BaseModel):
+    job_id: str
+    script: dict
+    words: list[dict]
+    audio_url: str
+    media_urls: list[str]
+    subtitle_style: dict
+    editor_state: dict | None = None
+    fps: int = 30
+    width: int = 1080
+    height: int = 1920
+
+
+class EditRequest(BaseModel):
+    editor_state: dict
+
+
+class RegenerateTTSRequest(BaseModel):
+    text: str | None = None  # if None, keep current narration
+    voice_id: str | None = None
+    rate: int | None = None
+    pitch: int | None = None
+
+
+class RegenerateMediaRequest(BaseModel):
+    keywords: list[str] = Field(..., min_length=1, max_length=6)
+
+
+class AISuggestRequest(BaseModel):
+    message: str = Field(..., min_length=1, max_length=2000)
+    context: dict | None = None

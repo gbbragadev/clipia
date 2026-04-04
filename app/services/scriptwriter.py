@@ -56,7 +56,7 @@ Retorne APENAS JSON valido:
 
 def generate_script(topic: str, style: str, duration_target: int) -> dict:
     client = anthropic.Anthropic(api_key=settings.ANTHROPIC_API_KEY)
-    word_count = int(duration_target * 2.0)  # pt-BR at ~2.0 wps with rate=-10%
+    word_count = int(duration_target * 2.05)  # pt-BR at ~2.0 wps, trim/pad handles the rest
 
     message = client.messages.create(
         model=settings.CLAUDE_MODEL,
