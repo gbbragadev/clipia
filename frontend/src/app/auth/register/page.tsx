@@ -25,7 +25,7 @@ export default function RegisterPage() {
     setLoading(true);
     try {
       await register(email, name, password);
-      router.push("/");
+      router.push(`/auth/verify?email=${encodeURIComponent(email)}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Erro ao criar conta");
     } finally {
@@ -43,7 +43,7 @@ export default function RegisterPage() {
           Crie sua conta
         </h1>
         <p className="text-slate-400 text-center text-sm mb-8">
-          Ganhe 2 créditos grátis para começar
+          Verifique seu email e ganhe 2 créditos grátis
         </p>
 
         <form onSubmit={handleSubmit} className="space-y-4">

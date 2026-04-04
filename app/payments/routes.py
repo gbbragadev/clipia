@@ -1,3 +1,6 @@
+import hashlib
+import hmac
+import json
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
@@ -5,6 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.dependencies import get_current_user
+from app.config import settings
 from app.db.engine import get_db
 from app.db.models import CreditPurchase, User
 from app.payments.schemas import (
@@ -47,7 +51,7 @@ async def checkout(
     db: AsyncSession = Depends(get_db),
 ):
     if req.package not in CREDIT_PACKAGES:
-        raise HTTPException(status_code=400, detail="Pacote inválido")
+        raise HTTPException(status_code=400, detail="Pacote invalido")
 
     checkout_url, purchase_id = await create_checkout(user, req.package, db)
     return CheckoutResponse(checkout_url=checkout_url, purchase_id=purchase_id)
@@ -58,22 +62,54 @@ async def mercadopago_webhook(
     request: Request,
     db: AsyncSession = Depends(get_db),
 ):
-    body = await request.json()
+    body = await request.body()
+    parsed = json.loads(body)
 
-    # MP sends different notification types
-    action = body.get("action") or body.get("type")
+    # Validate signature if webhook secret is configured
+    if settings.MP_WEBHOOK_SECRET:
+        signature = request.headers.get("x-signature", "")
+        request_id = request.headers.get("x-request-id", "")
+
+        parts = {}
+        for part in signature.split(","):
+            if "=" in part:
+                k, v = part.split("=", 1)
+                parts[k.strip()] = v.strip()
+
+        ts = parts.get("ts", "")
+        v1 = parts.get("v1", "")
+
+        if not ts or not v1:
+            logger.warning("Webhook missing signature parts: %s", signature)
+            return {"status": "invalid_signature"}
+
+        data_id = ""
+        if "data" in parsed and "id" in parsed["data"]:
+            data_id = str(parsed["data"]["id"])
+
+        manifest = f"id:{data_id};request-id:{request_id};ts:{ts};"
+        expected = hmac.new(
+            settings.MP_WEBHOOK_SECRET.encode(),
+            manifest.encode(),
+            hashlib.sha256,
+        ).hexdigest()
+
+        if not hmac.compare_digest(expected, v1):
+            logger.warning("Webhook signature mismatch")
+            return {"status": "invalid_signature"}
+
+    action = parsed.get("action") or parsed.get("type")
     if action not in ("payment.created", "payment.updated", "payment"):
         return {"status": "ignored"}
 
-    # Extract payment ID from body
     payment_id = None
-    if "data" in body and "id" in body["data"]:
-        payment_id = str(body["data"]["id"])
-    elif "id" in body:
-        payment_id = str(body["id"])
+    if "data" in parsed and "id" in parsed["data"]:
+        payment_id = str(parsed["data"]["id"])
+    elif "id" in parsed:
+        payment_id = str(parsed["id"])
 
     if not payment_id:
-        logger.warning("Webhook without payment ID: %s", body)
+        logger.warning("Webhook without payment ID: %s", parsed)
         return {"status": "no_payment_id"}
 
     credited = await process_webhook(payment_id, db)

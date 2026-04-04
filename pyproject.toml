@@ -21,6 +21,7 @@ dependencies = [
     "python-jose[cryptography]>=3.3.0",
     "passlib[bcrypt]>=1.7.4",
     "mercadopago>=2.2.0",
+    "slowapi>=0.1.9",
 ]
 
 [project.optional-dependencies]

@@ -42,7 +42,22 @@ class Settings(BaseSettings):
     MP_ACCESS_TOKEN: str = ""
     MP_WEBHOOK_SECRET: str = ""
     FRONTEND_URL: str = "http://localhost:3003"
-    BACKEND_URL: str = ""  # https://api-autoshorts.gbbragadev.com in production
+    BACKEND_URL: str = ""  # https://api.clipia.com.br in production
+
+    # Rate Limiting
+    RATE_LIMIT_AUTH: str = "5/minute"
+    RATE_LIMIT_GENERATE: str = "10/minute"
+    RATE_LIMIT_DEFAULT: str = "60/minute"
+
+    # CORS
+    CORS_ORIGINS: str = "*"  # comma-separated, "*" for dev
+
+    # SMTP (email verification)
+    SMTP_HOST: str = ""
+    SMTP_PORT: int = 587
+    SMTP_USER: str = ""
+    SMTP_PASSWORD: str = ""
+    SMTP_FROM: str = "noreply@clipia.com.br"
 
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
 

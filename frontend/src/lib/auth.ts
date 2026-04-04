@@ -6,6 +6,7 @@ export interface User {
   name: string;
   credits: number;
   plan: string;
+  email_verified: boolean;
 }
 
 export interface AuthResponse {
@@ -61,6 +62,32 @@ export async function getMe(): Promise<User> {
   if (!res.ok) {
     clearToken();
     throw new Error("Sessão expirada");
+  }
+  return res.json();
+}
+
+export async function verifyEmail(email: string, code: string): Promise<{ status: string; credits?: number }> {
+  const res = await fetch(`${API_BASE}/api/v1/auth/verify-email`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email, code }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: "Erro ao verificar" }));
+    throw new Error(err.detail || "Erro ao verificar");
+  }
+  return res.json();
+}
+
+export async function resendCode(email: string): Promise<{ status: string }> {
+  const res = await fetch(`${API_BASE}/api/v1/auth/resend-code`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: "Erro ao reenviar" }));
+    throw new Error(err.detail || "Erro ao reenviar");
   }
   return res.json();
 }

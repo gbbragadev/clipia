@@ -35,6 +35,9 @@ class User(Base):
     credits: Mapped[int] = mapped_column(Integer, default=2)
     plan: Mapped[str] = mapped_column(String(50), default="free")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    email_verified: Mapped[bool] = mapped_column(default=False)
+    verification_code: Mapped[str | None] = mapped_column(String(6), nullable=True)
+    verification_expires: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     jobs: Mapped[list["Job"]] = relationship(back_populates="user")
     purchases: Mapped[list["CreditPurchase"]] = relationship(back_populates="user")

@@ -23,3 +23,13 @@ class UserResponse(BaseModel):
     name: str
     credits: int
     plan: str
+    email_verified: bool
+
+
+class VerifyEmailRequest(BaseModel):
+    email: str
+    code: str
+
+
+class ResendCodeRequest(BaseModel):
+    email: str

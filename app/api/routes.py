@@ -6,14 +6,18 @@ from pathlib import Path
 logger = logging.getLogger(__name__)
 
 import redis
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
+from slowapi import Limiter
+from slowapi.util import get_remote_address
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.dependencies import get_current_user
 from app.config import settings
+
+limiter = Limiter(key_func=get_remote_address)
 from app.db.engine import get_db
 from app.db.models import Job, User, WaitlistEntry
 from app.models import (
@@ -32,11 +36,15 @@ _redis = redis.Redis.from_url(settings.REDIS_URL, decode_responses=True)
 
 
 @router.post("/generate")
+@limiter.limit(settings.RATE_LIMIT_GENERATE)
 async def generate(
+    request: Request,
     req: GenerateRequest,
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
+    if not user.email_verified:
+        raise HTTPException(status_code=403, detail="Verifique seu email antes de gerar videos")
     if user.credits < 1:
         raise HTTPException(status_code=402, detail="Créditos insuficientes")
 

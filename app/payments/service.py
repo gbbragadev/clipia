@@ -71,7 +71,7 @@ async def create_checkout(user: User, package_key: str, db: AsyncSession) -> tup
     purchase.mp_preference_id = response["id"]
     await db.commit()
 
-    checkout_url = response.get("sandbox_init_point") or response["init_point"]
+    checkout_url = response.get("init_point") or response.get("sandbox_init_point", "")
     return checkout_url, purchase.id
 
 
