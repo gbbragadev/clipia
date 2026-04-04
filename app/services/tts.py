@@ -1,12 +1,16 @@
-from app.worker.gpu_models import get_tts_model
+import asyncio
+import edge_tts
 
 
-def synthesize_narration(text: str, output_path: str, speaker_wav: str) -> str:
-    tts = get_tts_model()
-    tts.tts_to_file(
-        text=text,
-        speaker_wav=speaker_wav,
-        language="pt",
-        file_path=output_path,
-    )
+VOICE = "pt-BR-AntonioNeural"  # Male, natural. Alt: pt-BR-FranciscaNeural (female)
+
+
+def synthesize_narration(text: str, output_path: str, speaker_wav: str = "") -> str:
+    """Generate narration audio using Microsoft Edge TTS (neural voices)."""
+    asyncio.run(_generate(text, output_path))
     return output_path
+
+
+async def _generate(text: str, output_path: str) -> None:
+    communicate = edge_tts.Communicate(text, VOICE, rate="-5%")
+    await communicate.save(output_path)
