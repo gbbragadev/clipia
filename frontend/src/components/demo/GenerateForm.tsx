@@ -1,21 +1,45 @@
 'use client'
 
 import { useState } from 'react'
+import { useRouter } from 'next/navigation'
+import { getToken } from '@/lib/auth'
 
 interface Props {
   onGenerate: (topic: string, style: string, duration: number) => void
   isGenerating: boolean
 }
 
+const STYLES = [
+  { value: 'educational', label: 'Educativo' },
+  { value: 'curiosity', label: 'Curiosidades' },
+  { value: 'storytelling', label: 'Narrativa' },
+  { value: 'news', label: 'Notícias' },
+  { value: 'humor', label: 'Humor' },
+  { value: 'motivational', label: 'Motivacional' },
+  { value: 'conspiracy', label: 'Mistério' },
+  { value: 'top5', label: 'Top 5' },
+  { value: 'tutorial', label: 'Tutorial' },
+  { value: 'debate', label: 'Debate' },
+  { value: 'horror', label: 'Terror' },
+  { value: 'scifi', label: 'Sci-Fi' },
+]
+
 export default function GenerateForm({ onGenerate, isGenerating }: Props) {
   const [topic, setTopic] = useState('')
   const [style, setStyle] = useState('educational')
   const [duration, setDuration] = useState(45)
+  const router = useRouter()
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
+    if (!getToken()) {
+      router.push('/auth/login')
+      return
+    }
     if (topic.length >= 5) onGenerate(topic, style, duration)
   }
+
+  const isLoggedIn = typeof window !== 'undefined' && !!getToken()
 
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
@@ -34,10 +58,9 @@ export default function GenerateForm({ onGenerate, isGenerating }: Props) {
           onChange={e => setStyle(e.target.value)}
           className="flex-1 px-4 py-3 rounded-lg bg-white/5 border border-gray-700 text-white focus:border-purple-500 focus:outline-none"
         >
-          <option value="educational">Educativo</option>
-          <option value="curiosity">Curiosidades</option>
-          <option value="storytelling">Narrativa</option>
-          <option value="news">Noticias</option>
+          {STYLES.map((s) => (
+            <option key={s.value} value={s.value}>{s.label}</option>
+          ))}
         </select>
         <div className="flex-1 flex items-center gap-3">
           <input
@@ -59,7 +82,7 @@ export default function GenerateForm({ onGenerate, isGenerating }: Props) {
             <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
             Gerando...
           </>
-        ) : 'Gerar Video'}
+        ) : isLoggedIn ? 'Gerar Vídeo' : 'Entrar e Gerar Vídeo'}
       </button>
     </form>
   )
