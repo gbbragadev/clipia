@@ -42,6 +42,7 @@ class Settings(BaseSettings):
     MP_ACCESS_TOKEN: str = ""
     MP_WEBHOOK_SECRET: str = ""
     FRONTEND_URL: str = "http://localhost:3003"
+    BACKEND_URL: str = ""  # https://api-autoshorts.gbbragadev.com in production
 
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
 

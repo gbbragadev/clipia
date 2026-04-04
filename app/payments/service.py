@@ -33,29 +33,41 @@ async def create_checkout(user: User, package_key: str, db: AsyncSession) -> tup
     db.add(purchase)
     await db.flush()
 
-    preference_data = {
+    preference_data: dict = {
         "items": [
             {
-                "title": f"ClipIA — {pkg['name']} ({pkg['credits']} cr��ditos)",
+                "title": f"ClipIA - {pkg['name']} ({pkg['credits']} creditos)",
                 "quantity": 1,
                 "unit_price": pkg["price_brl"] / 100,
                 "currency_id": "BRL",
             }
         ],
-        "back_urls": {
-            "success": f"{settings.FRONTEND_URL}/dashboard/credits?status=success",
-            "failure": f"{settings.FRONTEND_URL}/dashboard/credits?status=failure",
-            "pending": f"{settings.FRONTEND_URL}/dashboard/credits?status=pending",
-        },
-        "auto_return": "approved",
         "external_reference": str(purchase.id),
-        "notification_url": f"{settings.FRONTEND_URL.replace('localhost:3003', 'localhost:8005')}/api/v1/webhooks/mercadopago",
     }
+
+    # back_urls and auto_return require HTTPS — only set in production
+    frontend = settings.FRONTEND_URL
+    if frontend.startswith("https://"):
+        preference_data["back_urls"] = {
+            "success": f"{frontend}/dashboard/credits?status=success",
+            "failure": f"{frontend}/dashboard/credits?status=failure",
+            "pending": f"{frontend}/dashboard/credits?status=pending",
+        }
+        preference_data["auto_return"] = "approved"
+
+    # notification_url must be publicly accessible
+    backend_url = settings.BACKEND_URL
+    if backend_url and backend_url.startswith("https://"):
+        preference_data["notification_url"] = f"{backend_url}/api/v1/webhooks/mercadopago"
 
     sdk = _get_sdk()
     result = await asyncio.to_thread(sdk.preference().create, preference_data)
-    response = result["response"]
 
+    if result["status"] != 201:
+        logger.error("MP preference creation failed: %s", result)
+        raise ValueError(f"MercadoPago error: {result['response']}")
+
+    response = result["response"]
     purchase.mp_preference_id = response["id"]
     await db.commit()
 
