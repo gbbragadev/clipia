@@ -20,9 +20,9 @@ export default function DemoSection() {
         </p>
 
         {/* Editor window chrome */}
-        <div className="rounded-2xl bg-[#0a0a14] border border-gray-800 overflow-hidden">
+        <div className="rounded-2xl bg-[#0a0a14] border border-gray-800">
           {/* Title bar */}
-          <div className="flex items-center gap-2 px-4 py-3 border-b border-gray-800/50 bg-[#08080f]">
+          <div className="flex items-center gap-2 px-4 py-3 border-b border-gray-800/50 bg-[#08080f] rounded-t-2xl">
             <div className="w-3 h-3 rounded-full bg-red-500/70" />
             <div className="w-3 h-3 rounded-full bg-yellow-500/70" />
             <div className="w-3 h-3 rounded-full bg-green-500/70" />
