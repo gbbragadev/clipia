@@ -1,6 +1,6 @@
 'use client'
 
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useEditor } from '@/contexts/EditorContext'
 
 interface MusicTrack {
@@ -44,6 +44,11 @@ export function MusicSelector() {
   const selectedUrl = composition?.musicUrl || null
   const volume = composition?.musicVolume ?? 0.15
 
+  // Cleanup audio on unmount
+  useEffect(() => {
+    return () => { audioRef.current?.pause() }
+  }, [])
+
   const togglePreview = (track: MusicTrack) => {
     if (previewId === track.id) {
       audioRef.current?.pause()
@@ -53,18 +58,22 @@ export function MusicSelector() {
     if (audioRef.current) audioRef.current.pause()
 
     const audio = new Audio(track.url)
-    audio.volume = volume
+    audio.volume = Math.max(0.3, volume)
     audio.loop = true
-    audio.play().catch(() => {})
+    audio.onerror = () => {
+      console.error('Failed to load audio:', track.url)
+      setPreviewId(null)
+    }
+    audio.play()
+      .then(() => setPreviewId(track.id))
+      .catch((err) => {
+        console.error('Audio play failed:', err)
+        setPreviewId(null)
+      })
     audioRef.current = audio
-    setPreviewId(track.id)
   }
 
   const selectTrack = (track: MusicTrack | null) => {
-    if (audioRef.current) {
-      audioRef.current.pause()
-      setPreviewId(null)
-    }
     updateMusic(track?.url ?? null)
   }
 

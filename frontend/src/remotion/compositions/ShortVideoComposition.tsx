@@ -35,13 +35,17 @@ export const ShortVideoComposition: React.FC<CompositionData> = ({
   const { fps, durationInFrames } = useVideoConfig()
 
   // Calculate scene frame ranges proportional to duration_hint
+  // Account for transition overlap (each transition consumes 10 frames shared between scenes)
+  const transitionDuration = 10
   const totalHints = scenes.reduce((sum, s) => sum + s.duration_hint, 0)
+  const transitionCount = scenes.filter((s, i) => i > 0 && s.transition && s.transition !== 'none').length
+  const availableFrames = durationInFrames + transitionCount * transitionDuration
   const sceneFrames: { from: number; duration: number }[] = []
   let currentFrame = 0
 
   for (const scene of scenes) {
     const ratio = scene.duration_hint / totalHints
-    const duration = Math.round(ratio * durationInFrames)
+    const duration = Math.max(transitionDuration + 1, Math.round(ratio * availableFrames))
     sceneFrames.push({ from: currentFrame, duration })
     currentFrame += duration
   }
@@ -55,9 +59,10 @@ export const ShortVideoComposition: React.FC<CompositionData> = ({
           const transitionType = scene?.transition || 'none'
           const presentation = getTransitionPresentation(transitionType)
           return (
-            <React.Fragment key={`scene-${i}`}>
+            <React.Fragment key={`scene-${i}-${transitionType}`}>
               {i > 0 && transitionType !== 'none' && presentation && (
                 <TransitionSeries.Transition
+                  key={`tr-${i}-${transitionType}`}
                   presentation={presentation}
                   timing={linearTiming({ durationInFrames: 10 })}
                 />
@@ -76,10 +81,8 @@ export const ShortVideoComposition: React.FC<CompositionData> = ({
       {/* Background music */}
       {musicUrl && <Html5Audio src={musicUrl} volume={musicVolume ?? 0.15} />}
 
-      {/* Word-by-word subtitles */}
-      {words.length > 0 && (
-        <SubtitleOverlay words={words} style={subtitleStyle} />
-      )}
+      {/* Subtitles rendered by Pretext canvas overlay in editor */}
+      {/* SubtitleOverlay only used during server-side render/export */}
 
       {/* User-added overlays */}
       {overlays?.map((overlay, i) => (

@@ -50,8 +50,9 @@ export const ImpactCaptions: React.FC<{
     <AbsoluteFill
       style={{
         display: 'flex',
-        alignItems: 'center',
+        alignItems: style.position === 'bottom' ? 'flex-end' : 'center',
         justifyContent: 'center',
+        paddingBottom: style.position === 'bottom' ? style.marginBottom : 0,
       }}
     >
       <div
@@ -70,12 +71,12 @@ export const ImpactCaptions: React.FC<{
           <span
             key={`${chunkStartFrame}-${i}`}
             style={{
-              fontFamily: 'Montserrat, system-ui, sans-serif',
-              fontSize: 72,
+              fontFamily: style.fontFamily,
+              fontSize: style.fontSize,
               fontWeight: 900,
               lineHeight: 1.1,
-              color: i % 2 === 0 ? '#FFFFFF' : style.accentColor,
-              WebkitTextStroke: '3px #000',
+              color: i % 2 === 0 ? style.color : style.accentColor,
+              WebkitTextStroke: `${style.strokeWidth || 3}px ${style.outlineColor}`,
               paintOrder: 'stroke fill',
               textShadow: '4px 4px 0px rgba(0, 0, 0, 0.8)',
               textTransform: 'uppercase',

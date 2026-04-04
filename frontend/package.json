@@ -11,16 +11,16 @@
     "@chenglou/pretext": "^0.0.4",
     "@remotion/animated-emoji": "^4.0.444",
     "@remotion/captions": "^4.0.444",
-    "@remotion/cli": "^4.0.443",
+    "@remotion/cli": "^4.0.444",
     "@remotion/google-fonts": "^4.0.444",
     "@remotion/noise": "^4.0.444",
-    "@remotion/player": "^4.0.443",
+    "@remotion/player": "^4.0.444",
     "@remotion/shapes": "^4.0.444",
     "@remotion/transitions": "^4.0.444",
     "next": "16.2.2",
     "react": "19.2.4",
     "react-dom": "19.2.4",
-    "remotion": "^4.0.443"
+    "remotion": "^4.0.444"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",

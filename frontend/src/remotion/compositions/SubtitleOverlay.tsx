@@ -36,19 +36,43 @@ const MinimalCaptions: React.FC<{
 
   if (!activeChunk) return null
 
-  const fadeIn = interpolate(
-    frame,
-    [activeChunk.startFrame, activeChunk.startFrame + 3],
-    [0, 1],
-    { extrapolateLeft: 'clamp', extrapolateRight: 'clamp' },
-  )
+  const animStyle = style.animationStyle || 'pop'
 
-  const scaleIn = interpolate(
-    frame,
-    [activeChunk.startFrame, activeChunk.startFrame + 4],
-    [0.88, 1],
-    { extrapolateLeft: 'clamp', extrapolateRight: 'clamp' },
-  )
+  let opacity = 1
+  let transform = 'none'
+
+  if (animStyle === 'pop' || animStyle === 'fade') {
+    opacity = interpolate(
+      frame,
+      [activeChunk.startFrame, activeChunk.startFrame + 3],
+      [0, 1],
+      { extrapolateLeft: 'clamp', extrapolateRight: 'clamp' },
+    )
+  }
+
+  if (animStyle === 'pop') {
+    const s = interpolate(
+      frame,
+      [activeChunk.startFrame, activeChunk.startFrame + 4],
+      [0.88, 1],
+      { extrapolateLeft: 'clamp', extrapolateRight: 'clamp' },
+    )
+    transform = `scale(${s})`
+  } else if (animStyle === 'slideUp') {
+    const y = interpolate(
+      frame,
+      [activeChunk.startFrame, activeChunk.startFrame + 5],
+      [30, 0],
+      { extrapolateLeft: 'clamp', extrapolateRight: 'clamp' },
+    )
+    opacity = interpolate(
+      frame,
+      [activeChunk.startFrame, activeChunk.startFrame + 3],
+      [0, 1],
+      { extrapolateLeft: 'clamp', extrapolateRight: 'clamp' },
+    )
+    transform = `translateY(${y}px)`
+  }
 
   return (
     <AbsoluteFill
@@ -61,8 +85,8 @@ const MinimalCaptions: React.FC<{
     >
       <div
         style={{
-          opacity: fadeIn,
-          transform: `scale(${scaleIn})`,
+          opacity,
+          transform,
           padding: '12px 28px',
           borderRadius: 8,
           backgroundColor: style.backgroundColor,
@@ -80,6 +104,8 @@ const MinimalCaptions: React.FC<{
             letterSpacing: '0.02em',
             lineHeight: 1.2,
             textShadow: `0 2px 8px ${style.outlineColor}`,
+            WebkitTextStroke: style.strokeWidth > 0 ? `${style.strokeWidth}px ${style.outlineColor}` : undefined,
+            paintOrder: style.strokeWidth > 0 ? 'stroke fill' : undefined,
           }}
         >
           {activeChunk.text}

@@ -11,7 +11,6 @@ interface EditorContextValue {
   // State
   jobId: string
   composition: CompositionData | null
-  compositionVersion: number
   loading: boolean
   error: string | null
   selectedSceneIndex: number
@@ -60,7 +59,6 @@ export function EditorProvider({ jobId, children }: { jobId: string; children: R
   const [saving, setSaving] = useState(false)
   const [playerFrame, setPlayerFrame] = useState(0)
   const [isPlaying, setIsPlaying] = useState(false)
-  const [compositionVersion, setCompositionVersion] = useState(0)
 
   const playerRef = useRef<PlayerRef | null>(null)
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -140,7 +138,6 @@ export function EditorProvider({ jobId, children }: { jobId: string; children: R
       return next
     })
     setDirty(true)
-    setCompositionVersion(v => v + 1)
   }, [pushHistory])
 
   const selectScene = useCallback((index: number) => setSelectedSceneIndex(index), [])
@@ -248,7 +245,7 @@ export function EditorProvider({ jobId, children }: { jobId: string; children: R
   }, [canRedo, historyIndex, history])
 
   const value: EditorContextValue = {
-    jobId, composition, compositionVersion, loading, error, selectedSceneIndex, activePanel, panelCollapsed,
+    jobId, composition, loading, error, selectedSceneIndex, activePanel, panelCollapsed,
     dirty, saving, playerFrame, isPlaying, playerRef, totalFrames,
     selectScene, setActivePanel, updateScene, updateSubtitleStyle, updateVoiceConfig,
     updateAudio, updateMusic, addOverlay, removeOverlay, getSceneStartFrame,

@@ -136,6 +136,79 @@ export function SubtitleEditor() {
         </div>
       </div>
 
+      {/* Animation */}
+      <div>
+        <div className="editor-section-header">Animacao</div>
+        <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+          {ANIMATION_OPTIONS.map((opt) => (
+            <button
+              key={opt.value}
+              onClick={() => updateSubtitleStyle({ animationStyle: opt.value as 'pop' | 'fade' | 'slideUp' | 'none' })}
+              className="editor-btn-sm"
+              style={{
+                background: style.animationStyle === opt.value ? 'rgba(124,58,237,0.2)' : undefined,
+                color: style.animationStyle === opt.value ? '#c4b5fd' : undefined,
+                borderColor: style.animationStyle === opt.value ? 'rgba(124,58,237,0.4)' : undefined,
+              }}
+            >
+              {opt.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Stroke Width */}
+      <div>
+        <div className="editor-section-header">
+          Contorno &middot; {style.strokeWidth}px
+        </div>
+        <input
+          type="range"
+          className="editor-slider"
+          min={0}
+          max={6}
+          value={style.strokeWidth}
+          onChange={(e) => updateSubtitleStyle({ strokeWidth: Number(e.target.value) })}
+        />
+      </div>
+
+      {/* Margin Bottom */}
+      <div>
+        <div className="editor-section-header">
+          Margem inferior &middot; {style.marginBottom}px
+        </div>
+        <input
+          type="range"
+          className="editor-slider"
+          min={40}
+          max={400}
+          value={style.marginBottom}
+          onChange={(e) => updateSubtitleStyle({ marginBottom: Number(e.target.value) })}
+        />
+      </div>
+
+      {/* Outline Color */}
+      <div>
+        <div className="editor-section-header">Cor do contorno</div>
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+          {[
+            { label: 'Preto', value: '#000000' },
+            { label: 'Escuro', value: '#1a1a1a' },
+            { label: 'Roxo', value: '#6C5CE7' },
+            { label: 'Azul', value: '#3b82f6' },
+            { label: 'Vermelho', value: '#ef4444' },
+          ].map((c) => (
+            <button
+              key={c.value}
+              onClick={() => updateSubtitleStyle({ outlineColor: c.value })}
+              className={`editor-color-swatch ${style.outlineColor === c.value ? 'editor-color-swatch--active' : ''}`}
+              style={{ background: c.value, border: c.value === '#000000' ? '1px solid #444' : undefined }}
+              title={c.label}
+            />
+          ))}
+        </div>
+      </div>
+
       {/* Words per chunk */}
       <div>
         <div className="editor-section-header">

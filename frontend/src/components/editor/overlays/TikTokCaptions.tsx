@@ -47,15 +47,15 @@ export const TikTokCaptions: React.FC<{
     <AbsoluteFill
       style={{
         display: 'flex',
-        alignItems: 'center',
+        alignItems: style.position === 'bottom' ? 'flex-end' : 'center',
         justifyContent: 'center',
-        paddingTop: '20%',
+        paddingBottom: style.position === 'bottom' ? style.marginBottom : 0,
       }}
     >
       <div
         style={{
           opacity: fadeIn,
-          backgroundColor: 'rgba(0, 0, 0, 0.65)',
+          backgroundColor: style.backgroundColor,
           borderRadius: 8,
           padding: '8px 16px',
           maxWidth: '85%',
@@ -64,8 +64,8 @@ export const TikTokCaptions: React.FC<{
       >
         <span
           style={{
-            fontFamily: 'Inter, system-ui, sans-serif',
-            fontSize: 48,
+            fontFamily: style.fontFamily,
+            fontSize: style.fontSize,
             fontWeight: 700,
             lineHeight: 1.3,
             letterSpacing: '0.01em',
@@ -77,7 +77,7 @@ export const TikTokCaptions: React.FC<{
               <span
                 key={w.index}
                 style={{
-                  color: isActive ? style.accentColor : '#FFFFFF',
+                  color: isActive ? style.accentColor : style.color,
                   transition: 'color 0.1s ease',
                 }}
               >
