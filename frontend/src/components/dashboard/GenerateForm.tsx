@@ -11,6 +11,7 @@ import {
 import TemplateSelector from './TemplateSelector'
 import StyleSelector, { type StyleValue } from './StyleSelector'
 import WpmSlider from './WpmSlider'
+import OpticalBalancePreview from './OpticalBalancePreview'
 
 const STEP_LABELS: Record<string, string> = {
   scripting: 'Escrevendo roteiro...',
@@ -126,6 +127,8 @@ export default function GenerateForm({ onJobComplete }: GenerateFormProps) {
           className="w-full px-4 py-3 text-sm rounded-xl border border-[var(--border-default)] bg-[var(--bg-surface)] text-[var(--text-primary)] placeholder:text-[var(--text-tertiary)] outline-none focus:border-purple-500/50 transition disabled:opacity-50"
         />
       </div>
+
+      <OpticalBalancePreview text={topic} />
 
       {/* Style */}
       <div className="mb-4">
