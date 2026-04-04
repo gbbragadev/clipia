@@ -88,7 +88,8 @@ export default function GenerateForm({ onGenerate, isGenerating }: Props) {
     if (topic.length >= 5) onGenerate(topic, style, duration)
   }
 
-  const isLoggedIn = typeof window !== 'undefined' && !!getToken()
+  const [isLoggedIn, setIsLoggedIn] = useState(false)
+  useEffect(() => { setIsLoggedIn(!!getToken()) }, [])
 
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
