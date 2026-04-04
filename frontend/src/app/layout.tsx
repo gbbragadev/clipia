@@ -9,9 +9,9 @@ const inter = Inter({
 });
 
 export const metadata: Metadata = {
-  title: "Auto Shorts - Gere videos curtos com IA",
+  title: "ClipIA - Crie videos curtos com IA",
   description:
-    "Plataforma de geracao automatizada de videos curtos com inteligencia artificial.",
+    "Transforme qualquer tema em video pronto para publicar. Roteiro, narracao, legendas e edicao — tudo automatico com IA.",
 };
 
 export default function RootLayout({

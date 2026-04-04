@@ -40,7 +40,7 @@ export default function WaitlistForm() {
             </h2>
             <h3 className="text-2xl font-bold mb-2">Acesso Antecipado</h3>
             <p className="text-gray-400 mb-8">
-              Seja um dos primeiros a usar o Auto Shorts quando lancarmos.
+              Seja um dos primeiros a usar o ClipIA quando lancarmos.
             </p>
 
             {submitted ? (

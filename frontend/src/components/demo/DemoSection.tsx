@@ -26,7 +26,7 @@ export default function DemoSection() {
             <div className="w-3 h-3 rounded-full bg-red-500/70" />
             <div className="w-3 h-3 rounded-full bg-yellow-500/70" />
             <div className="w-3 h-3 rounded-full bg-green-500/70" />
-            <span className="ml-3 text-xs text-gray-500 font-mono">Auto Shorts Editor</span>
+            <span className="ml-3 text-xs text-gray-500 font-mono">ClipIA Editor</span>
           </div>
 
           {/* Content */}
