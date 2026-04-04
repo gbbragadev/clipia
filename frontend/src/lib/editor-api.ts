@@ -33,10 +33,15 @@ export async function fetchComposition(jobId: string): Promise<CompositionData> 
     media_urls: string[]
     subtitle_style: Record<string, unknown>
     editor_state: Record<string, unknown> | null
+    template_id: string
+    layout_type: string
     fps: number
     width: number
     height: number
   }>(`${API_BASE}/jobs/${jobId}/composition`)
+
+  // Restore from saved editor_state if available
+  const saved = data.editor_state?.composition as Partial<CompositionData> | undefined
 
   return {
     title: data.script.title || '',
@@ -47,14 +52,18 @@ export async function fetchComposition(jobId: string): Promise<CompositionData> 
     subtitleStyle: {
       ...DEFAULT_SUBTITLE_STYLE,
       ...(data.subtitle_style as Partial<typeof DEFAULT_SUBTITLE_STYLE>),
+      ...(saved?.subtitleStyle ?? {}),
     },
-    voiceConfig: DEFAULT_VOICE_CONFIG,
+    voiceConfig: saved?.voiceConfig ?? DEFAULT_VOICE_CONFIG,
     fps: data.fps,
     width: data.width,
     height: data.height,
-    overlays: [],
-    musicUrl: null,
-    musicVolume: 0.15,
+    overlays: saved?.overlays ?? [],
+    musicUrl: saved?.musicUrl ?? null,
+    musicVolume: saved?.musicVolume ?? 0.15,
+    isRendering: false,
+    templateId: data.template_id || 'stock_narration',
+    layoutType: (data.layout_type as import('@/remotion/types').LayoutType) || 'fullscreen',
   }
 }
 
@@ -86,6 +95,23 @@ export interface GenerateParams {
   topic: string
   style: 'educational' | 'curiosity' | 'storytelling' | 'news'
   duration_target: number
+  template_id: string
+}
+
+export interface VideoTemplateInfo {
+  id: string
+  name: string
+  description: string
+  icon: string
+  layout_type: string
+}
+
+export async function fetchTemplates(): Promise<VideoTemplateInfo[]> {
+  const res = await fetch(`${API_BASE}/templates`, {
+    headers: getAuthHeaders(),
+  })
+  if (!res.ok) return []
+  return res.json()
 }
 
 export async function generateVideo(params: GenerateParams): Promise<{ job_id: string; status: string }> {
@@ -93,6 +119,25 @@ export async function generateVideo(params: GenerateParams): Promise<{ job_id: s
     method: 'POST',
     headers: getAuthHeaders(),
     body: JSON.stringify(params),
+  })
+}
+
+export async function regenerateTTS(
+  jobId: string,
+  narrationText: string,
+  voiceId?: string,
+  rate?: number,
+  pitch?: number,
+): Promise<{ audio_url: string; words: Array<{ word: string; start: number; end: number }> }> {
+  return fetchJSON(`${API_BASE}/jobs/${jobId}/regenerate-tts`, {
+    method: 'POST',
+    headers: getAuthHeaders(),
+    body: JSON.stringify({
+      text: narrationText,
+      voice_id: voiceId,
+      rate,
+      pitch,
+    }),
   })
 }
 

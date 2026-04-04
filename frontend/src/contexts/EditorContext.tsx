@@ -35,6 +35,7 @@ interface EditorContextValue {
   togglePanel: () => void
   addOverlay: (overlay: VideoOverlay) => void
   removeOverlay: (index: number) => void
+  updateOverlay: (index: number, updates: Partial<VideoOverlay>) => void
   updateAudio: (words: Array<Record<string, unknown>>, audioUrl: string) => void
   updateMusic: (musicUrl: string | null, musicVolume?: number) => void
   getSceneStartFrame: (sceneIndex: number) => number
@@ -66,6 +67,7 @@ export function EditorProvider({ jobId, children }: { jobId: string; children: R
   // Undo/redo
   const [history, setHistory] = useState<CompositionData[]>([])
   const [historyIndex, setHistoryIndex] = useState(-1)
+  const historyIndexRef = useRef(-1)
 
   // Derived: total frames
   const totalFrames = composition && composition.words.length > 0
@@ -79,6 +81,7 @@ export function EditorProvider({ jobId, children }: { jobId: string; children: R
         setComposition(data)
         setHistory([data])
         setHistoryIndex(0)
+        historyIndexRef.current = 0
         setLoading(false)
       })
       .catch((err) => {
@@ -119,15 +122,17 @@ export function EditorProvider({ jobId, children }: { jobId: string; children: R
     return () => { if (saveTimerRef.current) clearTimeout(saveTimerRef.current) }
   }, [dirty, composition, jobId])
 
-  // Push to history helper
+  // Push to history helper — uses ref to avoid stale closure
   const pushHistory = useCallback((newComp: CompositionData) => {
+    const idx = historyIndexRef.current
     setHistory((prev) => {
-      const truncated = prev.slice(0, historyIndex + 1)
-      const next = [...truncated, newComp].slice(-MAX_HISTORY)
-      return next
+      const truncated = prev.slice(0, idx + 1)
+      return [...truncated, newComp].slice(-MAX_HISTORY)
     })
-    setHistoryIndex((prev) => Math.min(prev + 1, MAX_HISTORY - 1))
-  }, [historyIndex])
+    const newIdx = Math.min(idx + 1, MAX_HISTORY - 1)
+    historyIndexRef.current = newIdx
+    setHistoryIndex(newIdx)
+  }, [])
 
   // Composition updater (with history)
   const updateComposition = useCallback((updater: (prev: CompositionData) => CompositionData) => {
@@ -193,6 +198,15 @@ export function EditorProvider({ jobId, children }: { jobId: string; children: R
     }))
   }, [updateComposition])
 
+  const updateOverlay = useCallback((index: number, updates: Partial<VideoOverlay>) => {
+    updateComposition((prev) => ({
+      ...prev,
+      overlays: (prev.overlays || []).map((o, i) =>
+        i === index ? { ...o, ...updates } : o
+      ),
+    }))
+  }, [updateComposition])
+
   // Player controls
   const seekToFrame = useCallback((frame: number) => {
     playerRef.current?.seekTo(frame)
@@ -231,6 +245,7 @@ export function EditorProvider({ jobId, children }: { jobId: string; children: R
   const undo = useCallback(() => {
     if (!canUndo) return
     const newIndex = historyIndex - 1
+    historyIndexRef.current = newIndex
     setHistoryIndex(newIndex)
     setComposition(history[newIndex])
     setDirty(true)
@@ -239,6 +254,7 @@ export function EditorProvider({ jobId, children }: { jobId: string; children: R
   const redo = useCallback(() => {
     if (!canRedo) return
     const newIndex = historyIndex + 1
+    historyIndexRef.current = newIndex
     setHistoryIndex(newIndex)
     setComposition(history[newIndex])
     setDirty(true)
@@ -248,7 +264,7 @@ export function EditorProvider({ jobId, children }: { jobId: string; children: R
     jobId, composition, loading, error, selectedSceneIndex, activePanel, panelCollapsed,
     dirty, saving, playerFrame, isPlaying, playerRef, totalFrames,
     selectScene, setActivePanel, updateScene, updateSubtitleStyle, updateVoiceConfig,
-    updateAudio, updateMusic, addOverlay, removeOverlay, getSceneStartFrame,
+    updateAudio, updateMusic, addOverlay, removeOverlay, updateOverlay, getSceneStartFrame,
     setPlayerFrame, seekToFrame, togglePlayback, togglePanel,
     undo, redo, canUndo, canRedo,
   }

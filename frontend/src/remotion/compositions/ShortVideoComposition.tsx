@@ -1,10 +1,10 @@
 import React from 'react'
-import { AbsoluteFill, Html5Audio, Sequence, useCurrentFrame, useVideoConfig } from 'remotion'
+import { AbsoluteFill, Html5Audio, Sequence, useVideoConfig } from 'remotion'
 import { TransitionSeries, linearTiming, type TransitionPresentation } from '@remotion/transitions'
 import { fade } from '@remotion/transitions/fade'
 import { slide } from '@remotion/transitions/slide'
 import { wipe } from '@remotion/transitions/wipe'
-import type { CompositionData } from '../types'
+import type { CompositionData, LayoutType } from '../types'
 import type { TransitionType } from '../types'
 import { SceneClip } from './SceneClip'
 import { SubtitleOverlay } from './SubtitleOverlay'
@@ -31,8 +31,55 @@ export const ShortVideoComposition: React.FC<CompositionData> = ({
   overlays,
   musicUrl,
   musicVolume,
+  isRendering,
+  layoutType,
 }) => {
-  const { fps, durationInFrames } = useVideoConfig()
+  const { fps, width, height, durationInFrames } = useVideoConfig()
+  const layout = (layoutType || 'fullscreen') as LayoutType
+
+  // Split-screen layout: dark top + gameplay bottom
+  if (layout === 'split_horizontal' && mediaUrls.length === 1) {
+    const splitRatio = 0.55
+    const topHeight = Math.round(height * splitRatio)
+    const botHeight = height - topHeight
+
+    return (
+      <AbsoluteFill style={{ backgroundColor: '#000' }}>
+        {/* Top region: dark background for subtitles */}
+        <div style={{ position: 'absolute', top: 0, left: 0, width, height: topHeight, background: '#0D0D0D', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          {isRendering && <SubtitleOverlay words={words} style={{ ...subtitleStyle, position: 'center' as const }} />}
+        </div>
+        {/* Bottom region: gameplay */}
+        <div style={{ position: 'absolute', top: topHeight, left: 0, width, height: botHeight, overflow: 'hidden' }}>
+          <SceneClip mediaUrl={mediaUrls[0]} />
+        </div>
+        {audioUrl && <Html5Audio src={audioUrl} />}
+        {musicUrl && <Html5Audio src={musicUrl} volume={musicVolume ?? 0.15} />}
+      </AbsoluteFill>
+    )
+  }
+
+  // Character overlay layout: full-screen gameplay + character image (approximate preview)
+  if (layout === 'character_overlay' && mediaUrls.length === 1) {
+    return (
+      <AbsoluteFill style={{ backgroundColor: '#000' }}>
+        <SceneClip mediaUrl={mediaUrls[0]} />
+        {/* Character placeholder (actual character is composited by FFmpeg) */}
+        <div style={{
+          position: 'absolute', bottom: 250, left: 40,
+          width: 350, height: 350, borderRadius: '50%',
+          background: 'rgba(108, 92, 231, 0.3)', border: '3px solid rgba(108, 92, 231, 0.5)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          fontSize: 14, color: '#aaa', textAlign: 'center',
+        }}>
+          Personagem
+        </div>
+        {audioUrl && <Html5Audio src={audioUrl} />}
+        {musicUrl && <Html5Audio src={musicUrl} volume={musicVolume ?? 0.15} />}
+        {isRendering && <SubtitleOverlay words={words} style={subtitleStyle} />}
+      </AbsoluteFill>
+    )
+  }
 
   // Calculate scene frame ranges proportional to duration_hint
   // Account for transition overlap (each transition consumes 10 frames shared between scenes)
@@ -54,24 +101,29 @@ export const ShortVideoComposition: React.FC<CompositionData> = ({
     <AbsoluteFill style={{ backgroundColor: '#000' }}>
       {/* Background video scenes with transitions */}
       <TransitionSeries>
-        {sceneFrames.map((sf, i) => {
+        {sceneFrames.flatMap((sf, i) => {
           const scene = scenes[i]
           const transitionType = scene?.transition || 'none'
           const presentation = getTransitionPresentation(transitionType)
-          return (
-            <React.Fragment key={`scene-${i}-${transitionType}`}>
-              {i > 0 && transitionType !== 'none' && presentation && (
-                <TransitionSeries.Transition
-                  key={`tr-${i}-${transitionType}`}
-                  presentation={presentation}
-                  timing={linearTiming({ durationInFrames: 10 })}
-                />
-              )}
-              <TransitionSeries.Sequence durationInFrames={sf.duration}>
-                {i < mediaUrls.length && <SceneClip mediaUrl={mediaUrls[i]} />}
-              </TransitionSeries.Sequence>
-            </React.Fragment>
+          const elements: React.ReactNode[] = []
+
+          if (i > 0 && presentation) {
+            elements.push(
+              <TransitionSeries.Transition
+                key={`tr-${i}`}
+                presentation={presentation}
+                timing={linearTiming({ durationInFrames: transitionDuration })}
+              />
+            )
+          }
+
+          elements.push(
+            <TransitionSeries.Sequence key={`seq-${i}`} durationInFrames={sf.duration}>
+              {i < mediaUrls.length && <SceneClip mediaUrl={mediaUrls[i]} />}
+            </TransitionSeries.Sequence>
           )
+
+          return elements
         })}
       </TransitionSeries>
 
@@ -81,8 +133,8 @@ export const ShortVideoComposition: React.FC<CompositionData> = ({
       {/* Background music */}
       {musicUrl && <Html5Audio src={musicUrl} volume={musicVolume ?? 0.15} />}
 
-      {/* Subtitles rendered by Pretext canvas overlay in editor */}
-      {/* SubtitleOverlay only used during server-side render/export */}
+      {/* Subtitles: Pretext canvas in editor, SubtitleOverlay in SSR export */}
+      {isRendering && <SubtitleOverlay words={words} style={subtitleStyle} />}
 
       {/* User-added overlays */}
       {overlays?.map((overlay, i) => (
@@ -98,44 +150,6 @@ export const ShortVideoComposition: React.FC<CompositionData> = ({
         </Sequence>
       ))}
 
-      {/* Progress bar at bottom */}
-      <ProgressBar />
-    </AbsoluteFill>
-  )
-}
-
-const ProgressBar: React.FC = () => {
-  const { durationInFrames } = useVideoConfig()
-  const frame = useCurrentFrame()
-  const progress = frame / durationInFrames
-
-  return (
-    <AbsoluteFill
-      style={{
-        display: 'flex',
-        alignItems: 'flex-end',
-        justifyContent: 'center',
-        paddingBottom: 80,
-      }}
-    >
-      <div
-        style={{
-          width: '80%',
-          height: 3,
-          background: 'rgba(255,255,255,0.15)',
-          borderRadius: 2,
-          overflow: 'hidden',
-        }}
-      >
-        <div
-          style={{
-            height: '100%',
-            width: `${progress * 100}%`,
-            background: 'rgba(255,255,255,0.7)',
-            borderRadius: 2,
-          }}
-        />
-      </div>
     </AbsoluteFill>
   )
 }

@@ -32,6 +32,7 @@ export function VoiceSelector() {
           ...(token ? { Authorization: `Bearer ${token}` } : {}),
         },
         body: JSON.stringify({
+          text: composition.scenes.map(s => s.text).join(' '),
           voice_id: voiceConfig.voiceId,
           rate: voiceConfig.rate,
           pitch: voiceConfig.pitch,

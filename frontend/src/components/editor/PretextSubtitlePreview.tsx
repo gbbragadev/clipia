@@ -226,13 +226,6 @@ export function PretextSubtitlePreview() {
       y += lineHeight
     }
 
-    // Progress line at bottom (thin accent color line showing video progress)
-    const progressY = h - 6 * scale
-    const progressW = (playerFrame / totalFrames) * w
-    ctx.globalAlpha = 0.6
-    ctx.fillStyle = style.accentColor
-    ctx.fillRect(0, progressY, progressW, 3 * scale)
-
     ctx.restore()
   }, [composition, playerFrame, totalFrames])
 

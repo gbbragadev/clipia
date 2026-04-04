@@ -25,11 +25,12 @@ interface ChatMessage {
 }
 
 export function AIAssistant() {
-  const { jobId, composition, updateScene } = useEditor()
+  const { jobId, composition, updateScene, updateAudio, selectScene, setActivePanel } = useEditor()
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
   const [appliedSuggestions, setAppliedSuggestions] = useState<Set<string>>(new Set())
+  const [applyingKey, setApplyingKey] = useState<string | null>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -75,10 +76,51 @@ export function AIAssistant() {
     }
   }
 
-  const handleApply = (msgIndex: number, sugIndex: number, suggestion: Suggestion) => {
+  const handleApply = async (msgIndex: number, sugIndex: number, suggestion: Suggestion) => {
+    if (!composition) return
     const key = `${msgIndex}-${sugIndex}`
+    setApplyingKey(key)
+
+    // 1. Update scene text in composition state
     updateScene(suggestion.scene_index, { text: suggestion.new_text })
-    setAppliedSuggestions(prev => new Set(prev).add(key))
+
+    // 2. Build the full text with the new scene applied
+    const updatedScenes = composition.scenes.map((s, i) =>
+      i === suggestion.scene_index ? { ...s, text: suggestion.new_text } : s
+    )
+    const fullText = updatedScenes.map(s => s.text).join(' ')
+
+    // 3. Regenerate TTS + Whisper transcription with updated text
+    try {
+      const token = getToken()
+      const res = await fetch(`/api/v1/jobs/${jobId}/regenerate-tts`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({
+          text: fullText,
+          voice_id: composition.voiceConfig?.voiceId || 'pt-BR-AntonioNeural',
+          rate: composition.voiceConfig?.rate ?? -10,
+          pitch: composition.voiceConfig?.pitch ?? 5,
+        }),
+      })
+      if (!res.ok) throw new Error('Falha ao regerar narracao')
+      const data = await res.json()
+      const audioUrl = `${data.audio_url}?t=${Date.now()}`
+      updateAudio(data.words, audioUrl)
+      setAppliedSuggestions(prev => new Set(prev).add(key))
+    } catch (err) {
+      console.error('AI apply regeneration failed:', err)
+      // Text is already updated, just mark as applied with warning
+      setAppliedSuggestions(prev => new Set(prev).add(key))
+    } finally {
+      setApplyingKey(null)
+    }
+
+    selectScene(suggestion.scene_index)
+    setActivePanel('scenes')
   }
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -191,6 +233,7 @@ export function AIAssistant() {
                 {msg.suggestions.map((sug, sugIdx) => {
                   const key = `${msgIdx}-${sugIdx}`
                   const applied = appliedSuggestions.has(key)
+                  const applying = applyingKey === key
                   return (
                     <div
                       key={sugIdx}
@@ -227,24 +270,30 @@ export function AIAssistant() {
                       </div>
                       <button
                         onClick={() => handleApply(msgIdx, sugIdx, sug)}
-                        disabled={applied}
+                        disabled={applied || applying || applyingKey !== null}
                         style={{
                           padding: '4px 14px',
                           fontSize: 12,
                           fontWeight: 600,
                           borderRadius: 6,
                           border: 'none',
-                          background: applied ? '#333' : '#6C5CE7',
-                          color: applied ? 'rgba(255,255,255,0.4)' : '#fff',
-                          cursor: applied ? 'default' : 'pointer',
+                          background: applied ? '#10b981' : applying ? 'rgba(108,92,231,0.5)' : '#6C5CE7',
+                          color: '#fff',
+                          cursor: applied || applying ? 'default' : 'pointer',
+                          opacity: (applyingKey !== null && !applying) ? 0.5 : 1,
                           transition: 'all 0.15s',
                         }}
                       >
-                        {applied ? 'Aplicado' : 'Aplicar'}
+                        {applied ? 'Aplicado' : applying ? 'Regerando narracao...' : 'Aplicar'}
                       </button>
                     </div>
                   )
                 })}
+              {appliedSuggestions.size > 0 && !applyingKey && (
+                <div style={{ fontSize: 11, color: 'rgba(16,185,129,0.7)', fontStyle: 'italic', marginTop: 4 }}>
+                  Texto e narracao atualizados com sucesso.
+                </div>
+              )}
               </div>
             )}
           </div>

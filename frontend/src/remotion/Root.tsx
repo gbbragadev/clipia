@@ -1,4 +1,4 @@
-import { Composition } from 'remotion'
+import { Composition, registerRoot } from 'remotion'
 import { ShortVideoComposition } from './compositions/ShortVideoComposition'
 import { DEFAULT_SUBTITLE_STYLE, DEFAULT_VOICE_CONFIG } from './types'
 import type { CompositionData } from './types'
@@ -47,7 +47,7 @@ const defaultProps: CompositionData = {
   musicVolume: 0.15,
 }
 
-export const RemotionRoot: React.FC = () => {
+const RemotionRoot: React.FC = () => {
   return (
     <Composition
       id="ShortVideo"
@@ -57,3 +57,5 @@ export const RemotionRoot: React.FC = () => {
     />
   )
 }
+
+registerRoot(RemotionRoot)

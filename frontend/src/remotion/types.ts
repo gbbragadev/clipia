@@ -49,6 +49,8 @@ export const DEFAULT_VOICE_CONFIG: VoiceConfig = {
   pitch: 5,
 }
 
+export type LayoutType = 'fullscreen' | 'split_horizontal' | 'character_overlay'
+
 export interface CompositionData {
   scenes: Scene[]
   words: Word[]
@@ -63,6 +65,9 @@ export interface CompositionData {
   overlays: VideoOverlay[]
   musicUrl: string | null
   musicVolume: number
+  isRendering?: boolean
+  templateId?: string
+  layoutType?: LayoutType
 }
 
 export const DEFAULT_SUBTITLE_STYLE: SubtitleStyle = {
