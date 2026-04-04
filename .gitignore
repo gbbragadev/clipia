@@ -7,3 +7,7 @@ dist/
 .venv/
 .pytest_cache/
 reference_voices/*.wav
+.gstack/
+.next/
+.playwright-mcp/
+.remember/
