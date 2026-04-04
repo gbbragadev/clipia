@@ -52,7 +52,7 @@ function CustomSelect({ value, onChange }: { value: string; onChange: (v: string
         </svg>
       </button>
       {open && (
-        <div className="absolute left-0 right-0 mt-1 rounded-lg bg-[#14141e] border border-gray-700 shadow-xl z-50 max-h-48 overflow-y-auto">
+        <div className="absolute left-0 right-0 bottom-full mb-1 rounded-lg bg-[#14141e] border border-gray-700 shadow-xl z-50 max-h-48 overflow-y-auto">
           {STYLES.map((s) => (
             <button
               key={s.value}
