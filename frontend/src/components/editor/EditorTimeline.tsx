@@ -2,6 +2,7 @@
 
 import { useCallback, useRef } from 'react'
 import { useEditor } from '@/contexts/EditorContext'
+import { SubtitleTimeline } from './SubtitleTimeline'
 
 const SCENE_COLORS = ['#7c3aed', '#3b82f6', '#06b6d4', '#10b981', '#f59e0b', '#ef4444']
 
@@ -16,6 +17,7 @@ export function EditorTimeline() {
   const {
     composition, playerFrame, totalFrames, isPlaying, selectedSceneIndex,
     seekToFrame, togglePlayback, selectScene, togglePanel, panelCollapsed,
+    getSceneStartFrame,
   } = useEditor()
   const scenesRef = useRef<HTMLDivElement>(null)
 
@@ -68,7 +70,7 @@ export function EditorTimeline() {
                   ? `linear-gradient(180deg, ${color}, ${color}aa)`
                   : `${color}44`,
               }}
-              onClick={(e) => { e.stopPropagation(); selectScene(i) }}
+              onClick={(e) => { e.stopPropagation(); selectScene(i); seekToFrame(getSceneStartFrame(i)) }}
             >
               {i + 1}
             </div>
@@ -82,13 +84,8 @@ export function EditorTimeline() {
         />
       </div>
 
-      {/* Waveform placeholder */}
-      <div style={{
-        height: 24, margin: '0 16px',
-        background: 'linear-gradient(90deg, rgba(124,58,237,0.1) 0%, rgba(59,130,246,0.1) 100%)',
-        borderRadius: 3,
-        opacity: 0.5,
-      }} />
+      {/* Word-by-word subtitle visualization (Pretext canvas) */}
+      <SubtitleTimeline />
 
       {/* Transport controls */}
       <div className="editor-timeline__transport">

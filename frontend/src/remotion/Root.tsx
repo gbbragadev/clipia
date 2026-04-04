@@ -43,6 +43,8 @@ const defaultProps: CompositionData = {
   width: 1080,
   height: 1920,
   overlays: [],
+  musicUrl: null,
+  musicVolume: 0.15,
 }
 
 export const RemotionRoot: React.FC = () => {

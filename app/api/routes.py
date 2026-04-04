@@ -181,6 +181,23 @@ async def save_editor_state(
 
     await db.execute(update(Job).where(Job.id == job_id).values(editor_state=req.editor_state))
     await db.commit()
+
+    # Sync edited scenes back to script.json for the render pipeline
+    try:
+        job_dir = Path(settings.STORAGE_DIR) / "jobs" / job_id
+        script_path = job_dir / "script.json"
+        if script_path.exists() and req.editor_state:
+            comp = req.editor_state.get("composition", {})
+            if comp.get("scenes"):
+                script = json.loads(script_path.read_text())
+                script["scenes"] = comp["scenes"]
+                script_path.write_text(json.dumps(script, ensure_ascii=False, indent=2))
+            if comp.get("words"):
+                words_path = job_dir / "words.json"
+                words_path.write_text(json.dumps(comp["words"], ensure_ascii=False))
+    except Exception as e:
+        logger.warning(f"Could not sync editor state to disk for {job_id}: {e}")
+
     return {"status": "saved"}
 
 
@@ -308,26 +325,33 @@ async def render_video(
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
 
-    # Dispatch render task (reuses existing compose pipeline)
     job_dir = Path(settings.STORAGE_DIR) / "jobs" / job_id
     if not job_dir.exists():
         raise HTTPException(status_code=404, detail="Job files not found")
 
-    # For now, just copy the existing final.mp4 to output
-    # Full re-render with editor state would need a new Celery task
-    final_path = job_dir / "final.mp4"
-    if not final_path.exists():
-        raise HTTPException(status_code=404, detail="Video not rendered yet")
-
-    import shutil
-    output_dir = Path(settings.STORAGE_DIR) / "output"
-    output_dir.mkdir(parents=True, exist_ok=True)
-    output_path = output_dir / f"{job_id}.mp4"
-    shutil.copy2(str(final_path), str(output_path))
+    from app.worker.tasks import task_rerender_video
+    task_rerender_video.delay(job_id)
 
     return {
-        "status": "completed",
-        "download_url": f"/api/v1/jobs/{job_id}/download",
+        "status": "rendering",
+        "message": "Re-render iniciado com edicoes atuais.",
+    }
+
+
+@router.get("/jobs/{job_id}/status")
+async def job_status(
+    job_id: str,
+    user: User = Depends(get_current_user),
+):
+    """Quick status check from Redis for polling."""
+    data = _redis.hgetall(f"job:{job_id}")
+    if not data:
+        raise HTTPException(status_code=404, detail="Job status not found")
+    return {
+        "status": data.get("status", "unknown"),
+        "progress": float(data.get("progress", 0)),
+        "current_step": data.get("current_step", ""),
+        "error": data.get("error", ""),
     }
 
 

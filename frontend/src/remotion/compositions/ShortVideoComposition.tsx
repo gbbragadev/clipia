@@ -29,6 +29,8 @@ export const ShortVideoComposition: React.FC<CompositionData> = ({
   mediaUrls,
   subtitleStyle,
   overlays,
+  musicUrl,
+  musicVolume,
 }) => {
   const { fps, durationInFrames } = useVideoConfig()
 
@@ -70,6 +72,9 @@ export const ShortVideoComposition: React.FC<CompositionData> = ({
 
       {/* Narration audio */}
       {audioUrl && <Html5Audio src={audioUrl} />}
+
+      {/* Background music */}
+      {musicUrl && <Html5Audio src={musicUrl} volume={musicVolume ?? 0.15} />}
 
       {/* Word-by-word subtitles */}
       {words.length > 0 && (

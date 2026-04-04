@@ -68,6 +68,8 @@ def compose_short(
     audio_path: str,
     words: list[dict],
     output_path: str,
+    music_path: str | None = None,
+    music_volume: float = 0.15,
 ) -> str:
     """Compose final video using FFmpeg pipeline with NVENC encoding."""
     job_dir = Path(output_path).parent
@@ -126,19 +128,42 @@ def compose_short(
 
     logger.info(f"Encoding with {encoder}")
 
-    _run([
-        "ffmpeg", "-y",
-        "-i", concat_output,
-        "-i", audio_path,
-        "-vf", f"ass={ass_path}",
-        "-c:v", encoder, *encoder_opts,
-        "-c:a", "aac", "-b:a", "128k",
-        "-shortest",
-        "-r", str(settings.VIDEO_FPS),
-        "-pix_fmt", "yuv420p",
-        "-movflags", "+faststart",
-        output_path,
-    ], "final encode")
+    if music_path and Path(music_path).exists():
+        # Mix narration + background music
+        logger.info(f"Mixing music at volume {music_volume}")
+        _run([
+            "ffmpeg", "-y",
+            "-i", concat_output,
+            "-i", audio_path,
+            "-stream_loop", "-1",
+            "-i", music_path,
+            "-filter_complex",
+            f"[1:a]volume=1.0[narr];[2:a]volume={music_volume}[mus];[narr][mus]amix=inputs=2:duration=first[aout]",
+            "-map", "0:v",
+            "-map", "[aout]",
+            "-vf", f"ass={ass_path}",
+            "-c:v", encoder, *encoder_opts,
+            "-c:a", "aac", "-b:a", "128k",
+            "-shortest",
+            "-r", str(settings.VIDEO_FPS),
+            "-pix_fmt", "yuv420p",
+            "-movflags", "+faststart",
+            output_path,
+        ], "final encode with music")
+    else:
+        _run([
+            "ffmpeg", "-y",
+            "-i", concat_output,
+            "-i", audio_path,
+            "-vf", f"ass={ass_path}",
+            "-c:v", encoder, *encoder_opts,
+            "-c:a", "aac", "-b:a", "128k",
+            "-shortest",
+            "-r", str(settings.VIDEO_FPS),
+            "-pix_fmt", "yuv420p",
+            "-movflags", "+faststart",
+            output_path,
+        ], "final encode")
 
     # Cleanup temp files
     for p in prepared:

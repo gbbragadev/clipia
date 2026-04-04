@@ -8,6 +8,7 @@ import { SceneGrid } from './SceneGrid'
 import { SubtitleEditor } from './SubtitleEditor'
 import { VoiceSelector } from './VoiceSelector'
 import { OverlayPicker } from './OverlayPicker'
+import { MusicSelector } from './MusicSelector'
 import { AIAssistant } from './AIAssistant'
 import { ExportPanel } from './ExportPanel'
 import { useKeyboardShortcuts } from '@/hooks/useKeyboardShortcuts'
@@ -98,7 +99,13 @@ export function EditorLayout() {
             {activePanel === 'scenes' && <SceneGrid />}
             {activePanel === 'voice' && <VoiceSelector />}
             {activePanel === 'subtitles' && <SubtitleEditor />}
-            {activePanel === 'elements' && <OverlayPicker />}
+            {activePanel === 'elements' && (
+              <>
+                <OverlayPicker />
+                <div style={{ borderTop: '1px solid #333', margin: '16px 0' }} />
+                <MusicSelector />
+              </>
+            )}
             {activePanel === 'ai' && <AIAssistant />}
           </div>
         </div>

@@ -88,9 +88,28 @@ export function ExportPanel({ onClose }: { onClose: () => void }) {
         throw new Error(`Erro ${res.status}: ${errText}`)
       }
 
-      const data = await res.json()
-      setDownloadUrl(data.download_url)
-      setState('done')
+      // Poll for render completion
+      const poll = async () => {
+        try {
+          const statusRes = await fetch(`/api/v1/jobs/${jobId}/status`, { headers })
+          if (!statusRes.ok) throw new Error('Erro ao verificar status')
+          const data = await statusRes.json()
+
+          if (data.status === 'completed') {
+            setDownloadUrl(`/api/v1/jobs/${jobId}/download`)
+            setState('done')
+          } else if (data.status === 'error') {
+            throw new Error(data.error || 'Erro na renderizacao')
+          } else {
+            setTimeout(poll, 2000)
+          }
+        } catch (pollErr) {
+          setError(pollErr instanceof Error ? pollErr.message : 'Erro ao verificar status')
+          setState('idle')
+        }
+      }
+
+      setTimeout(poll, 3000)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Erro ao renderizar')
       setState('idle')

@@ -243,3 +243,59 @@ def task_finalize(self, video_path: str, job_id: str) -> str:
     except Exception as e:
         _fail_job(job_id, f"Finalize failed: {e}")
         raise
+
+
+@celery_app.task(name="rerender_video", bind=True)
+def task_rerender_video(self, job_id: str) -> str:
+    """Re-compose video with current editor state (edited scenes/words)."""
+    try:
+        _update_job(job_id, "rendering", "compositing", 0.1)
+        job_dir = get_job_dir(job_id)
+
+        script_path = job_dir / "script.json"
+        if not script_path.exists():
+            raise RuntimeError("script.json not found")
+        script = json.loads(script_path.read_text())
+
+        words_path = job_dir / "words.json"
+        words = json.loads(words_path.read_text()) if words_path.exists() else []
+
+        audio_path = str(job_dir / "narration.wav")
+        if not (job_dir / "narration.wav").exists():
+            raise RuntimeError("narration.wav not found")
+
+        media_dir = job_dir / "media"
+        media_paths = []
+        if media_dir.exists():
+            media_paths = sorted(
+                [str(p) for p in media_dir.glob("scene_*.mp4")],
+                key=lambda p: int(str(p).split("scene_")[1].split(".")[0])
+            )
+
+        if not media_paths:
+            raise RuntimeError("No media files found for re-render")
+
+        _update_job(job_id, "rendering", "compositing", 0.3)
+
+        output_path = str(job_dir / "final_edited.mp4")
+        compose_short(
+            scenes=script["scenes"],
+            media_paths=media_paths,
+            audio_path=audio_path,
+            words=words,
+            output_path=output_path,
+        )
+
+        _update_job(job_id, "rendering", "finalizing", 0.9)
+
+        output_dir = get_output_dir()
+        final_path = str(output_dir / f"{job_id}.mp4")
+        shutil.copy2(output_path, final_path)
+
+        _update_job(job_id, "completed", None, 1.0)
+        logger.info(f"Re-render completed for job {job_id}")
+        return final_path
+    except Exception as e:
+        _update_job(job_id, "error", error=str(e))
+        logger.error(f"Re-render failed for job {job_id}: {e}")
+        raise

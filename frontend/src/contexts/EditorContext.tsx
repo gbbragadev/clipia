@@ -11,6 +11,7 @@ interface EditorContextValue {
   // State
   jobId: string
   composition: CompositionData | null
+  compositionVersion: number
   loading: boolean
   error: string | null
   selectedSceneIndex: number
@@ -36,6 +37,8 @@ interface EditorContextValue {
   addOverlay: (overlay: VideoOverlay) => void
   removeOverlay: (index: number) => void
   updateAudio: (words: Array<Record<string, unknown>>, audioUrl: string) => void
+  updateMusic: (musicUrl: string | null, musicVolume?: number) => void
+  getSceneStartFrame: (sceneIndex: number) => number
   undo: () => void
   redo: () => void
   canUndo: boolean
@@ -57,6 +60,7 @@ export function EditorProvider({ jobId, children }: { jobId: string; children: R
   const [saving, setSaving] = useState(false)
   const [playerFrame, setPlayerFrame] = useState(0)
   const [isPlaying, setIsPlaying] = useState(false)
+  const [compositionVersion, setCompositionVersion] = useState(0)
 
   const playerRef = useRef<PlayerRef | null>(null)
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -136,6 +140,7 @@ export function EditorProvider({ jobId, children }: { jobId: string; children: R
       return next
     })
     setDirty(true)
+    setCompositionVersion(v => v + 1)
   }, [pushHistory])
 
   const selectScene = useCallback((index: number) => setSelectedSceneIndex(index), [])
@@ -166,6 +171,15 @@ export function EditorProvider({ jobId, children }: { jobId: string; children: R
       ...prev,
       words: words as unknown as CompositionData['words'],
       audioUrl,
+    }))
+  }, [updateComposition])
+
+  // Music update
+  const updateMusic = useCallback((musicUrl: string | null, musicVolume?: number) => {
+    updateComposition((prev) => ({
+      ...prev,
+      musicUrl,
+      ...(musicVolume !== undefined ? { musicVolume } : {}),
     }))
   }, [updateComposition])
 
@@ -202,6 +216,17 @@ export function EditorProvider({ jobId, children }: { jobId: string; children: R
 
   const togglePanel = useCallback(() => setPanelCollapsed((p) => !p), [])
 
+  // Get the start frame of a scene by index
+  const getSceneStartFrame = useCallback((sceneIndex: number) => {
+    if (!composition) return 0
+    const totalHints = composition.scenes.reduce((s, sc) => s + sc.duration_hint, 0)
+    let frameOffset = 0
+    for (let j = 0; j < sceneIndex; j++) {
+      frameOffset += (composition.scenes[j].duration_hint / totalHints) * totalFrames
+    }
+    return Math.round(frameOffset)
+  }, [composition, totalFrames])
+
   // Undo/redo
   const canUndo = historyIndex > 0
   const canRedo = historyIndex < history.length - 1
@@ -223,10 +248,10 @@ export function EditorProvider({ jobId, children }: { jobId: string; children: R
   }, [canRedo, historyIndex, history])
 
   const value: EditorContextValue = {
-    jobId, composition, loading, error, selectedSceneIndex, activePanel, panelCollapsed,
+    jobId, composition, compositionVersion, loading, error, selectedSceneIndex, activePanel, panelCollapsed,
     dirty, saving, playerFrame, isPlaying, playerRef, totalFrames,
     selectScene, setActivePanel, updateScene, updateSubtitleStyle, updateVoiceConfig,
-    updateAudio, addOverlay, removeOverlay,
+    updateAudio, updateMusic, addOverlay, removeOverlay, getSceneStartFrame,
     setPlayerFrame, seekToFrame, togglePlayback, togglePanel,
     undo, redo, canUndo, canRedo,
   }

@@ -1,12 +1,14 @@
 'use client'
 
-import { useMemo } from 'react'
 import { Player } from '@remotion/player'
 import { ShortVideoComposition } from '@/remotion/compositions/ShortVideoComposition'
 import { useEditor } from '@/contexts/EditorContext'
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const VideoComponent = ShortVideoComposition as any
+
 export function VideoPlayer() {
-  const { composition, playerRef, totalFrames } = useEditor()
+  const { composition, playerRef, totalFrames, compositionVersion } = useEditor()
 
   if (!composition) return null
 
@@ -15,8 +17,9 @@ export function VideoPlayer() {
       <div className="editor-player-glow" />
       <div className="editor-player-container">
         <Player
+          key={compositionVersion}
           ref={playerRef}
-          component={ShortVideoComposition as unknown as React.FC<Record<string, unknown>>}
+          component={VideoComponent}
           inputProps={composition}
           durationInFrames={totalFrames}
           compositionWidth={composition.width}
@@ -25,7 +28,6 @@ export function VideoPlayer() {
           style={{ width: '100%', height: '100%' }}
           controls={false}
           loop
-          clickToPlay
           acknowledgeRemotionLicense
         />
       </div>

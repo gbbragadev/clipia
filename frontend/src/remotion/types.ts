@@ -61,6 +61,8 @@ export interface CompositionData {
   height: number
   title: string
   overlays: VideoOverlay[]
+  musicUrl: string | null
+  musicVolume: number
 }
 
 export const DEFAULT_SUBTITLE_STYLE: SubtitleStyle = {

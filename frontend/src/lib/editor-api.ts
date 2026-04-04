@@ -53,6 +53,8 @@ export async function fetchComposition(jobId: string): Promise<CompositionData> 
     width: data.width,
     height: data.height,
     overlays: [],
+    musicUrl: null,
+    musicVolume: 0.15,
   }
 }
 
