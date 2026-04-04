@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
+import HowItWorksStepCanvas from './HowItWorksStepCanvas'
 
 const steps = [
   {
@@ -106,9 +107,9 @@ export default function HowItWorks() {
                 }}>
                   <StepIcon type={step.icon} />
                 </div>
-                <span style={{ fontSize: 48, fontWeight: 900, color: 'rgba(255,255,255,0.15)', position: 'absolute', top: 12, right: 20 }}>
-                  {step.number}
-                </span>
+                <div style={{ position: 'absolute', top: 12, right: 20 }}>
+                  <HowItWorksStepCanvas number={step.number} />
+                </div>
               </div>
 
               {/* Text content */}

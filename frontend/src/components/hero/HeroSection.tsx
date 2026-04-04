@@ -1,7 +1,13 @@
+'use client'
+
+import { useRef } from 'react'
 import VideoShowcase from './VideoShowcase'
 import PretextCanvas from './PretextCanvas'
+import HeroTitleCanvas from './HeroTitleCanvas'
 
 export default function HeroSection() {
+  const h1Ref = useRef<HTMLHeadingElement>(null)
+
   return (
     <section className="hero-bg" style={{ minHeight: '90vh', padding: '100px 16px 40px' }}>
       <div style={{ maxWidth: 1200, margin: '0 auto' }}>
@@ -19,14 +25,17 @@ export default function HeroSection() {
               Beta privado
             </div>
 
-            <h1 style={{
-              fontSize: 'clamp(2.5rem, 5vw, 4.5rem)', fontWeight: 900,
-              color: 'white', lineHeight: 1.05, letterSpacing: '-0.03em', marginBottom: 20,
-            }}>
-              Crie videos curtos
-              <br />
-              <span style={{ color: '#a78bfa' }}>com IA</span>
-            </h1>
+            <div style={{ position: 'relative' }}>
+              <h1 ref={h1Ref} style={{
+                fontSize: 'clamp(2.5rem, 5vw, 4.5rem)', fontWeight: 900,
+                color: 'white', lineHeight: 1.05, letterSpacing: '-0.03em', marginBottom: 20,
+              }}>
+                Crie videos curtos
+                <br />
+                <span style={{ color: '#a78bfa' }}>com IA</span>
+              </h1>
+              <HeroTitleCanvas targetRef={h1Ref} />
+            </div>
 
             <p style={{ fontSize: 18, lineHeight: 1.7, color: '#94a3b8', maxWidth: 440, marginBottom: 24 }}>
               Digite um tema e receba um video pronto para publicar.

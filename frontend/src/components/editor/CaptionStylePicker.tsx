@@ -48,6 +48,34 @@ const PRESETS: {
       textShadow: '2px 2px 0px rgba(0, 0, 0, 0.8)',
     },
   },
+  {
+    key: 'karaoke',
+    label: 'Karaoke',
+    preview: {
+      fontFamily: 'Inter, system-ui, sans-serif',
+      fontSize: 13,
+      fontWeight: 700,
+      color: '#FFFFFF',
+      background: 'linear-gradient(90deg, #FFFC00 50%, rgba(255,255,255,0.4) 50%)',
+      WebkitBackgroundClip: 'text',
+      WebkitTextFillColor: 'transparent',
+      padding: '2px 6px',
+    } as React.CSSProperties,
+  },
+  {
+    key: 'boxed',
+    label: 'Boxed',
+    preview: {
+      fontFamily: 'Montserrat, sans-serif',
+      fontSize: 13,
+      fontWeight: 800,
+      color: '#FFFFFF',
+      textTransform: 'uppercase',
+      backgroundColor: 'rgba(108, 92, 231, 0.7)',
+      padding: '3px 8px',
+      borderRadius: 6,
+    },
+  },
 ]
 
 const ACCENT_COLORS = [
@@ -63,7 +91,7 @@ export function CaptionStylePicker() {
   if (!composition) return null
 
   const style = composition.subtitleStyle
-  const showAccent = style.preset === 'tiktok' || style.preset === 'impact' || style.preset === 'karaoke'
+  const showAccent = style.preset === 'tiktok' || style.preset === 'impact' || style.preset === 'karaoke' || style.preset === 'boxed'
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>

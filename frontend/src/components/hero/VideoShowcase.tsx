@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useRef, useEffect } from 'react'
+import ReelSubtitleCanvas from './ReelSubtitleCanvas'
 
 const REELS = [
   {
@@ -99,25 +100,12 @@ function Reel({ reel, isActive, index, muted }: { reel: typeof REELS[0]; isActiv
         </div>
       </div>
 
-      {/* Animated word-by-word subtitle */}
-      <div style={{
-        position: 'absolute', bottom: 95, left: 0, right: 48,
-        display: 'flex', flexWrap: 'wrap', justifyContent: 'center',
-        gap: '3px 5px', padding: '0 18px', zIndex: 2,
-      }}>
-        {reel.subtitle.map((word, wi) => (
-          <span key={wi} style={{
-            fontSize: 15, fontWeight: 700, color: 'white',
-            opacity: wi < wordIdx ? 1 : 0.2,
-            background: wi === wordIdx - 1 ? `${reel.accent}66` : 'transparent',
-            borderRadius: 4, padding: '2px 6px',
-            transition: 'opacity 0.15s, background 0.15s',
-            textShadow: '0 1px 8px rgba(0,0,0,0.8)',
-          }}>
-            {word}
-          </span>
-        ))}
-      </div>
+      {/* Animated word-by-word subtitle (Pretext canvas) */}
+      <ReelSubtitleCanvas
+        words={reel.subtitle}
+        activeWordIndex={wordIdx - 1}
+        accent={reel.accent}
+      />
 
       {/* Social icons */}
       <div style={{

@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useRef, useCallback } from 'react'
-import { prepareWithSegments, layoutWithLines } from '@chenglou/pretext'
+import { prepareWithSegments, layoutWithLines, walkLineRanges } from '@chenglou/pretext'
 import { useEditor } from '@/contexts/EditorContext'
 
 export function PretextSubtitlePreview() {
@@ -202,6 +202,129 @@ export function PretextSubtitlePreview() {
 
         ctx.shadowBlur = 0
         ctx.textAlign = 'center'
+
+      } else if (style.preset === 'karaoke') {
+        // === KARAOKE STYLE: progressive fill per word ===
+        const lineWords = line.text.split(' ')
+        let xOffset = x - line.width / 2
+        ctx.textAlign = 'left'
+
+        for (const lw of lineWords) {
+          if (!lw) continue
+          const wordWidth = ctx.measureText(lw).width
+
+          // Find matching word for timing
+          const matchedWord = chunkWords.find(
+            cw => cw.word.toUpperCase() === lw
+          )
+          const isWordActive = matchedWord && currentTime >= matchedWord.start && currentTime <= matchedWord.end
+          const isWordPast = matchedWord && currentTime > matchedWord.end
+
+          // Stroke
+          if (strokeW > 0) {
+            ctx.strokeStyle = style.outlineColor
+            ctx.lineWidth = strokeW
+            ctx.lineJoin = 'round'
+            ctx.strokeText(lw, xOffset, y)
+          }
+
+          if (isWordActive && matchedWord) {
+            // Progressive fill: base color → accent color sweep
+            const wordProgress = Math.min(1, Math.max(0,
+              (currentTime - matchedWord.start) / (matchedWord.end - matchedWord.start)
+            ))
+            const fillX = xOffset + wordWidth * wordProgress
+
+            // Draw base color (unfilled part)
+            ctx.save()
+            ctx.beginPath()
+            ctx.rect(fillX, y - fontSize, wordWidth - (fillX - xOffset) + 2, fontSize * 2)
+            ctx.clip()
+            ctx.fillStyle = style.color
+            ctx.globalAlpha = fadeProgress * 0.5
+            ctx.fillText(lw, xOffset, y)
+            ctx.restore()
+
+            // Draw accent color (filled part)
+            ctx.save()
+            ctx.beginPath()
+            ctx.rect(xOffset - 1, y - fontSize, fillX - xOffset + 1, fontSize * 2)
+            ctx.clip()
+            ctx.shadowColor = style.accentColor
+            ctx.shadowBlur = 10 * scale
+            ctx.fillStyle = style.accentColor
+            ctx.globalAlpha = fadeProgress
+            ctx.fillText(lw, xOffset, y)
+            ctx.restore()
+
+            // Bounce on new word (first 100ms)
+            if (matchedWord && currentTime - matchedWord.start < 0.1) {
+              const bt = (currentTime - matchedWord.start) / 0.1
+              const bounceScale = 1.05 - 0.05 * bt
+              ctx.save()
+              const cx = xOffset + wordWidth / 2
+              const cy = y
+              ctx.translate(cx, cy)
+              ctx.scale(bounceScale, bounceScale)
+              ctx.translate(-cx, -cy)
+              ctx.restore()
+            }
+          } else {
+            ctx.fillStyle = isWordPast ? style.accentColor : style.color
+            ctx.globalAlpha = isWordPast ? fadeProgress : fadeProgress * 0.5
+            ctx.fillText(lw, xOffset, y)
+            ctx.globalAlpha = fadeProgress
+          }
+
+          xOffset += ctx.measureText(lw + ' ').width
+        }
+        ctx.textAlign = 'center'
+
+      } else if (style.preset === 'boxed') {
+        // === BOXED STYLE: individual rounded boxes per line with stagger reveal ===
+        const chunkTime = chunkWords[0].start
+        const elapsedSinceChunk = currentTime - chunkTime
+        const lineIdx = layout.lines.indexOf(line)
+        const lineDelay = lineIdx * 0.06 // 60ms stagger per line
+        const boxTime = Math.max(0, elapsedSinceChunk - lineDelay)
+        const boxProgress = Math.min(1, boxTime / 0.15) // 150ms to full width
+        const textDelay = 0.03 // 30ms after box
+        const textProgress = Math.min(1, Math.max(0, (boxTime - textDelay) / 0.12))
+
+        const padding = 10 * scale
+        const boxWidth = (line.width + padding * 2) * boxProgress
+        const boxHeight = fontSize * 1.4
+        const boxX = x - boxWidth / 2
+        const boxY = y - fontSize * 0.15
+
+        // Draw box
+        ctx.save()
+        const bgColor = style.backgroundColor !== 'transparent'
+          ? style.backgroundColor
+          : style.accentColor + '33' // fallback with alpha
+        ctx.fillStyle = bgColor
+        ctx.beginPath()
+        ctx.roundRect(boxX, boxY, boxWidth, boxHeight, 6 * scale)
+        ctx.fill()
+        ctx.restore()
+
+        // Draw text (appears after box)
+        if (textProgress > 0) {
+          ctx.save()
+          ctx.globalAlpha = fadeProgress * textProgress
+          ctx.textAlign = 'center'
+
+          if (strokeW > 0) {
+            ctx.strokeStyle = style.outlineColor
+            ctx.lineWidth = strokeW
+            ctx.lineJoin = 'round'
+            ctx.strokeText(line.text, x, y)
+          }
+
+          ctx.fillStyle = style.color
+          ctx.fillText(line.text, x, y)
+          ctx.restore()
+        }
 
       } else {
         // === MINIMAL STYLE ===
