@@ -1,0 +1,261 @@
+/* ── Editor: 3-zone grid (header / workspace / timeline) ──── */
+.editor {
+  display: grid;
+  grid-template-rows: 48px 1fr 120px;
+  height: 100vh;
+  overflow: hidden;
+  background: #1A1A1A;
+  color: #E8E8E8;
+  font-family: var(--font-inter), system-ui, sans-serif;
+}
+
+/* ── Loading ──────────────────────────────── */
+.editor-loading {
+  grid-row: 1 / -1;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 12px; background: inherit;
+}
+.editor-loading__spinner {
+  width: 28px; height: 28px;
+  border: 3px solid rgba(108,92,231,0.2); border-top-color: #6C5CE7;
+  border-radius: 50%; animation: spin 0.7s linear infinite;
+}
+.editor-loading__title { font-size: 16px; font-weight: 600; }
+.editor-loading__sub { font-size: 12px; color: #666666; }
+
+/* ── Header (row 1, 48px) ────────────────── */
+.editor-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 0 16px;
+  border-bottom: 1px solid rgba(255,255,255,0.08);
+  background: #222222;
+}
+.editor-header__left { display: flex; align-items: center; gap: 8px; }
+.editor-header__logo {
+  font-weight: 800; font-size: 15px;
+  background: linear-gradient(135deg,#6C5CE7,#00D4FF);
+  -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+  text-decoration: none;
+}
+.editor-header__sep { color: rgba(255,255,255,0.08); font-size: 14px; }
+.editor-header__title { font-size: 12px; color: #999999; max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.editor-header__right { display: flex; align-items: center; gap: 10px; }
+.editor-header__status { font-size: 10px; padding: 2px 7px; border-radius: 4px; }
+.editor-header__status--saving { color: #666666; }
+.editor-header__status--dirty { color: #f59e0b; background: rgba(245,158,11,0.08); }
+.editor-header__status--saved { color: #10b981; background: rgba(16,185,129,0.08); }
+.editor-header__export {
+  padding: 6px 16px; background: #6C5CE7;
+  border: none; border-radius: 7px; color: white; font-weight: 600; font-size: 12px;
+  cursor: pointer; transition: opacity 0.15s;
+}
+.editor-header__export:hover { opacity: 0.9; }
+
+/* ── Workspace (row 2) ───────────────────── */
+.editor-workspace {
+  display: flex; min-height: 0; overflow: hidden; position: relative;
+}
+
+/* ── Player zone: flex:1 = takes ALL remaining space ── */
+.editor-player-zone {
+  flex: 1; display: flex; align-items: center; justify-content: center;
+  min-width: 0; padding: 12px;
+  background: #1A1A1A;
+}
+
+/* Player container: height-driven, aspect ratio derives width */
+.editor-player-container {
+  position: relative;
+  height: calc(100vh - 192px); /* 100vh - 48px header - 120px timeline - 24px padding */
+  aspect-ratio: 9 / 16;
+  max-width: 100%;
+  border-radius: 16px;
+  overflow: hidden;
+  border: 2px solid rgba(255,255,255,0.08);
+  background: #1A1A1A;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.4), 0 0 0 1px rgba(255,255,255,0.04);
+}
+
+/* Glow behind player */
+.editor-player-glow {
+  position: absolute; inset: -16px;
+  background: radial-gradient(ellipse at center, rgba(108,92,231,0.06) 0%, transparent 65%);
+  border-radius: 32px; filter: blur(16px); pointer-events: none; z-index: -1;
+}
+
+/* ── Tools panel (320px, collapsible) ──────── */
+.editor-tools-panel {
+  flex: 0 0 320px; display: flex; flex-direction: column;
+  border-left: 1px solid rgba(255,255,255,0.08);
+  background: #222222; overflow: hidden;
+  transition: flex-basis 0.25s cubic-bezier(0.4,0,0.2,1), opacity 0.2s ease;
+}
+.editor-tools-panel--collapsed { flex-basis: 0; opacity: 0; pointer-events: none; }
+
+/* Panel toggle button */
+.editor-panel-toggle {
+  position: absolute; right: 320px; top: 50%; transform: translateY(-50%);
+  z-index: 10; width: 20px; height: 44px;
+  background: #222222; border: 1px solid rgba(255,255,255,0.08); border-right: none;
+  border-radius: 6px 0 0 6px; display: flex; align-items: center; justify-content: center;
+  cursor: pointer; color: #666666; font-size: 11px;
+  transition: all 0.2s;
+}
+.editor-panel-toggle:hover { color: #E8E8E8; background: #2A2A2A; }
+.editor-panel-toggle--collapsed { right: 0; border-radius: 6px 0 0 6px; }
+
+/* ── Tabs ─────────────────────────────────── */
+.editor-tabs {
+  display: flex; gap: 1px; flex-shrink: 0;
+  background: #1A1A1A; border-bottom: 1px solid rgba(255,255,255,0.08);
+}
+.editor-tab {
+  flex: 1; display: flex; flex-direction: column; align-items: center; gap: 2px;
+  padding: 8px 0; background: transparent; border: none;
+  border-bottom: 2px solid transparent;
+  color: #666666; font-size: 9px; font-weight: 600;
+  cursor: pointer; transition: all 0.15s;
+  text-transform: uppercase; letter-spacing: 0.05em;
+}
+.editor-tab:hover { color: #999999; background: rgba(255,255,255,0.02); }
+.editor-tab--active { color: #6C5CE7; border-bottom-color: #6C5CE7; background: rgba(108,92,231,0.15); }
+.editor-tab__icon { font-size: 15px; }
+.editor-tab__label { font-size: 9px; }
+
+.editor-panel-content {
+  flex: 1; overflow-y: auto; padding: 14px;
+}
+.editor-panel-content::-webkit-scrollbar { width: 3px; }
+.editor-panel-content::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.08); border-radius: 2px; }
+
+/* ── Timeline (row 3, 120px, FULL WIDTH) ──── */
+.editor-timeline {
+  display: flex; flex-direction: column;
+  border-top: 1px solid rgba(255,255,255,0.08);
+  background: #1E1E1E;
+  padding: 0;
+}
+
+/* Timeline ruler */
+.editor-timeline__ruler {
+  height: 16px; display: flex; align-items: flex-end;
+  padding: 0 16px; position: relative;
+}
+.editor-timeline__tick {
+  position: absolute; bottom: 0;
+  font-size: 9px; color: #666666;
+  transform: translateX(-50%);
+}
+.editor-timeline__tick::before {
+  content: ''; display: block; width: 1px; height: 4px;
+  background: rgba(255,255,255,0.15); margin: 0 auto 2px;
+}
+
+/* Scene blocks area (clickable for seek) */
+.editor-timeline__scenes {
+  height: 36px; display: flex; gap: 2px;
+  padding: 0 16px; position: relative; cursor: pointer;
+}
+.editor-timeline__scene {
+  display: flex; align-items: center; justify-content: center;
+  border-radius: 4px; font-size: 10px; font-weight: 600;
+  color: #E8E8E8; transition: all 0.12s;
+  border: none; cursor: pointer;
+}
+.editor-timeline__scene:hover { filter: brightness(1.2); }
+.editor-timeline__scene--active { box-shadow: inset 0 0 0 1.5px rgba(255,255,255,0.3); }
+
+/* Playhead */
+.editor-timeline__playhead {
+  position: absolute; top: 0; bottom: 0; width: 2px;
+  background: #00D4FF; box-shadow: 0 0 6px rgba(0,212,255,0.5);
+  border-radius: 1px; pointer-events: none; z-index: 5;
+  transition: left 0.08s linear;
+}
+.editor-timeline__playhead::before {
+  content: ''; position: absolute; top: -3px; left: -4px;
+  width: 10px; height: 10px;
+  background: #00D4FF; border-radius: 50%;
+  box-shadow: 0 0 4px rgba(0,212,255,0.4);
+}
+
+/* Transport controls */
+.editor-timeline__transport {
+  height: 32px; display: flex; align-items: center; gap: 12px;
+  padding: 0 16px; border-top: 1px solid rgba(255,255,255,0.08);
+}
+.editor-timeline__transport-btn {
+  background: none; border: none; color: #999999;
+  font-size: 16px; cursor: pointer; padding: 2px 6px; border-radius: 4px;
+  transition: all 0.12s;
+}
+.editor-timeline__transport-btn:hover { color: #E8E8E8; background: rgba(255,255,255,0.06); }
+.editor-timeline__transport-btn--active { color: #6C5CE7; }
+.editor-timeline__time {
+  font-size: 11px; color: #999999; font-variant-numeric: tabular-nums;
+}
+.editor-timeline__spacer { flex: 1; }
+.editor-timeline__shortcut-hint {
+  font-size: 9px; color: #666666; padding: 2px 6px;
+  background: #2A2A2A; border-radius: 3px;
+}
+
+/* ── Shared components ────────────────────── */
+.editor-card {
+  background: #2A2A2A; border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 8px; padding: 10px; transition: all 0.15s ease;
+}
+.editor-card:hover { background: #333333; }
+.editor-card--selected { background: rgba(108,92,231,0.15); border-color: rgba(108,92,231,0.25); }
+
+.editor-section-header {
+  font-size: 10px; font-weight: 700; color: #666666;
+  text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 10px;
+}
+
+.editor-slider {
+  -webkit-appearance: none; width: 100%; height: 4px;
+  background: rgba(255,255,255,0.1); border-radius: 2px; outline: none;
+}
+.editor-slider::-webkit-slider-thumb {
+  -webkit-appearance: none; width: 14px; height: 14px;
+  background: #6C5CE7; border-radius: 50%; cursor: pointer; border: 2px solid #222222;
+}
+
+.editor-color-swatch {
+  width: 26px; height: 26px; border-radius: 6px;
+  border: 2px solid transparent; cursor: pointer; transition: all 0.12s;
+}
+.editor-color-swatch:hover { transform: scale(1.1); }
+.editor-color-swatch--active { border-color: #E8E8E8; box-shadow: 0 0 6px rgba(255,255,255,0.25); }
+
+.editor-select {
+  width: 100%; padding: 7px 10px; background: #1A1A1A;
+  border: 1px solid rgba(255,255,255,0.08); border-radius: 6px;
+  color: #E8E8E8; font-size: 12px; cursor: pointer;
+}
+.editor-select:focus { border-color: rgba(108,92,231,0.4); outline: none; }
+
+.editor-btn-sm {
+  padding: 5px 10px; background: #2A2A2A;
+  border: 1px solid rgba(255,255,255,0.08); border-radius: 5px;
+  color: #999999; font-size: 11px; font-weight: 600;
+  cursor: pointer; transition: all 0.12s;
+}
+.editor-btn-sm:hover { background: #333333; color: #E8E8E8; }
+
+.editor-placeholder {
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 6px; padding: 50px 0; color: #666666; font-size: 13px;
+}
+.editor-placeholder__icon { font-size: 24px; opacity: 0.4; }
+
+/* ── Animations ───────────────────────────── */
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* ── Responsive ───────────────────────────── */
+@media (max-width: 1439px) {
+  .editor-tools-panel { flex-basis: 280px; }
+  .editor-panel-toggle { right: 280px; }
+  .editor-panel-toggle--collapsed { right: 0; }
+}
