@@ -59,7 +59,7 @@ export default function GenerateForm({ onGenerate, isGenerating }: Props) {
           className="flex-1 px-4 py-3 rounded-lg bg-white/5 border border-gray-700 text-white focus:border-purple-500 focus:outline-none"
         >
           {STYLES.map((s) => (
-            <option key={s.value} value={s.value}>{s.label}</option>
+            <option key={s.value} value={s.value} className="bg-[#1a1a22] text-white">{s.label}</option>
           ))}
         </select>
         <div className="flex-1 flex items-center gap-3">
