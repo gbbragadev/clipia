@@ -24,7 +24,7 @@ export default function TemplateSelector({ selected, onSelect, disabled }: Templ
           className={`flex items-start gap-3 p-4 rounded-xl border text-left transition cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed ${
             selected === t.id
               ? 'bg-purple-500/10 border-purple-500/60'
-              : 'bg-[#1A1A1A] border-[#333] hover:border-[#555]'
+              : 'bg-[var(--bg-surface)] border-[var(--border-default)] hover:border-[var(--border-hover)]'
           }`}
         >
           <span className="text-3xl flex-shrink-0 mt-0.5">{t.icon}</span>

@@ -56,7 +56,7 @@ export default function VideoCard({ job, onEdit }: VideoCardProps) {
   const icon = STYLE_ICONS[job.style] || '🎬'
 
   return (
-    <div className="rounded-xl bg-[#1A1A1A] border border-[#222] overflow-hidden hover:border-[#444] transition group">
+    <div className="rounded-xl bg-[var(--bg-surface)] border border-[var(--border-subtle)] overflow-hidden hover:border-[var(--border-hover)] transition group">
       {/* Thumbnail */}
       <div className={`aspect-video bg-gradient-to-br ${gradient} flex items-center justify-center`}>
         <span className="text-5xl opacity-15 group-hover:opacity-25 transition">{icon}</span>
@@ -91,7 +91,7 @@ export default function VideoCard({ job, onEdit }: VideoCardProps) {
             <a
               href={job.download_url}
               download
-              className="flex-1 py-2 rounded-lg border border-[#333] text-gray-400 text-xs font-medium text-center hover:border-gray-500 hover:text-gray-300 transition"
+              className="flex-1 py-2 rounded-lg border border-[var(--border-default)] text-gray-400 text-xs font-medium text-center hover:border-gray-500 hover:text-gray-300 transition"
             >
               Baixar
             </a>

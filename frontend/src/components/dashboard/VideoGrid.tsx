@@ -12,11 +12,11 @@ interface VideoGridProps {
 
 function SkeletonCard() {
   return (
-    <div className="rounded-xl bg-[#1A1A1A] border border-[#222] overflow-hidden animate-pulse">
-      <div className="aspect-video bg-[#222]" />
+    <div className="rounded-xl bg-[var(--bg-surface)] border border-[var(--border-subtle)] overflow-hidden animate-pulse">
+      <div className="aspect-video bg-[var(--bg-surface-hover)]" />
       <div className="p-4 space-y-2">
-        <div className="h-4 bg-[#222] rounded w-3/4" />
-        <div className="h-3 bg-[#222] rounded w-1/2" />
+        <div className="h-4 bg-[var(--bg-surface-hover)] rounded w-3/4" />
+        <div className="h-3 bg-[var(--bg-surface-hover)] rounded w-1/2" />
       </div>
     </div>
   )

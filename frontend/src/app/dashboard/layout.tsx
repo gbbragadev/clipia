@@ -17,11 +17,11 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
   }, [loading, router])
 
   if (loading) {
-    return <div className="min-h-screen bg-[#111]" />
+    return <div className="min-h-screen" style={{ background: 'var(--bg-raised)' }} />
   }
 
   return (
-    <div className="min-h-screen bg-[#111] text-[#E8E8E8] font-sans">
+    <div className="min-h-screen font-sans" style={{ background: 'var(--bg-raised)', color: 'var(--text-primary)' }}>
       <DashboardNavbar />
       <main className="pt-14">
         {children}

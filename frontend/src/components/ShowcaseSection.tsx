@@ -1,5 +1,7 @@
 'use client'
 
+import ShowcasePretextOverlay from '@/components/ShowcasePretextOverlay'
+
 const SHOWCASE_ITEMS = [
   {
     title: '5 curiosidades sobre o oceano profundo',
@@ -7,6 +9,9 @@ const SHOWCASE_ITEMS = [
     gradient: 'from-blue-900/60 to-cyan-900/60',
     icon: '🌊',
     video: null as string | null, // sera preenchido com video real
+    phrase: 'O oceano cobre mais de 70% da superficie da Terra',
+    captionStyle: 'tiktok' as const,
+    captionAccent: '#22d3ee',
   },
   {
     title: 'Como a IA está mudando o mundo',
@@ -14,6 +19,9 @@ const SHOWCASE_ITEMS = [
     gradient: 'from-purple-900/60 to-indigo-900/60',
     icon: '🤖',
     video: null as string | null,
+    phrase: 'Inteligencia artificial ja supera humanos em tarefas complexas',
+    captionStyle: 'impact' as const,
+    captionAccent: '#c084fc',
   },
   {
     title: 'Fatos que ninguém te contou sobre o cérebro',
@@ -21,6 +29,9 @@ const SHOWCASE_ITEMS = [
     gradient: 'from-amber-900/60 to-orange-900/60',
     icon: '🧠',
     video: null as string | null,
+    phrase: 'Seu cerebro processa 60 mil pensamentos por dia',
+    captionStyle: 'karaoke' as const,
+    captionAccent: '#fb923c',
   },
 ]
 
@@ -46,7 +57,7 @@ export default function ShowcaseSection() {
           {SHOWCASE_ITEMS.map((item) => (
             <div
               key={item.title}
-              className="rounded-2xl overflow-hidden bg-[#1A1A1A] border border-[#222] group hover:border-[#444] transition"
+              className="rounded-2xl overflow-hidden border group transition" style={{ background: 'var(--bg-surface)', borderColor: 'var(--border-subtle)' }}
             >
               {/* Video/Placeholder area */}
               <div className="relative aspect-[9/16] max-h-[420px] overflow-hidden">
@@ -60,11 +71,12 @@ export default function ShowcaseSection() {
                     src={item.video}
                   />
                 ) : (
-                  <div className={`w-full h-full bg-gradient-to-br ${item.gradient} flex flex-col items-center justify-center`}>
+                  <div className={`w-full h-full bg-gradient-to-br ${item.gradient} flex flex-col items-center justify-center relative`}>
                     <span className="text-6xl opacity-30 group-hover:opacity-50 transition">{item.icon}</span>
                     <span className="text-xs text-gray-500 mt-4 opacity-0 group-hover:opacity-100 transition">
                       Em breve
                     </span>
+                    <ShowcasePretextOverlay phrase={item.phrase} style={item.captionStyle} accent={item.captionAccent} />
                   </div>
                 )}
 

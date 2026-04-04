@@ -119,7 +119,7 @@ export default function GenerateForm({ onJobComplete }: GenerateFormProps) {
           onKeyDown={(e) => { if (e.key === 'Enter') handleGenerate() }}
           placeholder="Ex: 5 curiosidades sobre o oceano profundo"
           disabled={generating}
-          className="w-full px-4 py-3 text-sm rounded-xl border border-[#333] bg-[#1A1A1A] text-gray-200 placeholder:text-gray-600 outline-none focus:border-purple-500/50 transition disabled:opacity-50"
+          className="w-full px-4 py-3 text-sm rounded-xl border border-[var(--border-default)] bg-[var(--bg-surface)] text-[var(--text-primary)] placeholder:text-gray-600 outline-none focus:border-purple-500/50 transition disabled:opacity-50"
         />
       </div>
 
@@ -151,7 +151,7 @@ export default function GenerateForm({ onJobComplete }: GenerateFormProps) {
 
       {/* Progress */}
       {activeJob && generating && (
-        <div className="p-4 rounded-xl bg-[#1A1A1A] border border-purple-500/20 mb-4">
+        <div className="p-4 rounded-xl bg-[var(--bg-surface)] border border-purple-500/20 mb-4">
           <div className="flex justify-between mb-2">
             <span className="text-xs text-gray-300">
               {activeJob.current_step ? STEP_LABELS[activeJob.current_step] || activeJob.current_step : 'Iniciando...'}
@@ -199,7 +199,7 @@ export default function GenerateForm({ onJobComplete }: GenerateFormProps) {
       {/* Credits modal placeholder */}
       {showCreditsModal && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center">
-          <div className="bg-[#1A1A1A] border border-[#333] rounded-2xl p-8 max-w-sm w-full mx-4 text-center">
+          <div className="bg-[var(--bg-surface)] border border-[var(--border-default)] rounded-2xl p-8 max-w-sm w-full mx-4 text-center">
             <div className="text-4xl mb-4">💰</div>
             <h3 className="text-lg font-bold mb-2">Seus créditos acabaram</h3>
             <p className="text-sm text-gray-400 mb-1">Plano: <span className="text-gray-300 capitalize">{user?.plan || 'free'}</span></p>

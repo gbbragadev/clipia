@@ -26,7 +26,7 @@ export default function StyleSelector({ selected, onSelect, disabled }: StyleSel
           className={`p-3 rounded-xl border text-center transition cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed ${
             selected === s.value
               ? 'bg-purple-500/15 border-purple-500'
-              : 'bg-[#1A1A1A] border-[#333] hover:border-[#555]'
+              : 'bg-[var(--bg-surface)] border-[var(--border-default)] hover:border-[var(--border-hover)]'
           }`}
         >
           <div className="text-xl mb-1">{s.icon}</div>

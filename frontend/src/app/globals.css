@@ -1,34 +1,87 @@
 @import "tailwindcss";
 
 @theme inline {
-  --color-background: #050509;
-  --color-foreground: #f1f5f9;
+  --color-background: var(--bg-base);
+  --color-foreground: var(--text-primary);
   --font-sans: var(--font-inter);
   --font-display: var(--font-display);
+}
+
+/* ── Theme Variables ── */
+:root, [data-theme="dark"] {
+  --bg-base: #0a0a12;
+  --bg-raised: #111118;
+  --bg-surface: #1A1A22;
+  --bg-surface-hover: #24242e;
+  --bg-nav: rgba(6, 6, 11, 0.7);
+  --border-subtle: rgba(255, 255, 255, 0.06);
+  --border-default: #333;
+  --border-hover: #555;
+  --text-primary: #f1f5f9;
+  --text-secondary: #94a3b8;
+  --text-tertiary: #666;
+  --text-muted: #555;
+  --surface-hover: rgba(255, 255, 255, 0.05);
+  --card-bg: rgba(255, 255, 255, 0.03);
+  --card-bg-hover: rgba(255, 255, 255, 0.06);
+  --card-border: rgba(255, 255, 255, 0.06);
+  --input-bg: #1A1A22;
+  --gradient-ambient-1: rgba(88, 28, 135, 0.12);
+  --gradient-ambient-2: rgba(37, 99, 235, 0.06);
+  --gradient-ambient-3: rgba(139, 92, 246, 0.05);
+  --logo-text: #fff;
+  --overlay-bg: rgba(0, 0, 0, 0.6);
+}
+
+[data-theme="light"] {
+  --bg-base: #f8f9fc;
+  --bg-raised: #ffffff;
+  --bg-surface: #f0f1f5;
+  --bg-surface-hover: #e8e9ee;
+  --bg-nav: rgba(255, 255, 255, 0.85);
+  --border-subtle: rgba(0, 0, 0, 0.06);
+  --border-default: #d4d4d8;
+  --border-hover: #a1a1aa;
+  --text-primary: #18181b;
+  --text-secondary: #52525b;
+  --text-tertiary: #a1a1aa;
+  --text-muted: #d4d4d8;
+  --surface-hover: rgba(0, 0, 0, 0.04);
+  --card-bg: rgba(255, 255, 255, 0.7);
+  --card-bg-hover: rgba(255, 255, 255, 0.9);
+  --card-border: rgba(0, 0, 0, 0.08);
+  --input-bg: #ffffff;
+  --gradient-ambient-1: rgba(139, 92, 246, 0.06);
+  --gradient-ambient-2: rgba(59, 130, 246, 0.04);
+  --gradient-ambient-3: rgba(139, 92, 246, 0.03);
+  --logo-text: #18181b;
+  --overlay-bg: rgba(255, 255, 255, 0.7);
 }
 
 * { box-sizing: border-box; }
 html { scroll-behavior: smooth; }
 
 body {
-  background: #0a0a12;
-  color: #f1f5f9;
+  background: var(--bg-base);
+  color: var(--text-primary);
   font-family: var(--font-sans), system-ui, -apple-system, sans-serif;
   overflow-x: hidden;
+  transition: background 0.3s, color 0.3s;
 }
 
-/* Page ambient gradient - not pure black */
+/* Page ambient gradient */
 body::before {
   content: '';
   position: fixed;
   inset: 0;
   z-index: -1;
   background:
-    radial-gradient(ellipse 80% 40% at 50% 0%, rgba(88, 28, 135, 0.12), transparent 70%),
-    radial-gradient(ellipse 60% 40% at 100% 60%, rgba(37, 99, 235, 0.06), transparent 70%),
-    radial-gradient(ellipse 50% 30% at 0% 100%, rgba(139, 92, 246, 0.05), transparent 70%),
-    #0a0a12;
+    radial-gradient(ellipse 80% 40% at 50% 0%, var(--gradient-ambient-1), transparent 70%),
+    radial-gradient(ellipse 60% 40% at 100% 60%, var(--gradient-ambient-2), transparent 70%),
+    radial-gradient(ellipse 50% 30% at 0% 100%, var(--gradient-ambient-3), transparent 70%),
+    var(--bg-base);
   pointer-events: none;
+  transition: background 0.3s;
 }
 
 /* Hero mesh gradient background */
@@ -42,14 +95,14 @@ body::before {
 
 /* Glass cards */
 .card {
-  background: rgba(255, 255, 255, 0.03);
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  background: var(--card-bg);
+  border: 1px solid var(--card-border);
   border-radius: 16px;
   backdrop-filter: blur(8px);
   transition: all 0.2s;
 }
 .card:hover {
-  background: rgba(255, 255, 255, 0.06);
+  background: var(--card-bg-hover);
   border-color: rgba(139, 92, 246, 0.2);
 }
 
@@ -70,15 +123,15 @@ body::before {
 .btn-primary:hover { opacity: 0.9; transform: translateY(-1px); }
 
 .btn-outline {
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  color: #94a3b8;
+  border: 1px solid var(--border-subtle);
+  color: var(--text-secondary);
   padding: 14px 28px;
   border-radius: 12px;
   transition: all 0.2s;
   text-decoration: none;
   font-size: 15px;
 }
-.btn-outline:hover { border-color: rgba(255, 255, 255, 0.25); color: white; }
+.btn-outline:hover { border-color: var(--border-hover); color: var(--text-primary); }
 
 /* Filmstrip */
 .filmstrip-border {

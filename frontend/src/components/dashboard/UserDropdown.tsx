@@ -35,20 +35,20 @@ export default function UserDropdown({ name, onLogout }: UserDropdownProps) {
       </button>
 
       {open && (
-        <div className="absolute right-0 mt-2 w-48 rounded-xl bg-[#1A1A1A]/95 backdrop-blur-lg border border-white/10 shadow-xl py-1 z-50">
-          <div className="px-4 py-2 border-b border-white/5">
-            <p className="text-sm font-medium text-gray-200 truncate">{name}</p>
+        <div className="absolute right-0 mt-2 w-48 rounded-xl backdrop-blur-lg shadow-xl py-1 z-50" style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-subtle)' }}>
+          <div className="px-4 py-2" style={{ borderBottom: '1px solid var(--border-subtle)' }}>
+            <p className="text-sm font-medium truncate" style={{ color: 'var(--text-primary)' }}>{name}</p>
           </div>
           <a
             href="/dashboard"
-            className="block px-4 py-2 text-sm text-gray-300 hover:bg-white/5 transition"
+            className="block px-4 py-2 text-sm transition hover:opacity-80" style={{ color: 'var(--text-secondary)' }}
           >
             Dashboard
           </a>
-          <div className="border-t border-white/5 mt-1">
+          <div style={{ borderTop: '1px solid var(--border-subtle)' }} className="mt-1">
             <button
               onClick={() => { setOpen(false); onLogout() }}
-              className="w-full text-left px-4 py-2 text-sm text-gray-400 hover:bg-white/5 hover:text-red-400 transition cursor-pointer"
+              className="w-full text-left px-4 py-2 text-sm hover:text-red-400 transition cursor-pointer" style={{ color: 'var(--text-tertiary)' }}
             >
               Sair
             </button>
