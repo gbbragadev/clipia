@@ -336,20 +336,29 @@ async def list_jobs(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """List all jobs for the current user."""
+    """List all jobs for the current user, with real-time status from Redis."""
     result = await db.execute(
         select(Job).where(Job.user_id == user.id).order_by(Job.created_at.desc()).limit(50)
     )
     jobs = result.scalars().all()
-    return [
-        {
+    items = []
+    for j in jobs:
+        # Redis has the real-time status; DB may be stale
+        redis_data = _redis.hgetall(f"job:{j.id}")
+        status = redis_data.get("status", j.status) if redis_data else j.status
+        has_video = j.video_url or (Path(settings.STORAGE_DIR) / "output" / f"{j.id}.mp4").exists()
+        # Treat completed jobs as editable if they have composition files
+        if status == "completed":
+            job_dir = Path(settings.STORAGE_DIR) / "jobs" / str(j.id)
+            if (job_dir / "script.json").exists():
+                status = "editable"
+        items.append({
             "job_id": str(j.id),
             "topic": j.topic,
             "style": j.style,
-            "status": j.status,
+            "status": status,
             "duration_target": j.duration_target,
             "created_at": j.created_at.isoformat() if j.created_at else None,
-            "download_url": f"/api/v1/jobs/{j.id}/download" if j.video_url else None,
-        }
-        for j in jobs
-    ]
+            "download_url": f"/api/v1/jobs/{j.id}/download" if has_video else None,
+        })
+    return items
