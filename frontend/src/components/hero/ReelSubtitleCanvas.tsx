@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { prepareWithSegments, layoutWithLines } from '@chenglou/pretext'
 
 interface ReelSubtitleCanvasProps {
@@ -12,11 +12,11 @@ interface ReelSubtitleCanvasProps {
 const FONT = '700 15px Inter, system-ui, sans-serif'
 const LINE_HEIGHT = 20
 const PADDING_X = 18
-const CANVAS_HEIGHT = 50
 const FONT_SIZE = 15
 
 export default function ReelSubtitleCanvas({ words, activeWordIndex, accent }: ReelSubtitleCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
+  const [canvasHeight, setCanvasHeight] = useState(70)
 
   useEffect(() => {
     const canvas = canvasRef.current
@@ -26,8 +26,21 @@ export default function ReelSubtitleCanvas({ words, activeWordIndex, accent }: R
     if (!parent) return
 
     const dpr = window.devicePixelRatio || 1
-    const w = parent.clientWidth - 48 // right: 48 offset
-    const h = CANVAS_HEIGHT
+    const w = parent.clientWidth - 48
+    const text = words.join(' ')
+    const maxWidth = w - PADDING_X * 2
+
+    // Pre-compute layout to determine needed height
+    const prepared = prepareWithSegments(text, FONT)
+    const layout = layoutWithLines(prepared, maxWidth, LINE_HEIGHT)
+    const totalLines = layout.lines.length
+    const neededHeight = Math.max(50, totalLines * LINE_HEIGHT + 16) // 8px padding top+bottom
+
+    if (neededHeight !== canvasHeight) {
+      setCanvasHeight(neededHeight)
+    }
+
+    const h = neededHeight
 
     canvas.width = w * dpr
     canvas.height = h * dpr
@@ -40,21 +53,13 @@ export default function ReelSubtitleCanvas({ words, activeWordIndex, accent }: R
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
     ctx.clearRect(0, 0, w, h)
 
-    const text = words.join(' ')
-    const maxWidth = w - PADDING_X * 2
-
-    const prepared = prepareWithSegments(text, FONT)
-    const layout = layoutWithLines(prepared, maxWidth, LINE_HEIGHT)
-
-    // Center the block vertically
-    const totalLines = layout.lines.length
+    // Center the block vertically within the (now adequate) canvas
     const blockHeight = totalLines * LINE_HEIGHT
     const startY = (h - blockHeight) / 2
 
     ctx.textBaseline = 'top'
     ctx.font = FONT
 
-    // Track global word index across lines
     let globalWordIdx = 0
 
     for (let li = 0; li < layout.lines.length; li++) {
@@ -63,7 +68,6 @@ export default function ReelSubtitleCanvas({ words, activeWordIndex, accent }: R
       const lineText = line.text.trim()
       const lineWords = lineText.split(/\s+/)
 
-      // Center line horizontally
       const x0 = PADDING_X + (maxWidth - line.width) / 2
       let x = x0
 
@@ -74,7 +78,6 @@ export default function ReelSubtitleCanvas({ words, activeWordIndex, accent }: R
         const wordWidth = ctx.measureText(word).width
         const spaceWidth = lw < lineWords.length - 1 ? ctx.measureText(' ').width : 0
 
-        // Determine style based on word index
         let fillColor: string
         let opacity: number
         const isActive = globalWordIdx === activeWordIndex
@@ -92,7 +95,6 @@ export default function ReelSubtitleCanvas({ words, activeWordIndex, accent }: R
 
         ctx.globalAlpha = opacity
 
-        // Black stroke for readability (text shadow)
         ctx.strokeStyle = 'black'
         ctx.lineWidth = 3
         ctx.lineJoin = 'round'
@@ -100,17 +102,14 @@ export default function ReelSubtitleCanvas({ words, activeWordIndex, accent }: R
         ctx.shadowBlur = 0
         ctx.strokeText(word, x, lineY)
 
-        // Glow for active word
         if (isActive) {
           ctx.shadowColor = accent
           ctx.shadowBlur = 12
         }
 
-        // Fill text
         ctx.fillStyle = fillColor
         ctx.fillText(word, x, lineY)
 
-        // Underline bar for active word
         if (isActive) {
           ctx.shadowColor = 'transparent'
           ctx.shadowBlur = 0
@@ -118,7 +117,6 @@ export default function ReelSubtitleCanvas({ words, activeWordIndex, accent }: R
           ctx.fillRect(x, lineY + FONT_SIZE + 2, wordWidth, 2)
         }
 
-        // Reset shadow
         ctx.shadowColor = 'transparent'
         ctx.shadowBlur = 0
 
@@ -128,7 +126,7 @@ export default function ReelSubtitleCanvas({ words, activeWordIndex, accent }: R
     }
 
     ctx.globalAlpha = 1
-  }, [words, activeWordIndex, accent])
+  }, [words, activeWordIndex, accent, canvasHeight])
 
   return (
     <canvas
@@ -138,7 +136,7 @@ export default function ReelSubtitleCanvas({ words, activeWordIndex, accent }: R
         bottom: 95,
         left: 0,
         right: 48,
-        height: CANVAS_HEIGHT,
+        height: canvasHeight,
         pointerEvents: 'none',
         zIndex: 2,
       }}

@@ -1,5 +1,6 @@
 'use client'
 
+import { useRef, useCallback } from 'react'
 import ShowcasePretextOverlay from '@/components/ShowcasePretextOverlay'
 
 const SHOWCASE_ITEMS = [
@@ -35,6 +36,78 @@ const SHOWCASE_ITEMS = [
   },
 ]
 
+function ShowcaseCard({ item }: { item: (typeof SHOWCASE_ITEMS)[number] }) {
+  const videoRef = useRef<HTMLVideoElement>(null)
+
+  const handleEnter = useCallback(() => {
+    const v = videoRef.current
+    if (v) {
+      v.muted = false
+      v.volume = 0.6
+    }
+  }, [])
+
+  const handleLeave = useCallback(() => {
+    const v = videoRef.current
+    if (v) {
+      v.muted = true
+    }
+  }, [])
+
+  return (
+    <div
+      className="rounded-2xl overflow-hidden border group transition cursor-pointer"
+      style={{ background: 'var(--bg-surface)', borderColor: 'var(--border-subtle)' }}
+      onMouseEnter={handleEnter}
+      onMouseLeave={handleLeave}
+      onTouchStart={handleEnter}
+      onTouchEnd={handleLeave}
+    >
+      <div className="relative aspect-[9/16] overflow-hidden">
+        {item.video ? (
+          <video
+            ref={videoRef}
+            autoPlay
+            muted
+            loop
+            playsInline
+            className="w-full h-full object-cover"
+            src={item.video}
+          />
+        ) : (
+          <div className={`w-full h-full bg-gradient-to-br ${item.gradient} flex flex-col items-center justify-center relative`}>
+            <span className="text-6xl opacity-30 group-hover:opacity-50 transition">{item.icon}</span>
+            <span className="text-xs text-gray-500 mt-4 opacity-0 group-hover:opacity-100 transition">
+              Em breve
+            </span>
+            <ShowcasePretextOverlay phrase={item.phrase} style={item.captionStyle} accent={item.captionAccent} />
+          </div>
+        )}
+
+        {/* Hover audio hint */}
+        {item.video && (
+          <div className="absolute top-3 right-3 z-10 opacity-0 group-hover:opacity-100 transition">
+            <div className="w-7 h-7 rounded-full bg-black/50 backdrop-blur-sm flex items-center justify-center">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="white">
+                <polygon points="11,5 6,9 2,9 2,15 6,15 11,19" />
+                <path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" />
+              </svg>
+            </div>
+          </div>
+        )}
+
+        {/* Bottom overlay */}
+        <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 to-transparent p-4">
+          <p className="text-sm font-medium text-white leading-snug">{item.title}</p>
+          <span className="inline-block mt-1.5 text-[10px] px-2 py-0.5 rounded-full bg-purple-500/30 text-purple-300">
+            {item.template}
+          </span>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 export default function ShowcaseSection() {
   return (
     <section id="showcase" className="py-24 px-4">
@@ -55,40 +128,7 @@ export default function ShowcaseSection() {
         {/* Grid */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
           {SHOWCASE_ITEMS.map((item) => (
-            <div
-              key={item.title}
-              className="rounded-2xl overflow-hidden border group transition" style={{ background: 'var(--bg-surface)', borderColor: 'var(--border-subtle)' }}
-            >
-              {/* Video/Placeholder area */}
-              <div className="relative aspect-[9/16] max-h-[420px] overflow-hidden">
-                {item.video ? (
-                  <video
-                    autoPlay
-                    muted
-                    loop
-                    playsInline
-                    className="w-full h-full object-cover"
-                    src={item.video}
-                  />
-                ) : (
-                  <div className={`w-full h-full bg-gradient-to-br ${item.gradient} flex flex-col items-center justify-center relative`}>
-                    <span className="text-6xl opacity-30 group-hover:opacity-50 transition">{item.icon}</span>
-                    <span className="text-xs text-gray-500 mt-4 opacity-0 group-hover:opacity-100 transition">
-                      Em breve
-                    </span>
-                    <ShowcasePretextOverlay phrase={item.phrase} style={item.captionStyle} accent={item.captionAccent} />
-                  </div>
-                )}
-
-                {/* Bottom overlay */}
-                <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 to-transparent p-4">
-                  <p className="text-sm font-medium text-white leading-snug">{item.title}</p>
-                  <span className="inline-block mt-1.5 text-[10px] px-2 py-0.5 rounded-full bg-purple-500/30 text-purple-300">
-                    {item.template}
-                  </span>
-                </div>
-              </div>
-            </div>
+            <ShowcaseCard key={item.title} item={item} />
           ))}
         </div>
 
