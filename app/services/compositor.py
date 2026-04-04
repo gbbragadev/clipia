@@ -46,7 +46,7 @@ def compose_short(
     if background.duration < total_duration:
         background = background.with_duration(total_duration)
 
-    subtitle_clips = build_subtitle_clips(words)
+    subtitle_clips = build_subtitle_clips(words, total_duration=total_duration)
 
     final = CompositeVideoClip(
         [background] + subtitle_clips,

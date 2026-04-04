@@ -10,7 +10,7 @@ def group_words(words: list[dict], max_words: int = 3) -> list[list[dict]]:
     return chunks
 
 
-def build_subtitle_clips(words: list[dict]):
+def build_subtitle_clips(words: list[dict], total_duration: float = 0):
     """Retorna lista de TextClip do MoviePy para overlay de legendas."""
     from moviepy import TextClip
 
@@ -21,20 +21,31 @@ def build_subtitle_clips(words: list[dict]):
         start = chunk[0]["start"]
         end = chunk[-1]["end"]
 
-        txt = (
-            TextClip(
-                text=text,
-                font=str(settings.FONT_PATH),
-                font_size=70,
-                color="white",
-                stroke_color="black",
-                stroke_width=3,
-                method="caption",
-                size=(900, None),
+        if end <= start:
+            continue
+        if total_duration > 0 and start >= total_duration:
+            break
+
+        if total_duration > 0:
+            end = min(end, total_duration - 0.01)
+
+        try:
+            txt = (
+                TextClip(
+                    text=text,
+                    font=str(settings.FONT_PATH),
+                    font_size=70,
+                    color="white",
+                    stroke_color="black",
+                    stroke_width=3,
+                    method="caption",
+                    size=(900, None),
+                )
+                .with_start(start)
+                .with_end(end)
+                .with_position(("center", 1400))
             )
-            .with_start(start)
-            .with_end(end)
-            .with_position(("center", 1400))
-        )
-        clips.append(txt)
+            clips.append(txt)
+        except Exception:
+            continue
     return clips
