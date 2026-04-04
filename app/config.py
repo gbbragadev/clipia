@@ -9,8 +9,16 @@ class Settings(BaseSettings):
     ANTHROPIC_API_KEY: str = ""
     PEXELS_API_KEY: str = ""
 
+    # Database
+    DATABASE_URL: str = "postgresql+asyncpg://clipia:clipia_dev@localhost:5435/clipia"
+
+    # Auth
+    JWT_SECRET: str = "dev-secret-change-in-production"
+    JWT_ALGORITHM: str = "HS256"
+    JWT_EXPIRE_MINUTES: int = 1440  # 24 hours
+
     # Redis
-    REDIS_URL: str = "redis://localhost:6379/0"
+    REDIS_URL: str = "redis://localhost:6382/0"
 
     # Paths
     STORAGE_DIR: Path = BASE_DIR / "storage"
