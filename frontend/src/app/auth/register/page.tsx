@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { useAuth } from "@/contexts/AuthContext";
+import Logo from "@/components/brand/Logo";
 
 export default function RegisterPage() {
   const [name, setName] = useState("");
@@ -35,11 +36,11 @@ export default function RegisterPage() {
   return (
     <div className="min-h-screen flex items-center justify-center px-4">
       <div className="card w-full max-w-md p-8">
-        <h1 className="text-2xl font-bold text-center mb-2">
-          Criar conta no{" "}
-          <span className="bg-gradient-to-r from-purple-500 to-blue-500 bg-clip-text text-transparent">
-            ClipIA
-          </span>
+        <div className="flex justify-center mb-4">
+          <Logo size="lg" />
+        </div>
+        <h1 className="text-xl font-semibold text-center mb-2 text-gray-200">
+          Crie sua conta
         </h1>
         <p className="text-slate-400 text-center text-sm mb-8">
           Ganhe 2 créditos grátis para começar

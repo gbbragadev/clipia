@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import dynamic from 'next/dynamic'
 import { useEditor } from '@/contexts/EditorContext'
+import Logo from '@/components/brand/Logo'
 import { EditorTimeline } from './EditorTimeline'
 import { SceneGrid } from './SceneGrid'
 import { SubtitleEditor } from './SubtitleEditor'
@@ -63,7 +64,7 @@ export function EditorLayout() {
       {/* Row 1: Header */}
       <header className="editor-header">
         <div className="editor-header__left">
-          <a href="/" className="editor-header__logo">ClipIA</a>
+          <a href="/dashboard" className="editor-header__logo"><Logo size="sm" /></a>
           <span className="editor-header__sep">/</span>
           <span className="editor-header__title">{composition?.title || 'Sem titulo'}</span>
         </div>
