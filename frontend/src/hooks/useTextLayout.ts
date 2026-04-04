@@ -3,17 +3,19 @@
 import { useEffect, useRef, useCallback } from 'react'
 import {
   prepareWithSegments,
+  layout,
   layoutWithLines,
   walkLineRanges,
   layoutNextLine,
   type PreparedTextWithSegments,
+  type LayoutResult,
   type LayoutLinesResult,
   type LayoutLineRange,
   type LayoutLine,
   type LayoutCursor,
 } from '@chenglou/pretext'
 
-export type { PreparedTextWithSegments, LayoutLinesResult, LayoutLineRange, LayoutLine, LayoutCursor }
+export type { PreparedTextWithSegments, LayoutResult, LayoutLinesResult, LayoutLineRange, LayoutLine, LayoutCursor }
 
 export function useTextLayout(text: string, font: string) {
   const preparedRef = useRef<PreparedTextWithSegments | null>(null)
@@ -51,10 +53,16 @@ export function useTextLayout(text: string, font: string) {
     return layoutNextLine(preparedRef.current, start, maxWidth)
   }, [])
 
+  const getSimpleLayout = useCallback((maxWidth: number, lineHeight: number): LayoutResult | null => {
+    if (!preparedRef.current) return null
+    return layout(preparedRef.current, maxWidth, lineHeight)
+  }, [])
+
   return {
     prepared: preparedRef,
     getLayout,
     getLineRanges,
     getNextLine,
+    getSimpleLayout,
   }
 }
