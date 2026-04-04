@@ -5,10 +5,11 @@ import ThemeToggle from '@/components/ThemeToggle'
 
 interface UserDropdownProps {
   name: string
+  plan?: string
   onLogout: () => void
 }
 
-export default function UserDropdown({ name, onLogout }: UserDropdownProps) {
+export default function UserDropdown({ name, plan, onLogout }: UserDropdownProps) {
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
 
@@ -39,6 +40,17 @@ export default function UserDropdown({ name, onLogout }: UserDropdownProps) {
         <div className="absolute right-0 mt-2 w-52 rounded-xl backdrop-blur-lg shadow-xl py-1 z-50" style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-subtle)' }}>
           <div className="px-4 py-2.5" style={{ borderBottom: '1px solid var(--border-subtle)' }}>
             <p className="text-sm font-medium truncate" style={{ color: 'var(--text-primary)' }}>{name}</p>
+            {plan && (
+              <span
+                className="inline-block mt-1 px-2 py-0.5 rounded text-[10px] font-semibold uppercase"
+                style={{
+                  background: plan === 'free' ? 'rgba(148,163,184,0.15)' : 'rgba(168,85,247,0.15)',
+                  color: plan === 'free' ? '#94a3b8' : '#c084fc',
+                }}
+              >
+                {plan}
+              </span>
+            )}
           </div>
           <a
             href="/dashboard"
@@ -46,6 +58,13 @@ export default function UserDropdown({ name, onLogout }: UserDropdownProps) {
             style={{ color: 'var(--text-secondary)' }}
           >
             Dashboard
+          </a>
+          <a
+            href="/dashboard/credits"
+            className="block px-4 py-2 text-sm transition hover:opacity-80"
+            style={{ color: 'var(--text-secondary)' }}
+          >
+            Meus Créditos
           </a>
           <div className="flex items-center justify-between px-4 py-2" style={{ borderTop: '1px solid var(--border-subtle)' }}>
             <span className="text-xs" style={{ color: 'var(--text-tertiary)' }}>Tema</span>

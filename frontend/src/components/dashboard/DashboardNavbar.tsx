@@ -12,14 +12,16 @@ export default function DashboardNavbar() {
     <nav className="fixed top-0 left-0 right-0 z-40">
       <div className="backdrop-blur-lg border-b" style={{ background: 'var(--bg-nav)', borderColor: 'var(--border-subtle)' }}>
         <div className="max-w-6xl mx-auto px-4 h-14 flex items-center justify-between">
-          <a href="/dashboard">
+          <a href="/">
             <Logo size="sm" />
           </a>
 
           {user && (
             <div className="flex items-center gap-3">
-              <CreditsBadge credits={user.credits} />
-              <UserDropdown name={user.name} onLogout={logout} />
+              <a href="/dashboard/credits" className="transition-opacity hover:opacity-80">
+                <CreditsBadge credits={user.credits} />
+              </a>
+              <UserDropdown name={user.name} plan={user.plan} onLogout={logout} />
             </div>
           )}
         </div>

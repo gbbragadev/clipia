@@ -2,7 +2,9 @@
 
 import { useState, useCallback, useEffect } from 'react'
 import { useEditor } from '@/contexts/EditorContext'
+import { useAuth } from '@/contexts/AuthContext'
 import { getToken } from '@/lib/auth'
+import ExportCostBanner from '@/components/dashboard/ExportCostBanner'
 
 type RenderStatus = 'ready' | 'rendering' | 'updated' | 'error'
 
@@ -15,6 +17,7 @@ interface PlatformCaption {
 
 export function ExportPanel({ onClose }: { onClose: () => void }) {
   const { composition, jobId } = useEditor()
+  const { user } = useAuth()
   const [renderStatus, setRenderStatus] = useState<RenderStatus>('ready')
   const [error, setError] = useState<string | null>(null)
   const [copiedIndex, setCopiedIndex] = useState<number | null>(null)
@@ -128,6 +131,16 @@ export function ExportPanel({ onClose }: { onClose: () => void }) {
         </button>
 
         <h2 style={{ color: '#E8E8E8', margin: '0 0 20px', fontSize: 20 }}>Exportar Video</h2>
+
+        {/* Cost banner */}
+        {(composition?.pendingCredits ?? 0) > 0 && (
+          <div style={{ marginBottom: 12 }}>
+            <ExportCostBanner
+              pendingCredits={composition?.pendingCredits ?? 0}
+              userCredits={user?.credits ?? 0}
+            />
+          </div>
+        )}
 
         {/* Download — always available */}
         <a

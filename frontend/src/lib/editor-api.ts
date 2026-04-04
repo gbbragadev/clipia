@@ -38,6 +38,7 @@ export async function fetchComposition(jobId: string): Promise<CompositionData> 
     fps: number
     width: number
     height: number
+    pending_credits: number
   }>(`${API_BASE}/jobs/${jobId}/composition`)
 
   // Restore from saved editor_state if available
@@ -64,6 +65,7 @@ export async function fetchComposition(jobId: string): Promise<CompositionData> 
     isRendering: false,
     templateId: data.template_id || 'stock_narration',
     layoutType: (data.layout_type as import('@/remotion/types').LayoutType) || 'fullscreen',
+    pendingCredits: data.pending_credits || 0,
   }
 }
 

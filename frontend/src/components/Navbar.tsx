@@ -20,16 +20,22 @@ export default function Navbar() {
             <a href="#como-funciona" className="hover:opacity-80 transition" style={{ color: 'var(--text-secondary)' }}>Como funciona</a>
             <ThemeToggle />
             {user ? (
-              <div className="flex items-center gap-4">
-                <a href="/dashboard" className="font-medium hover:text-purple-400 transition" style={{ color: 'var(--text-primary)' }}>
+              <div className="flex items-center gap-3">
+                {/* Avatar + credits */}
+                <div className="flex items-center gap-2 px-3 py-1.5 rounded-full" style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-subtle)' }}>
+                  <span className="w-6 h-6 rounded-full bg-gradient-to-br from-purple-600 to-blue-600 flex items-center justify-center text-white text-[10px] font-semibold">
+                    {user.name?.charAt(0).toUpperCase() || '?'}
+                  </span>
+                  <span className="text-purple-400 font-semibold text-xs">{user.credits}</span>
+                  <span className="text-xs" style={{ color: 'var(--text-tertiary)' }}>créditos</span>
+                </div>
+                {/* Dashboard button */}
+                <a
+                  href="/dashboard"
+                  className="px-4 py-2 rounded-lg bg-gradient-to-r from-purple-600 to-blue-600 text-white text-sm font-medium hover:opacity-90 transition"
+                >
                   Dashboard
                 </a>
-                <span style={{ color: 'var(--text-secondary)' }}>
-                  <span className="text-purple-400 font-semibold">{user.credits}</span> créditos
-                </span>
-                <button onClick={logout} className="hover:text-red-400 transition cursor-pointer" style={{ color: 'var(--text-tertiary)' }}>
-                  Sair
-                </button>
               </div>
             ) : (
               <a href="/auth/login" className="px-4 py-2 rounded-lg bg-gradient-to-r from-purple-600 to-blue-600 text-white hover:opacity-90 transition">

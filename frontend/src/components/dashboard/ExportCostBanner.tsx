@@ -1,0 +1,44 @@
+'use client'
+
+interface ExportCostBannerProps {
+  pendingCredits: number
+  userCredits: number
+}
+
+export default function ExportCostBanner({ pendingCredits, userCredits }: ExportCostBannerProps) {
+  if (pendingCredits <= 0) return null
+
+  const canAfford = userCredits >= pendingCredits
+
+  return (
+    <div
+      className="flex items-center justify-between px-4 py-3 rounded-xl text-sm"
+      style={{
+        background: canAfford ? 'rgba(168, 85, 247, 0.1)' : 'rgba(239, 68, 68, 0.1)',
+        border: `1px solid ${canAfford ? 'rgba(168, 85, 247, 0.25)' : 'rgba(239, 68, 68, 0.25)'}`,
+      }}
+    >
+      <div>
+        <span style={{ color: canAfford ? '#c084fc' : '#fca5a5' }}>
+          Custo de edição IA: <strong>{pendingCredits}</strong> crédito{pendingCredits !== 1 ? 's' : ''}
+        </span>
+        <span className="ml-2" style={{ color: 'var(--text-tertiary)' }}>
+          (Você tem {userCredits})
+        </span>
+      </div>
+      {!canAfford && (
+        <a
+          href="/dashboard/credits"
+          className="px-3 py-1 rounded-lg text-xs font-semibold"
+          style={{
+            background: 'linear-gradient(135deg, #a855f7, #6366f1)',
+            color: '#fff',
+            textDecoration: 'none',
+          }}
+        >
+          Comprar créditos
+        </a>
+      )}
+    </div>
+  )
+}

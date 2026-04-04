@@ -68,6 +68,7 @@ export interface CompositionData {
   isRendering?: boolean
   templateId?: string
   layoutType?: LayoutType
+  pendingCredits?: number
 }
 
 export const DEFAULT_SUBTITLE_STYLE: SubtitleStyle = {

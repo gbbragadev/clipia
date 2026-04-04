@@ -193,6 +193,7 @@ async def get_composition(job_id: str, db: AsyncSession = Depends(get_db)):
         editor_state=editor_state,
         template_id=job_template_id,
         layout_type=tmpl.layout.type,
+        pending_credits=job.pending_credits if job else 0.0,
     )
 
 
@@ -293,8 +294,18 @@ async def ai_suggest(
     job_id: str,
     req: AISuggestRequest,
     user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
 ):
-    """Get AI suggestions for script improvement."""
+    """Get AI suggestions for script improvement. Acumula 0.5 credito por chamada."""
+    # Acumular custo no job
+    result_job = await db.execute(select(Job).where(Job.id == job_id, Job.user_id == user.id))
+    job = result_job.scalar_one_or_none()
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    job.pending_credits = (job.pending_credits or 0) + 0.5
+    await db.commit()
+
     import anthropic
 
     client = anthropic.Anthropic(api_key=settings.ANTHROPIC_API_KEY)
@@ -345,6 +356,7 @@ Regras:
     except json.JSONDecodeError:
         result = {"suggestions": [], "general_feedback": raw}
 
+    result["pending_credits"] = job.pending_credits
     return result
 
 
@@ -360,6 +372,21 @@ async def render_video(
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
 
+    # Debitar pending_credits (custo acumulado de sugestoes IA)
+    pending = job.pending_credits or 0.0
+    if pending > 0:
+        # Refresh user credits
+        user_result = await db.execute(select(User).where(User.id == user.id))
+        fresh_user = user_result.scalar_one()
+        if fresh_user.credits < pending:
+            raise HTTPException(
+                status_code=402,
+                detail=f"Créditos insuficientes para exportar. Custo acumulado: {pending}. Seus créditos: {fresh_user.credits}",
+            )
+        fresh_user.credits = int(fresh_user.credits - pending)
+        job.pending_credits = 0.0
+        await db.commit()
+
     job_dir = Path(settings.STORAGE_DIR) / "jobs" / job_id
     if not job_dir.exists():
         raise HTTPException(status_code=404, detail="Job files not found")
@@ -371,6 +398,29 @@ async def render_video(
         "status": "rendering",
         "message": "Re-render iniciado com edicoes atuais.",
     }
+
+
+@router.post("/jobs/{job_id}/reset")
+async def reset_job(
+    job_id: str,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Reset job to original state. Costs 1 credit, clears pending_credits."""
+    result = await db.execute(select(Job).where(Job.id == job_id, Job.user_id == user.id))
+    job = result.scalar_one_or_none()
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    if user.credits < 1:
+        raise HTTPException(status_code=402, detail="Créditos insuficientes para resetar")
+
+    user.credits -= 1
+    job.pending_credits = 0.0
+    job.editor_state = None
+    await db.commit()
+
+    return {"status": "reset", "credits_remaining": user.credits}
 
 
 @router.get("/jobs/{job_id}/status")

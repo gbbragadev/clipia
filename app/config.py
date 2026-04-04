@@ -38,6 +38,11 @@ class Settings(BaseSettings):
     # Claude
     CLAUDE_MODEL: str = "claude-sonnet-4-6"
 
+    # MercadoPago
+    MP_ACCESS_TOKEN: str = ""
+    MP_WEBHOOK_SECRET: str = ""
+    FRONTEND_URL: str = "http://localhost:3003"
+
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
 
 

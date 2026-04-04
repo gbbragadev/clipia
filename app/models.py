@@ -31,6 +31,7 @@ class CompositionResponse(BaseModel):
     fps: int = 30
     width: int = 1080
     height: int = 1920
+    pending_credits: float = 0.0
 
 
 class EditRequest(BaseModel):

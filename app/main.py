@@ -6,6 +6,7 @@ from fastapi.staticfiles import StaticFiles
 
 from app.api.routes import router
 from app.auth.routes import router as auth_router
+from app.payments.routes import router as payments_router
 from app.config import settings
 from app.db.engine import engine
 
@@ -28,6 +29,7 @@ app.add_middleware(
 
 app.include_router(auth_router, prefix="/api/v1")
 app.include_router(router, prefix="/api/v1")
+app.include_router(payments_router, prefix="/api/v1")
 
 # Serve job assets (media, audio, subtitles) for the Remotion editor
 jobs_dir = settings.STORAGE_DIR / "jobs"
