@@ -79,3 +79,33 @@ export async function fetchJobs(): Promise<JobSummary[]> {
     headers: getAuthHeaders(),
   })
 }
+
+export interface GenerateParams {
+  topic: string
+  style: 'educational' | 'curiosity' | 'storytelling' | 'news'
+  duration_target: number
+}
+
+export async function generateVideo(params: GenerateParams): Promise<{ job_id: string; status: string }> {
+  return fetchJSON(`${API_BASE}/generate`, {
+    method: 'POST',
+    headers: getAuthHeaders(),
+    body: JSON.stringify(params),
+  })
+}
+
+export interface JobStatusResponse {
+  job_id: string
+  status: string
+  progress: number
+  current_step: string | null
+  error: string | null
+  created_at: string
+  download_url: string | null
+}
+
+export async function fetchJobStatus(jobId: string): Promise<JobStatusResponse> {
+  return fetchJSON(`${API_BASE}/jobs/${jobId}`, {
+    headers: getAuthHeaders(),
+  })
+}
