@@ -6,7 +6,7 @@ import edge_tts
 
 VOICE = "pt-BR-AntonioNeural"
 RATE = "-10%"
-PITCH = "+5%"
+PITCH = "+5Hz"
 
 
 def synthesize_narration(text: str, output_path: str, speaker_wav: str = "") -> str:
