@@ -14,6 +14,7 @@ import WpmSlider from './WpmSlider'
 import OpticalBalancePreview from './OpticalBalancePreview'
 import ScriptDensityHeatmap from './ScriptDensityHeatmap'
 import NarrationTimelineRuler from './NarrationTimelineRuler'
+import KineticPreviewPanel from './KineticPreviewPanel'
 
 const STEP_LABELS: Record<string, string> = {
   scripting: 'Escrevendo roteiro...',
@@ -196,6 +197,10 @@ export default function GenerateForm({ onJobComplete }: GenerateFormProps) {
 
             {script.trim() && (
               <NarrationTimelineRuler script={script} duration={duration} wpm={wpm} />
+            )}
+
+            {script.trim() && (
+              <KineticPreviewPanel script={script} />
             )}
           </div>
         )}
