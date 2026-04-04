@@ -4,6 +4,7 @@ import logging
 import anthropic
 
 from app.config import settings
+from app.templates import get_template
 
 logger = logging.getLogger(__name__)
 
@@ -54,22 +55,39 @@ Retorne APENAS JSON valido:
 }}"""
 
 
-def generate_script(topic: str, style: str, duration_target: int) -> dict:
+def generate_script(topic: str, style: str, duration_target: int, template_id: str = "stock_narration") -> dict:
+    template = get_template(template_id)
     client = anthropic.Anthropic(api_key=settings.ANTHROPIC_API_KEY)
-    word_count = int(duration_target * 2.05)  # pt-BR at ~2.0 wps, trim/pad handles the rest
+    word_count = int(duration_target * template.script.word_rate)
+
+    prompt_text = SCRIPT_PROMPT.format(
+        topic=topic,
+        style=style,
+        duration=duration_target,
+        word_count=word_count,
+    )
+
+    # Remove keywords instructions for templates that don't need them
+    if not template.script.needs_keywords:
+        prompt_text = prompt_text.replace(
+            '"keywords_en": ["specific", "visual", "search terms"],\n      ',
+            "",
+        )
+        prompt_text = prompt_text.replace(
+            "REGRAS DE KEYWORDS:\n"
+            "- Keywords em INGLES para busca de video stock no Pexels\n"
+            "- Sejam ESPECIFICAS e VISUAIS: \"orange tabby cat close up face\" NAO \"cat\"\n"
+            "- 3-4 keywords descritivas por cena que resultem em video PORTRAIT relevante\n"
+            "- Prefira: animais em close, paisagens dramaticas, macro shots, acoes humanas",
+            "KEYWORDS: NAO inclua keywords_en neste formato.",
+        )
+
+    prompt_text += template.script.prompt_extra
 
     message = client.messages.create(
         model=settings.CLAUDE_MODEL,
         max_tokens=1500,
-        messages=[{
-            "role": "user",
-            "content": SCRIPT_PROMPT.format(
-                topic=topic,
-                style=style,
-                duration=duration_target,
-                word_count=word_count,
-            ),
-        }],
+        messages=[{"role": "user", "content": prompt_text}],
     )
 
     raw = message.content[0].text

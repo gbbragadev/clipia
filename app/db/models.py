@@ -30,6 +30,7 @@ class Job(Base):
     topic: Mapped[str] = mapped_column(String(500), nullable=False)
     style: Mapped[str] = mapped_column(String(50), nullable=False)
     duration_target: Mapped[int] = mapped_column(Integer, nullable=False)
+    template_id: Mapped[str] = mapped_column(String(50), default="stock_narration")
     status: Mapped[str] = mapped_column(String(50), default="queued")
     progress: Mapped[float] = mapped_column(Float, default=0.0)
     current_step: Mapped[str | None] = mapped_column(String(50), nullable=True)

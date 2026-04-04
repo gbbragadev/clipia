@@ -3,6 +3,7 @@ import json
 import logging
 import shutil
 from datetime import datetime, timezone
+from pathlib import Path
 
 import redis
 
@@ -54,7 +55,7 @@ def _fail_job(job_id: str, error: str):
         logger.error(f"Failed to refund credit for job {job_id}: {e}")
 
 
-def dispatch_pipeline(job_id: str, topic: str, style: str, duration_target: int):
+def dispatch_pipeline(job_id: str, topic: str, style: str, duration_target: int, template_id: str = "stock_narration"):
     from celery import chain
 
     _redis.hset(f"job:{job_id}", mapping={
@@ -63,23 +64,24 @@ def dispatch_pipeline(job_id: str, topic: str, style: str, duration_target: int)
         "progress": "0",
         "error": "",
         "created_at": datetime.now(timezone.utc).isoformat(),
+        "template_id": template_id,
     })
     pipeline = chain(
-        task_generate_script.s(job_id, topic, style, duration_target),
-        task_synthesize_audio.s(job_id),
+        task_generate_script.s(job_id, topic, style, duration_target, template_id),
+        task_synthesize_audio.s(job_id, template_id),
         task_transcribe_audio.s(job_id),
-        task_fetch_media.s(job_id),
-        task_compose_video.s(job_id),
+        task_fetch_media.s(job_id, template_id),
+        task_compose_video.s(job_id, template_id),
         task_finalize.s(job_id),
     )
     pipeline.apply_async()
 
 
 @celery_app.task(name="generate_script", bind=True)
-def task_generate_script(self, job_id: str, topic: str, style: str, duration_target: int) -> dict:
+def task_generate_script(self, job_id: str, topic: str, style: str, duration_target: int, template_id: str = "stock_narration") -> dict:
     try:
         _update_job(job_id, "processing", "scripting", 0.1)
-        script = generate_script(topic, style, duration_target)
+        script = generate_script(topic, style, duration_target, template_id=template_id)
         job_dir = get_job_dir(job_id)
         (job_dir / "script.json").write_text(json.dumps(script, ensure_ascii=False, indent=2))
 
@@ -99,13 +101,23 @@ def task_generate_script(self, job_id: str, topic: str, style: str, duration_tar
 
 
 @celery_app.task(name="synthesize_audio", bind=True)
-def task_synthesize_audio(self, script: dict, job_id: str) -> str:
+def task_synthesize_audio(self, script: dict, job_id: str, template_id: str = "stock_narration") -> str:
     try:
+        from app.templates import get_template
+        template = get_template(template_id)
+
         _update_job(job_id, "processing", "tts", 0.2)
         job_dir = get_job_dir(job_id)
         output_path = str(job_dir / "narration.wav")
         duration_target = script.get("_duration_target", 0)
-        synthesize_narration(text=script["narration"], output_path=output_path, duration_target=duration_target)
+        synthesize_narration(
+            text=script["narration"],
+            output_path=output_path,
+            duration_target=duration_target,
+            voice_id=template.voice.voice_id,
+            rate=template.voice.rate,
+            pitch=template.voice.pitch,
+        )
 
         # Validate audio exists and has reasonable duration
         from pathlib import Path
@@ -144,8 +156,12 @@ def task_transcribe_audio(self, audio_path: str, job_id: str) -> dict:
 
 
 @celery_app.task(name="fetch_media", bind=True)
-def task_fetch_media(self, data: dict, job_id: str) -> dict:
+def task_fetch_media(self, data: dict, job_id: str, template_id: str = "stock_narration") -> dict:
     try:
+        from app.templates import get_template
+        from app.services.media_library import pick_clip
+
+        template = get_template(template_id)
         _update_job(job_id, "processing", "media", 0.55)
         script = data["script"]
         job_dir = get_job_dir(job_id)
@@ -153,30 +169,42 @@ def task_fetch_media(self, data: dict, job_id: str) -> dict:
         media_dir.mkdir(exist_ok=True)
 
         media_paths = []
-        for i, scene in enumerate(script["scenes"]):
-            keywords = scene.get("keywords_en", ["nature"])
-            results = asyncio.run(search_media_for_scene(keywords))
-            if results:
-                dest = str(media_dir / f"scene_{i}.mp4")
-                try:
-                    asyncio.run(download_media(results[0]["url"], dest))
-                    media_paths.append(dest)
-                    logger.info(f"Scene {i}: downloaded '{keywords[0]}'")
-                except Exception as e:
-                    logger.warning(f"Scene {i}: download failed, trying next result: {e}")
-                    if len(results) > 1:
-                        try:
-                            asyncio.run(download_media(results[1]["url"], dest))
-                            media_paths.append(dest)
-                        except Exception:
-                            logger.error(f"Scene {i}: all downloads failed")
-            else:
-                logger.warning(f"Scene {i}: no media found for {keywords}")
+
+        if template.media.source == "local" and template.media.loop_single:
+            # Single local clip, looped for entire video
+            clip = pick_clip(template.media.library_tag or "minecraft_parkour")
+            if clip is None:
+                raise RuntimeError(f"No clips in library '{template.media.library_tag}'")
+            dest = str(media_dir / "background.mp4")
+            shutil.copy2(str(clip), dest)
+            media_paths = [dest]
+            logger.info(f"Using local clip: {clip.name} (will loop)")
+        else:
+            # Original Pexels behavior (per-scene search)
+            for i, scene in enumerate(script["scenes"]):
+                keywords = scene.get("keywords_en", ["nature"])
+                results = asyncio.run(search_media_for_scene(keywords))
+                if results:
+                    dest = str(media_dir / f"scene_{i}.mp4")
+                    try:
+                        asyncio.run(download_media(results[0]["url"], dest))
+                        media_paths.append(dest)
+                        logger.info(f"Scene {i}: downloaded '{keywords[0]}'")
+                    except Exception as e:
+                        logger.warning(f"Scene {i}: download failed, trying next result: {e}")
+                        if len(results) > 1:
+                            try:
+                                asyncio.run(download_media(results[1]["url"], dest))
+                                media_paths.append(dest)
+                            except Exception:
+                                logger.error(f"Scene {i}: all downloads failed")
+                else:
+                    logger.warning(f"Scene {i}: no media found for {keywords}")
 
         if not media_paths:
-            raise RuntimeError("No media downloaded for any scene")
+            raise RuntimeError("No media available")
 
-        logger.info(f"Media: {len(media_paths)}/{len(script['scenes'])} scenes have video")
+        logger.info(f"Media: {len(media_paths)} file(s) ready")
         _update_job(job_id, "processing", "media", 0.65)
         data["media_paths"] = media_paths
         return data
@@ -186,8 +214,11 @@ def task_fetch_media(self, data: dict, job_id: str) -> dict:
 
 
 @celery_app.task(name="compose_video", bind=True)
-def task_compose_video(self, data: dict, job_id: str) -> str:
+def task_compose_video(self, data: dict, job_id: str, template_id: str = "stock_narration") -> str:
     try:
+        from app.templates import get_template
+        template = get_template(template_id)
+
         _update_job(job_id, "processing", "compositing", 0.7)
         job_dir = get_job_dir(job_id)
         output_path = str(job_dir / "final.mp4")
@@ -197,6 +228,7 @@ def task_compose_video(self, data: dict, job_id: str) -> str:
             audio_path=data["audio_path"],
             words=data["words"],
             output_path=output_path,
+            layout=template.layout,
         )
         _update_job(job_id, "processing", "compositing", 0.9)
         return output_path
@@ -245,12 +277,17 @@ def task_finalize(self, video_path: str, job_id: str) -> str:
         raise
 
 
-@celery_app.task(name="rerender_video", bind=True)
+@celery_app.task(name="rerender_video", bind=True, soft_time_limit=90, time_limit=120)
 def task_rerender_video(self, job_id: str) -> str:
-    """Re-compose video with current editor state (edited scenes/words)."""
+    """Re-render video with editor changes using FFmpeg + NVENC (~15s).
+
+    Runs in background — user never waits. Previous version stays available.
+    """
     try:
-        _update_job(job_id, "rendering", "compositing", 0.1)
+        _update_job(job_id, "rendering", "preparing", 0.05)
         job_dir = get_job_dir(job_id)
+        from app.config import BASE_DIR
+        from app.services.compositor import compose_short
 
         script_path = job_dir / "script.json"
         if not script_path.exists():
@@ -261,33 +298,66 @@ def task_rerender_video(self, job_id: str) -> str:
         words = json.loads(words_path.read_text()) if words_path.exists() else []
 
         audio_path = str(job_dir / "narration.wav")
-        if not (job_dir / "narration.wav").exists():
+        if not Path(audio_path).exists():
             raise RuntimeError("narration.wav not found")
 
-        media_dir = job_dir / "media"
+        # Collect media file paths
         media_paths = []
+        media_dir = job_dir / "media"
         if media_dir.exists():
-            media_paths = sorted(
-                [str(p) for p in media_dir.glob("scene_*.mp4")],
-                key=lambda p: int(str(p).split("scene_")[1].split(".")[0])
-            )
+            # Check for local template background first
+            bg_file = media_dir / "background.mp4"
+            if bg_file.exists():
+                media_paths = [str(bg_file)]
+            else:
+                for i in range(len(script.get("scenes", []))):
+                    scene_file = media_dir / f"scene_{i}.mp4"
+                    if scene_file.exists():
+                        media_paths.append(str(scene_file))
 
         if not media_paths:
             raise RuntimeError("No media files found for re-render")
 
-        _update_job(job_id, "rendering", "compositing", 0.3)
+        # Read editor_state
+        editor_state_path = job_dir / "editor_state.json"
+        comp_data = {}
+        if editor_state_path.exists():
+            editor_state = json.loads(editor_state_path.read_text())
+            comp_data = editor_state.get("composition", {})
+
+        # Resolve music path
+        music_path = None
+        music_url = comp_data.get("musicUrl")
+        if music_url:
+            music_file = BASE_DIR / "frontend" / "public" / music_url.lstrip("/")
+            if music_file.exists():
+                music_path = str(music_file)
 
         output_path = str(job_dir / "final_edited.mp4")
+
+        _update_job(job_id, "rendering", "encoding", 0.2)
+        logger.info(f"Starting FFmpeg+NVENC re-render for job {job_id}")
+
+        # Get template layout for re-render
+        from app.templates import get_template
+        re_template_id = _redis.hget(f"job:{job_id}", "template_id") or "stock_narration"
+        re_template = get_template(re_template_id)
+
         compose_short(
-            scenes=script["scenes"],
+            scenes=script.get("scenes", []),
             media_paths=media_paths,
             audio_path=audio_path,
             words=words,
             output_path=output_path,
+            music_path=music_path,
+            music_volume=comp_data.get("musicVolume", 0.15),
+            subtitle_style=comp_data.get("subtitleStyle"),
+            layout=re_template.layout,
         )
 
         _update_job(job_id, "rendering", "finalizing", 0.9)
 
+        # Copy to output dir (becomes downloadable version)
         output_dir = get_output_dir()
         final_path = str(output_dir / f"{job_id}.mp4")
         shutil.copy2(output_path, final_path)

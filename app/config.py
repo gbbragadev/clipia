@@ -36,7 +36,7 @@ class Settings(BaseSettings):
     WHISPER_COMPUTE_TYPE: str = "float16"
 
     # Claude
-    CLAUDE_MODEL: str = "claude-sonnet-4-20250514"
+    CLAUDE_MODEL: str = "claude-sonnet-4-6"
 
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
 

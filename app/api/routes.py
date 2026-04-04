@@ -45,6 +45,7 @@ async def generate(
         topic=req.topic,
         style=req.style,
         duration_target=req.duration_target,
+        template_id=req.template_id,
         status="queued",
     )
     db.add(job)
@@ -59,10 +60,11 @@ async def generate(
         "progress": "0",
         "current_step": "",
         "error": "",
+        "template_id": req.template_id,
         "created_at": datetime.now(timezone.utc).isoformat(),
     })
 
-    dispatch_pipeline(job_id, req.topic, req.style, req.duration_target)
+    dispatch_pipeline(job_id, req.topic, req.style, req.duration_target, template_id=req.template_id)
 
     return {"job_id": job_id, "status": "queued"}
 
@@ -107,6 +109,22 @@ async def join_waitlist(body: WaitlistRequest, db: AsyncSession = Depends(get_db
     return {"message": "Adicionado à waitlist com sucesso"}
 
 
+@router.get("/templates")
+async def list_templates():
+    """Return available video templates."""
+    from app.templates import TEMPLATES
+    return [
+        {
+            "id": t.id,
+            "name": t.name,
+            "description": t.description,
+            "icon": t.icon,
+            "layout_type": t.layout.type,
+        }
+        for t in TEMPLATES.values()
+    ]
+
+
 # ── Editor endpoints ──────────────────────────────────────────
 
 
@@ -134,10 +152,15 @@ async def get_composition(job_id: str, db: AsyncSession = Depends(get_db)):
     media_dir = job_dir / "media"
     media_urls = []
     if media_dir.exists():
-        for i in range(len(script.get("scenes", []))):
-            scene_file = media_dir / f"scene_{i}.mp4"
-            if scene_file.exists():
-                media_urls.append(f"/storage/jobs/{job_id}/media/scene_{i}.mp4")
+        # Check for local template background first
+        bg_file = media_dir / "background.mp4"
+        if bg_file.exists():
+            media_urls = [f"/storage/jobs/{job_id}/media/background.mp4"]
+        else:
+            for i in range(len(script.get("scenes", []))):
+                scene_file = media_dir / f"scene_{i}.mp4"
+                if scene_file.exists():
+                    media_urls.append(f"/storage/jobs/{job_id}/media/scene_{i}.mp4")
 
     audio_url = f"/storage/jobs/{job_id}/narration.wav" if (job_dir / "narration.wav").exists() else ""
 
@@ -145,6 +168,11 @@ async def get_composition(job_id: str, db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(Job).where(Job.id == job_id))
     job = result.scalar_one_or_none()
     editor_state = job.editor_state if job else None
+
+    # Get template info
+    from app.templates import get_template
+    job_template_id = getattr(job, "template_id", "stock_narration") if job else "stock_narration"
+    tmpl = get_template(job_template_id)
 
     return CompositionResponse(
         job_id=job_id,
@@ -163,6 +191,8 @@ async def get_composition(job_id: str, db: AsyncSession = Depends(get_db)):
             "maxWordsPerChunk": 3,
         },
         editor_state=editor_state,
+        template_id=job_template_id,
+        layout_type=tmpl.layout.type,
     )
 
 
@@ -182,13 +212,18 @@ async def save_editor_state(
     await db.execute(update(Job).where(Job.id == job_id).values(editor_state=req.editor_state))
     await db.commit()
 
-    # Sync edited scenes back to script.json for the render pipeline
+    # Sync edited state to disk for the render pipeline
     try:
         job_dir = Path(settings.STORAGE_DIR) / "jobs" / job_id
-        script_path = job_dir / "script.json"
-        if script_path.exists() and req.editor_state:
+        if req.editor_state:
+            # Save full editor_state for re-render (music, subtitleStyle, overlays)
+            state_path = job_dir / "editor_state.json"
+            state_path.write_text(json.dumps(req.editor_state, ensure_ascii=False, indent=2))
+
+            # Sync scenes/words to their own files
             comp = req.editor_state.get("composition", {})
-            if comp.get("scenes"):
+            script_path = job_dir / "script.json"
+            if script_path.exists() and comp.get("scenes"):
                 script = json.loads(script_path.read_text())
                 script["scenes"] = comp["scenes"]
                 script_path.write_text(json.dumps(script, ensure_ascii=False, indent=2))

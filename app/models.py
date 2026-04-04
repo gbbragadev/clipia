@@ -5,6 +5,7 @@ class GenerateRequest(BaseModel):
     topic: str = Field(..., min_length=5, max_length=500)
     style: str = Field(default="educational", pattern="^(educational|curiosity|storytelling|news)$")
     duration_target: int = Field(default=45, ge=20, le=60)
+    template_id: str = Field(default="stock_narration")
 
 
 class JobStatus(BaseModel):
@@ -25,6 +26,8 @@ class CompositionResponse(BaseModel):
     media_urls: list[str]
     subtitle_style: dict
     editor_state: dict | None = None
+    template_id: str = "stock_narration"
+    layout_type: str = "fullscreen"
     fps: int = 30
     width: int = 1080
     height: int = 1920
