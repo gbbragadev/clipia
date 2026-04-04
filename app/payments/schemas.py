@@ -5,9 +5,9 @@ from pydantic import BaseModel
 
 
 CREDIT_PACKAGES = {
-    "starter": {"name": "Starter", "credits": 5, "price_brl": 1990},
-    "popular": {"name": "Popular", "credits": 15, "price_brl": 4990},
-    "pro": {"name": "Pro", "credits": 50, "price_brl": 12990},
+    "starter": {"name": "Starter", "credits": 10, "price_brl": 1990},
+    "popular": {"name": "Popular", "credits": 30, "price_brl": 4990},
+    "pro": {"name": "Pro", "credits": 100, "price_brl": 12990},
 }
 
 
