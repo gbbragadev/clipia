@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 40" fill="none">
+  <defs>
+    <linearGradient id="brand" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#7c3aed"/>
+      <stop offset="100%" stop-color="#3b82f6"/>
+    </linearGradient>
+  </defs>
+  <rect x="2" y="4" width="32" height="32" rx="8" fill="none" stroke="url(#brand)" stroke-width="2.5"/>
+  <polygon points="14,12 14,28 26,20" fill="url(#brand)"/>
+  <text x="42" y="28" font-family="Inter, system-ui, sans-serif" font-size="22" font-weight="700" fill="#f1f5f9">
+    Clip<tspan fill="url(#brand)">IA</tspan>
+  </text>
+</svg>
