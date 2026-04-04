@@ -1,8 +1,11 @@
 'use client'
 
 import ScrollProgress from './ScrollProgress'
+import { useAuth } from '@/contexts/AuthContext'
 
 export default function Navbar() {
+  const { user, logout } = useAuth()
+
   return (
     <nav className="fixed top-0 left-0 right-0 z-40">
       <div className="backdrop-blur-lg bg-[#06060b]/70 border-b border-gray-800/50">
@@ -23,9 +26,20 @@ export default function Navbar() {
           <div className="hidden md:flex items-center gap-6 text-sm text-gray-400">
             <a href="#demo" className="hover:text-white transition">Demo</a>
             <a href="#como-funciona" className="hover:text-white transition">Como funciona</a>
-            <a href="#waitlist" className="px-4 py-2 rounded-lg bg-gradient-to-r from-purple-600 to-blue-600 text-white hover:opacity-90 transition">
-              Acesso antecipado
-            </a>
+            {user ? (
+              <div className="flex items-center gap-3">
+                <span className="text-slate-300">
+                  <span className="text-purple-400 font-semibold">{user.credits}</span> créditos
+                </span>
+                <button onClick={logout} className="text-slate-400 hover:text-white transition">
+                  Sair
+                </button>
+              </div>
+            ) : (
+              <a href="/auth/login" className="px-4 py-2 rounded-lg bg-gradient-to-r from-purple-600 to-blue-600 text-white hover:opacity-90 transition">
+                Entrar
+              </a>
+            )}
           </div>
         </div>
       </div>

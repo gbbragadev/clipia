@@ -11,11 +11,25 @@ export default function WaitlistForm() {
     if (saved) setSubmitted(true)
   }, [])
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const [loading, setLoading] = useState(false)
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (email) {
-      localStorage.setItem('waitlist_email', email)
+    if (!email) return
+    setLoading(true)
+    try {
+      await fetch("/api/v1/waitlist", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email }),
+      })
       setSubmitted(true)
+      localStorage.setItem('waitlist_email', email)
+    } catch {
+      setSubmitted(true)
+      localStorage.setItem('waitlist_email', email)
+    } finally {
+      setLoading(false)
     }
   }
 
