@@ -1,5 +1,6 @@
 import asyncio
 import secrets
+import uuid
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
@@ -63,6 +64,14 @@ async def register(request: Request, body: RegisterRequest, db: AsyncSession = D
         if result.scalar_one_or_none() is not None:
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Email ja cadastrado")
 
+        # Resolve referrer if referral code provided
+        referrer_id = None
+        if body.referral_code:
+            ref_result = await db.execute(select(User).where(User.referral_code == body.referral_code))
+            referrer = ref_result.scalar_one_or_none()
+            if referrer:
+                referrer_id = referrer.id
+
         code = generate_otp()
         user = User(
             email=body.email,
@@ -72,6 +81,11 @@ async def register(request: Request, body: RegisterRequest, db: AsyncSession = D
             email_verified=False,
             verification_code=code,
             verification_expires=otp_expiry(),
+            utm_source=body.utm_source,
+            utm_medium=body.utm_medium,
+            utm_campaign=body.utm_campaign,
+            referral_code=uuid.uuid4().hex[:8],
+            referred_by=referrer_id,
         )
         db.add(user)
         await db.commit()
@@ -122,6 +136,11 @@ async def verify_email(request: Request, body: VerifyEmailRequest, db: AsyncSess
         if user.email_verified:
             return {"status": "already_verified"}
 
+        MAX_OTP_ATTEMPTS = 5
+
+        if user.otp_attempts >= MAX_OTP_ATTEMPTS:
+            raise HTTPException(status_code=429, detail="Muitas tentativas. Solicite um novo codigo.")
+
         if not user.verification_code or not user.verification_expires:
             raise HTTPException(status_code=400, detail="Nenhum codigo pendente")
 
@@ -129,14 +148,29 @@ async def verify_email(request: Request, body: VerifyEmailRequest, db: AsyncSess
             raise HTTPException(status_code=400, detail="Codigo expirado. Solicite um novo.")
 
         if user.verification_code != body.code:
-            raise HTTPException(status_code=400, detail="Codigo incorreto")
+            user.otp_attempts += 1
+            await db.commit()
+            remaining = MAX_OTP_ATTEMPTS - user.otp_attempts
+            if remaining <= 0:
+                raise HTTPException(status_code=429, detail="Muitas tentativas. Solicite um novo codigo.")
+            raise HTTPException(status_code=400, detail=f"Codigo incorreto. {remaining} tentativa(s) restante(s).")
 
         user.email_verified = True
+        user.otp_attempts = 0
         user.verification_code = None
         user.verification_expires = None
         user.credits = 2
         await db.commit()
         record_credit_metric("credit", 2)
+
+        # Credit referrer with 2 bonus credits
+        if user.referred_by:
+            from sqlalchemy import update as sql_update
+            await db.execute(
+                sql_update(User).where(User.id == user.referred_by).values(credits=User.credits + 2)
+            )
+            await db.commit()
+            record_credit_metric("referral_bonus", 2)
 
         return {"status": "verified", "credits": 2}
 
@@ -163,6 +197,7 @@ async def resend_code(request: Request, body: ResendCodeRequest, db: AsyncSessio
         code = generate_otp()
         user.verification_code = code
         user.verification_expires = otp_expiry()
+        user.otp_attempts = 0
         await db.commit()
 
         await asyncio.to_thread(send_verification_email, user.email, code, user.name)
@@ -187,6 +222,7 @@ async def forgot_password(request: Request, body: ForgotPasswordRequest, db: Asy
             code = generate_otp()
             user.verification_code = code
             user.verification_expires = otp_expiry()
+            user.otp_attempts = 0
             await db.commit()
 
             await asyncio.to_thread(send_password_reset_email, user.email, code, user.name)
@@ -210,11 +246,24 @@ async def verify_reset_code(request: Request, body: VerifyResetCodeRequest, db: 
         if not user or not user.verification_code or not user.verification_expires:
             raise HTTPException(status_code=400, detail="Codigo incorreto")
 
+        MAX_OTP_ATTEMPTS = 5
+
+        if user.otp_attempts >= MAX_OTP_ATTEMPTS:
+            raise HTTPException(status_code=429, detail="Muitas tentativas. Solicite um novo codigo.")
+
         if datetime.now(timezone.utc) > _ensure_utc(user.verification_expires):
             raise HTTPException(status_code=400, detail="Codigo expirado. Solicite um novo.")
 
         if user.verification_code != body.code:
-            raise HTTPException(status_code=400, detail="Codigo incorreto")
+            user.otp_attempts += 1
+            await db.commit()
+            remaining = MAX_OTP_ATTEMPTS - user.otp_attempts
+            if remaining <= 0:
+                raise HTTPException(status_code=429, detail="Muitas tentativas. Solicite um novo codigo.")
+            raise HTTPException(status_code=400, detail=f"Codigo incorreto. {remaining} tentativa(s) restante(s).")
+
+        user.otp_attempts = 0
+        await db.commit()
 
         return {"status": "verified", "reset_token": create_reset_token(str(user.id))}
 
@@ -265,6 +314,7 @@ async def get_me(user: User = Depends(get_current_user)):
         credits=user.credits,
         plan=user.plan,
         email_verified=user.email_verified,
+        referral_code=user.referral_code,
     )
 
 
@@ -291,6 +341,7 @@ async def update_me(
         credits=user.credits,
         plan=user.plan,
         email_verified=user.email_verified,
+        referral_code=user.referral_code,
     )
 
 

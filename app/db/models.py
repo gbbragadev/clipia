@@ -38,9 +38,16 @@ class User(Base):
     email_verified: Mapped[bool] = mapped_column(default=False)
     verification_code: Mapped[str | None] = mapped_column(String(6), nullable=True)
     verification_expires: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    utm_source: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    utm_medium: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    utm_campaign: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    otp_attempts: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    referral_code: Mapped[str] = mapped_column(String(12), unique=True, nullable=False, default=lambda: uuid.uuid4().hex[:8])
+    referred_by: Mapped[uuid.UUID | None] = mapped_column(GUID(), ForeignKey("users.id"), nullable=True)
 
     jobs: Mapped[list["Job"]] = relationship(back_populates="user")
     purchases: Mapped[list["CreditPurchase"]] = relationship(back_populates="user")
+    voice_clones: Mapped[list["VoiceClone"]] = relationship(back_populates="user")
 
 
 class Job(Base):
@@ -63,8 +70,25 @@ class Job(Base):
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     exported_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     pending_credits: Mapped[float] = mapped_column(Float, default=0.0)
+    credit_cost: Mapped[int] = mapped_column(Integer, default=1)
+    voice_provider: Mapped[str] = mapped_column(String(50), default="edge")
+    voice_config: Mapped[dict | None] = mapped_column(JsonType, nullable=True)
 
     user: Mapped["User"] = relationship(back_populates="jobs")
+
+
+class VoiceClone(Base):
+    __tablename__ = "voice_clones"
+
+    id: Mapped[uuid.UUID] = mapped_column(GUID(), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(GUID(), ForeignKey("users.id"), nullable=False, index=True)
+    name: Mapped[str] = mapped_column(String(100), nullable=False)
+    provider: Mapped[str] = mapped_column(String(50), default="elevenlabs")
+    external_voice_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    samples_count: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    user: Mapped["User"] = relationship(back_populates="voice_clones")
 
 
 class WaitlistEntry(Base):

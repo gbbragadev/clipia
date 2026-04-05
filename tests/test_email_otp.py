@@ -10,7 +10,7 @@ from app.db.models import User
 async def test_register_creates_pending_user_and_verify_grants_two_credits(client, db_session):
     register = await client.post(
         "/api/v1/auth/register",
-        json={"email": "otp@example.com", "name": "Otp User", "password": "secret1"},
+        json={"email": "otp@example.com", "name": "Otp User", "password": "Secret123"},
     )
     assert register.status_code == 201, "Registration should succeed for OTP flow."
 

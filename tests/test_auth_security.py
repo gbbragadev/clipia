@@ -10,7 +10,7 @@ from app.db.models import User
 
 @pytest.mark.asyncio
 async def test_register_duplicate_email_returns_409(client):
-    payload = {"email": "dup@example.com", "name": "Dup", "password": "secret1"}
+    payload = {"email": "dup@example.com", "name": "Dup", "password": "Secret123"}
     first = await client.post("/api/v1/auth/register", json=payload)
     second = await client.post("/api/v1/auth/register", json=payload)
 
@@ -22,7 +22,7 @@ async def test_register_duplicate_email_returns_409(client):
 async def test_register_normalizes_email_and_hashes_password(client, db_session):
     response = await client.post(
         "/api/v1/auth/register",
-        json={"email": "  TEST@Example.COM ", "name": "User", "password": "secret1"},
+        json={"email": "  TEST@Example.COM ", "name": "User", "password": "Secret123"},
     )
 
     assert response.status_code == 201, "Registration with normalized email should succeed."
@@ -34,7 +34,7 @@ async def test_register_normalizes_email_and_hashes_password(client, db_session)
 
 @pytest.mark.asyncio
 async def test_login_wrong_password_and_missing_user_share_401(client):
-    register = {"email": "login@example.com", "name": "Login", "password": "secret1"}
+    register = {"email": "login@example.com", "name": "Login", "password": "Secret123"}
     await client.post("/api/v1/auth/register", json=register)
 
     wrong_password = await client.post(
