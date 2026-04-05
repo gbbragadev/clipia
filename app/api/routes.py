@@ -2,7 +2,8 @@ import json
 import logging
 import shutil
 import uuid
-from datetime import datetime, timezone
+from collections import defaultdict
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -22,7 +23,7 @@ from app.errors import ErrorMessages, not_found_error, validate_uuid
 
 limiter = Limiter(key_func=get_remote_address)
 from app.db.engine import get_db
-from app.db.models import Job, User, WaitlistEntry
+from app.db.models import CreditPurchase, Job, User, WaitlistEntry
 from app.models import (
     AISuggestRequest,
     CompositionResponse,
@@ -40,6 +41,74 @@ from app.worker.tasks import dispatch_pipeline
 
 router = APIRouter(tags=["jobs"])
 _redis = redis.Redis.from_url(settings.REDIS_URL, decode_responses=True)
+
+_ADMIN_DASHBOARD_RANGES = {"7d": 7, "30d": 30, "90d": 90}
+
+
+def _coerce_utc(dt: datetime | None) -> datetime | None:
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
+
+
+def _bucket_key(dt: datetime | None) -> str | None:
+    utc_dt = _coerce_utc(dt)
+    return utc_dt.date().isoformat() if utc_dt else None
+
+
+def _round2(value: float) -> float:
+    return round(value, 2)
+
+
+async def _build_storage_stats(db: AsyncSession) -> dict[str, int | float]:
+    storage_dir = settings.STORAGE_DIR
+    jobs_dir = storage_dir / "jobs"
+    output_dir = storage_dir / "output"
+    jobs_dir.mkdir(parents=True, exist_ok=True)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    result = await db.execute(select(Job.id, Job.created_at, Job.status))
+    jobs = result.all()
+    job_ids = {str(row.id) for row in jobs}
+
+    orphan_dirs = 0
+    if jobs_dir.exists():
+        for entry in jobs_dir.iterdir():
+            if entry.is_dir() and entry.name not in job_ids:
+                orphan_dirs += 1
+
+    total_jobs = len(jobs)
+    failed_jobs = sum(1 for row in jobs if row.status == "failed")
+    oldest_created = None
+    for row in jobs:
+        created_at = _coerce_utc(row.created_at)
+        if created_at is None:
+            continue
+        if oldest_created is None or created_at < oldest_created:
+            oldest_created = created_at
+
+    oldest_job_days = 0
+    if oldest_created is not None:
+        oldest_job_days = max(0, int((datetime.now(timezone.utc) - oldest_created).days))
+
+    return {
+        "jobs_dir_size_gb": bytes_to_gb(path_size_bytes(jobs_dir)),
+        "output_dir_size_gb": bytes_to_gb(path_size_bytes(output_dir)),
+        "total_jobs": total_jobs,
+        "failed_jobs": failed_jobs,
+        "orphan_dirs": orphan_dirs,
+        "oldest_job_days": oldest_job_days,
+    }
+
+
+def _empty_daily_series(days: int, now: datetime) -> dict[str, float]:
+    series: dict[str, float] = {}
+    for offset in range(days):
+        day = (now.date()).fromordinal(now.date().toordinal() - (days - 1 - offset))
+        series[day.isoformat()] = 0.0
+    return series
 
 
 def _ensure_storage_ready() -> None:
@@ -619,6 +688,202 @@ async def list_jobs(
 
 
 @router.get(
+    "/admin/dashboard",
+    summary="Admin dashboard",
+    description="Aggregated admin metrics for the SaaS control panel.",
+    responses={200: {"description": "Dashboard metrics"}}
+)
+async def admin_dashboard(
+    range: str = "30d",
+    _admin_user: User = Depends(get_current_admin_user),
+    db: AsyncSession = Depends(get_db),
+):
+    if range not in _ADMIN_DASHBOARD_RANGES:
+        raise HTTPException(status_code=400, detail="Range invalido")
+
+    now = datetime.now(timezone.utc)
+    days = _ADMIN_DASHBOARD_RANGES[range]
+    window_start = now.replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=days - 1)
+
+    users_result = await db.execute(select(User))
+    purchases_result = await db.execute(select(CreditPurchase))
+    jobs_result = await db.execute(select(Job))
+
+    users = list(users_result.scalars().all())
+    purchases = list(purchases_result.scalars().all())
+    jobs = list(jobs_result.scalars().all())
+
+    users_in_range = [user for user in users if (_coerce_utc(user.created_at) or now) >= window_start]
+    purchases_in_range = [
+        purchase for purchase in purchases if (_coerce_utc(purchase.created_at) or now) >= window_start
+    ]
+    jobs_in_range = [job for job in jobs if (_coerce_utc(job.created_at) or now) >= window_start]
+
+    approved_purchases = [purchase for purchase in purchases_in_range if purchase.status == "approved"]
+    pending_purchases = [purchase for purchase in purchases_in_range if purchase.status != "approved"]
+    approved_user_ids = {str(purchase.user_id) for purchase in purchases if purchase.status == "approved"}
+
+    revenue_by_day = _empty_daily_series(days, now)
+    users_by_day = _empty_daily_series(days, now)
+    jobs_by_day = _empty_daily_series(days, now)
+    approved_orders_by_day = _empty_daily_series(days, now)
+
+    package_mix: dict[str, dict[str, int | float | str]] = {}
+    recent_users = sorted(users, key=lambda user: _coerce_utc(user.created_at) or now, reverse=True)[:5]
+    recent_purchases = sorted(
+        purchases, key=lambda purchase: _coerce_utc(purchase.created_at) or now, reverse=True
+    )[:5]
+    recent_failed_jobs = sorted(
+        [job for job in jobs if job.status == "failed"],
+        key=lambda job: _coerce_utc(job.created_at) or now,
+        reverse=True,
+    )[:5]
+
+    for user in users_in_range:
+        bucket = _bucket_key(user.created_at)
+        if bucket:
+            users_by_day[bucket] += 1
+
+    for purchase in purchases_in_range:
+        bucket = _bucket_key(purchase.created_at)
+        if bucket:
+            if purchase.status == "approved":
+                revenue_by_day[bucket] += purchase.price_brl / 100
+                approved_orders_by_day[bucket] += 1
+
+        mix = package_mix.setdefault(
+            purchase.package_name,
+            {
+                "package_name": purchase.package_name,
+                "orders": 0,
+                "approved_revenue_brl": 0.0,
+                "credits_sold": 0,
+            },
+        )
+        mix["orders"] += 1
+        if purchase.status == "approved":
+            mix["approved_revenue_brl"] = _round2(float(mix["approved_revenue_brl"]) + (purchase.price_brl / 100))
+            mix["credits_sold"] = int(mix["credits_sold"]) + purchase.credits_amount
+
+    for job in jobs_in_range:
+        bucket = _bucket_key(job.created_at)
+        if bucket:
+            jobs_by_day[bucket] += 1
+
+    current_job_statuses = defaultdict(int)
+    for job in jobs:
+        current_job_statuses[job.status] += 1
+
+    settled_jobs = [job for job in jobs_in_range if job.status in {"completed", "failed"}]
+    success_rate = 0.0
+    if settled_jobs:
+        success_rate = _round2(
+            (sum(1 for job in settled_jobs if job.status == "completed") / len(settled_jobs)) * 100
+        )
+
+    pending_credits_jobs = [float(job.pending_credits or 0.0) for job in jobs if (job.pending_credits or 0.0) > 0]
+    avg_pending_credits = _round2(sum(pending_credits_jobs) / len(pending_credits_jobs)) if pending_credits_jobs else 0.0
+
+    storage_stats = await _build_storage_stats(db)
+
+    approved_revenue_brl = _round2(sum(purchase.price_brl for purchase in approved_purchases) / 100)
+    pending_revenue_brl = _round2(sum(purchase.price_brl for purchase in pending_purchases) / 100)
+    approved_orders = len(approved_purchases)
+    average_ticket_brl = _round2(approved_revenue_brl / approved_orders) if approved_orders else 0.0
+    verified_users = sum(1 for user in users_in_range if user.email_verified)
+    paying_users = len({str(purchase.user_id) for purchase in approved_purchases})
+    registered = len(users_in_range)
+    verification_rate = _round2((verified_users / registered) * 100) if registered else 0.0
+    payer_conversion_rate = _round2((paying_users / registered) * 100) if registered else 0.0
+
+    return {
+        "range": range,
+        "window_start": window_start.date().isoformat(),
+        "window_end": now.date().isoformat(),
+        "summary": {
+            "approved_revenue_brl": approved_revenue_brl,
+            "pending_revenue_brl": pending_revenue_brl,
+            "approved_orders": approved_orders,
+            "pending_orders": len(pending_purchases),
+            "average_ticket_brl": average_ticket_brl,
+            "new_users": registered,
+            "verified_users": verified_users,
+            "paying_users": paying_users,
+            "active_jobs": int(current_job_statuses["queued"] + current_job_statuses["processing"]),
+            "credits_sold": int(sum(purchase.credits_amount for purchase in approved_purchases)),
+            "credits_consumed": int(len(jobs_in_range)),
+        },
+        "timeseries": {
+            "revenue_by_day": [{"date": date, "value": _round2(value)} for date, value in revenue_by_day.items()],
+            "new_users_by_day": [{"date": date, "value": int(value)} for date, value in users_by_day.items()],
+            "jobs_by_day": [{"date": date, "value": int(value)} for date, value in jobs_by_day.items()],
+            "approved_orders_by_day": [
+                {"date": date, "value": int(value)} for date, value in approved_orders_by_day.items()
+            ],
+        },
+        "funnel": {
+            "registered": registered,
+            "verified": verified_users,
+            "paying": paying_users,
+            "verification_rate": verification_rate,
+            "payer_conversion_rate": payer_conversion_rate,
+        },
+        "operations": {
+            "queued_jobs": int(current_job_statuses["queued"]),
+            "processing_jobs": int(current_job_statuses["processing"]),
+            "completed_jobs": int(current_job_statuses["completed"]),
+            "failed_jobs": int(current_job_statuses["failed"]),
+            "success_rate": success_rate,
+            "avg_pending_credits": avg_pending_credits,
+            **storage_stats,
+        },
+        "package_mix": sorted(
+            package_mix.values(),
+            key=lambda item: (float(item["approved_revenue_brl"]), int(item["orders"])),
+            reverse=True,
+        ),
+        "recent_activity": {
+            "recent_users": [
+                {
+                    "id": str(user.id),
+                    "email": user.email,
+                    "name": user.name,
+                    "plan": user.plan,
+                    "email_verified": user.email_verified,
+                    "created_at": user.created_at.isoformat() if user.created_at else None,
+                    "is_paying": str(user.id) in approved_user_ids,
+                }
+                for user in recent_users
+            ],
+            "recent_purchases": [
+                {
+                    "id": str(purchase.id),
+                    "user_id": str(purchase.user_id),
+                    "package_name": purchase.package_name,
+                    "price_brl": purchase.price_brl,
+                    "credits_amount": purchase.credits_amount,
+                    "status": purchase.status,
+                    "created_at": purchase.created_at.isoformat() if purchase.created_at else None,
+                    "paid_at": purchase.paid_at.isoformat() if purchase.paid_at else None,
+                }
+                for purchase in recent_purchases
+            ],
+            "recent_failed_jobs": [
+                {
+                    "id": str(job.id),
+                    "user_id": str(job.user_id),
+                    "topic": job.topic,
+                    "status": job.status,
+                    "error": job.error,
+                    "created_at": job.created_at.isoformat() if job.created_at else None,
+                }
+                for job in recent_failed_jobs
+            ],
+        },
+    }
+
+
+@router.get(
     "/admin/storage-stats",
     summary="Storage stats",
     description="Admin storage stats.",
@@ -628,45 +893,4 @@ async def storage_stats(
     _admin_user: User = Depends(get_current_admin_user),
     db: AsyncSession = Depends(get_db),
 ):
-    storage_dir = settings.STORAGE_DIR
-    jobs_dir = storage_dir / "jobs"
-    output_dir = storage_dir / "output"
-    jobs_dir.mkdir(parents=True, exist_ok=True)
-    output_dir.mkdir(parents=True, exist_ok=True)
-
-    result = await db.execute(select(Job.id, Job.created_at, Job.status))
-    jobs = result.all()
-    job_ids = {str(row.id) for row in jobs}
-
-    orphan_dirs = 0
-    if jobs_dir.exists():
-        for entry in jobs_dir.iterdir():
-            if entry.is_dir() and entry.name not in job_ids:
-                orphan_dirs += 1
-
-    total_jobs = len(jobs)
-    failed_jobs = sum(1 for row in jobs if row.status == "failed")
-    oldest_created = None
-    for row in jobs:
-        if row.created_at is None:
-            continue
-        created_at = row.created_at
-        if created_at.tzinfo is None:
-            created_at = created_at.replace(tzinfo=timezone.utc)
-        else:
-            created_at = created_at.astimezone(timezone.utc)
-        if oldest_created is None or created_at < oldest_created:
-            oldest_created = created_at
-
-    oldest_job_days = 0
-    if oldest_created is not None:
-        oldest_job_days = max(0, int((datetime.now(timezone.utc) - oldest_created).days))
-
-    return {
-        "jobs_dir_size_gb": bytes_to_gb(path_size_bytes(jobs_dir)),
-        "output_dir_size_gb": bytes_to_gb(path_size_bytes(output_dir)),
-        "total_jobs": total_jobs,
-        "failed_jobs": failed_jobs,
-        "orphan_dirs": orphan_dirs,
-        "oldest_job_days": oldest_job_days,
-    }
+    return await _build_storage_stats(db)
