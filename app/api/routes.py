@@ -23,7 +23,7 @@ from app.errors import ErrorMessages, not_found_error, validate_uuid
 
 limiter = Limiter(key_func=get_remote_address)
 from app.db.engine import get_db
-from app.db.models import CreditPurchase, Job, User, WaitlistEntry
+from app.db.models import CreditPurchase, Job, User, VoiceClone, WaitlistEntry
 from app.models import (
     AISuggestRequest,
     CompositionResponse,
@@ -32,6 +32,7 @@ from app.models import (
     JobStatus,
     RegenerateMediaRequest,
     RegenerateTTSRequest,
+    VoiceCloneRequest,
     WaitlistRequest,
 )
 from app.observability import record_credit_metric
@@ -43,6 +44,25 @@ router = APIRouter(tags=["jobs"])
 _redis = redis.Redis.from_url(settings.REDIS_URL, decode_responses=True)
 
 _ADMIN_DASHBOARD_RANGES = {"7d": 7, "30d": 30, "90d": 90}
+
+_ALLOWED_AUDIO_MIMES: dict[str, str] = {
+    "audio/wav": ".wav",
+    "audio/x-wav": ".wav",
+    "audio/mpeg": ".mp3",
+    "audio/mp3": ".mp3",
+    "audio/webm": ".webm",
+    "audio/ogg": ".ogg",
+}
+
+
+def _validate_audio_upload(content_type: str | None, filename: str | None, size: int, max_mb: int = 50) -> str:
+    """Validate audio upload. Returns safe extension. Raises ValueError on failure."""
+    if size > max_mb * 1024 * 1024:
+        raise ValueError(f"Arquivo muito grande (max {max_mb}MB)")
+    ct = (content_type or "").lower().split(";")[0].strip()
+    if ct not in _ALLOWED_AUDIO_MIMES:
+        raise ValueError(f"Tipo de audio nao suportado: {ct}. Envie WAV, MP3, WebM ou OGG.")
+    return _ALLOWED_AUDIO_MIMES[ct]
 
 
 def _coerce_utc(dt: datetime | None) -> datetime | None:
@@ -132,12 +152,20 @@ async def generate(
     db: AsyncSession = Depends(get_db),
 ):
     """Queue a video generation job."""
+    # Determine credit cost based on voice provider
+    credit_cost_map = {
+        "edge": settings.CREDIT_COST_EDGE,
+        "elevenlabs": settings.CREDIT_COST_ELEVENLABS,
+        "custom": settings.CREDIT_COST_CUSTOM_AUDIO,
+    }
+    credit_cost = credit_cost_map.get(req.voice_provider, 1)
+
     async with get_lock(f"generate:{user.id}"):
         _ensure_storage_ready()
         debit = await db.execute(
             update(User)
-            .where(User.id == user.id, User.email_verified.is_(True), User.credits >= 1)
-            .values(credits=User.credits - 1)
+            .where(User.id == user.id, User.email_verified.is_(True), User.credits >= credit_cost)
+            .values(credits=User.credits - credit_cost)
         )
         if debit.rowcount == 0:
             fresh_user = await db.get(User, user.id)
@@ -150,7 +178,7 @@ async def generate(
         fresh_user = await db.get(User, user.id)
         if fresh_user is None:
             raise HTTPException(status_code=401, detail=ErrorMessages.UNAUTHORIZED)
-        record_credit_metric("debit", 1)
+        record_credit_metric("debit", credit_cost)
 
         job = Job(
             user_id=fresh_user.id,
@@ -158,6 +186,9 @@ async def generate(
             style=req.style,
             duration_target=req.duration_target,
             template_id=req.template_id,
+            voice_provider=req.voice_provider,
+            voice_config=req.voice_config,
+            credit_cost=credit_cost,
             status="queued",
         )
         db.add(job)
@@ -176,9 +207,14 @@ async def generate(
         "created_at": datetime.now(timezone.utc).isoformat(),
     })
 
-    dispatch_pipeline(job_id, req.topic, req.style, req.duration_target, template_id=req.template_id)
+    dispatch_pipeline(
+        job_id, req.topic, req.style, req.duration_target,
+        template_id=req.template_id,
+        voice_provider=req.voice_provider,
+        voice_config=req.voice_config,
+    )
 
-    return {"job_id": job_id, "status": "queued"}
+    return {"job_id": job_id, "status": "queued", "credit_cost": credit_cost}
 
 
 @router.get(
@@ -267,6 +303,212 @@ async def list_templates():
         }
         for t in TEMPLATES.values()
     ]
+
+
+# ── Voice endpoints ───────────────────────────────────────────
+
+
+@router.get(
+    "/voices",
+    summary="List voices",
+    description="Returns available voices across all providers.",
+    responses={200: {"description": "List of voices"}}
+)
+async def list_voices(
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """List all available voices (Edge + ElevenLabs + user clones)."""
+    from app.services.edge_provider import EDGE_VOICES
+
+    voices = [v.__dict__ for v in EDGE_VOICES]
+
+    # ElevenLabs voices (if API key configured)
+    if settings.ELEVENLABS_API_KEY:
+        try:
+            from app.services.elevenlabs_provider import ElevenLabsProvider
+            provider = ElevenLabsProvider()
+            el_voices = await provider.list_voices()
+            voices.extend(v.__dict__ for v in el_voices)
+        except Exception as e:
+            logger.warning(f"Failed to fetch ElevenLabs voices: {e}")
+
+    # User's cloned voices from DB
+    result = await db.execute(
+        select(VoiceClone).where(VoiceClone.user_id == user.id)
+    )
+    clones = result.scalars().all()
+    for clone in clones:
+        voices.append({
+            "id": clone.external_voice_id,
+            "name": f"{clone.name} (clone)",
+            "provider": clone.provider,
+            "language": "multilingual",
+            "is_clone": True,
+            "clone_id": str(clone.id),
+        })
+
+    return voices
+
+
+@router.post(
+    "/voices/clone",
+    summary="Clone voice",
+    description="Clone a voice using ElevenLabs Instant Voice Cloning.",
+    responses={200: {"description": "Voice cloned"}}
+)
+@limiter.limit("3/hour")
+async def clone_voice(
+    request: Request,
+    req: VoiceCloneRequest,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Clone a voice from uploaded audio samples."""
+    if not settings.ELEVENLABS_API_KEY:
+        raise HTTPException(status_code=503, detail="Voice cloning not available")
+
+    # Check max clones per user (limit 5)
+    result = await db.execute(
+        select(VoiceClone).where(VoiceClone.user_id == user.id)
+    )
+    if len(result.scalars().all()) >= 5:
+        raise HTTPException(status_code=400, detail="Máximo de 5 vozes clonadas por usuário")
+
+    # Get uploaded files from multipart
+    form = await request.form()
+    files = form.getlist("files")
+    if not files:
+        raise HTTPException(status_code=400, detail="Envie pelo menos 1 arquivo de áudio")
+
+    audio_bytes = []
+    for f in files:
+        content = await f.read()
+        try:
+            _validate_audio_upload(content_type=f.content_type, filename=f.filename, size=len(content), max_mb=10)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+        audio_bytes.append(content)
+
+    from app.services.elevenlabs_provider import ElevenLabsProvider
+    provider = ElevenLabsProvider()
+    voice_id = await provider.clone_voice(req.name, audio_bytes, req.description)
+
+    clone = VoiceClone(
+        user_id=user.id,
+        name=req.name,
+        provider="elevenlabs",
+        external_voice_id=voice_id,
+        samples_count=len(audio_bytes),
+    )
+    db.add(clone)
+    await db.commit()
+    await db.refresh(clone)
+
+    return {
+        "clone_id": str(clone.id),
+        "voice_id": voice_id,
+        "name": req.name,
+    }
+
+
+@router.delete(
+    "/voices/{clone_id}",
+    summary="Delete cloned voice",
+    description="Deletes a user's cloned voice.",
+    responses={200: {"description": "Voice deleted"}}
+)
+async def delete_voice(
+    clone_id: str,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Delete a cloned voice."""
+    validate_uuid(clone_id)
+    result = await db.execute(
+        select(VoiceClone).where(VoiceClone.id == clone_id, VoiceClone.user_id == user.id)
+    )
+    clone = result.scalar_one_or_none()
+    if clone is None:
+        raise not_found_error()
+
+    # Delete from ElevenLabs
+    if clone.provider == "elevenlabs" and settings.ELEVENLABS_API_KEY:
+        try:
+            from app.services.elevenlabs_provider import ElevenLabsProvider
+            provider = ElevenLabsProvider()
+            await provider.delete_voice(clone.external_voice_id)
+        except Exception as e:
+            logger.warning(f"Failed to delete voice from ElevenLabs: {e}")
+
+    await db.delete(clone)
+    await db.commit()
+    return {"status": "deleted"}
+
+
+@router.post(
+    "/jobs/{job_id}/upload-audio",
+    summary="Upload custom audio",
+    description="Upload a custom audio file for a job.",
+    responses={200: {"description": "Audio uploaded"}}
+)
+@limiter.limit("10/minute")
+async def upload_audio(
+    request: Request,
+    job_id: str,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Upload custom audio (WAV/MP3/WebM) for a job."""
+    job = await get_owned_job(db, user, job_id)
+    job_id = str(job.id)
+
+    form = await request.form()
+    file = form.get("file")
+    if file is None:
+        raise HTTPException(status_code=400, detail="Envie um arquivo de áudio")
+
+    content = await file.read()
+    try:
+        ext = _validate_audio_upload(content_type=file.content_type, filename=file.filename, size=len(content))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    job_dir = Path(settings.STORAGE_DIR) / "jobs" / job_id
+    job_dir.mkdir(parents=True, exist_ok=True)
+
+    # Save uploaded file
+    upload_path = str(job_dir / f"upload{ext}")
+    with open(upload_path, "wb") as f:
+        f.write(content)
+
+    # Validate
+    from app.services.custom_audio_provider import validate_audio_file
+    try:
+        meta = validate_audio_file(upload_path)
+    except ValueError as e:
+        Path(upload_path).unlink(missing_ok=True)
+        raise HTTPException(status_code=400, detail=str(e))
+
+    # Normalize to WAV
+    output_path = str(job_dir / "narration.wav")
+    from app.services.custom_audio_provider import normalize_audio
+    normalize_audio(upload_path, output_path)
+
+    # Transcribe with Whisper for word timestamps
+    words = []
+    try:
+        from app.services.transcriber import transcribe_with_timestamps
+        words = transcribe_with_timestamps(output_path)
+        (job_dir / "words.json").write_text(json.dumps(words, ensure_ascii=False))
+    except Exception as e:
+        logger.warning(f"Whisper transcription of uploaded audio failed: {e}")
+
+    return {
+        "audio_url": f"/storage/jobs/{job_id}/narration.wav",
+        "words": words,
+        "duration": meta["duration"],
+    }
 
 
 # ── Editor endpoints ──────────────────────────────────────────
@@ -424,16 +666,25 @@ async def regenerate_tts(
     script = json.loads(script_path.read_text())
     narration = req.text if req.text else script.get("narration", "")
 
-    # Regenerate TTS (async to avoid blocking the event loop)
+    # Regenerate TTS (async)
     audio_path = str(job_dir / "narration.wav")
-    from app.services.tts import synthesize_narration_async
-    await synthesize_narration_async(
-        text=narration,
-        output_path=audio_path,
-        voice_id=req.voice_id or "pt-BR-AntonioNeural",
-        rate=req.rate if req.rate is not None else -10,
-        pitch=req.pitch if req.pitch is not None else 5,
-    )
+    if req.voice_provider == "elevenlabs" and settings.ELEVENLABS_API_KEY:
+        from app.services.elevenlabs_provider import ElevenLabsProvider
+        provider = ElevenLabsProvider()
+        await provider.synthesize(
+            text=narration,
+            output_path=audio_path,
+            voice_id=req.voice_id or "",
+        )
+    else:
+        from app.services.tts import synthesize_narration_async
+        await synthesize_narration_async(
+            text=narration,
+            output_path=audio_path,
+            voice_id=req.voice_id or "pt-BR-AntonioNeural",
+            rate=req.rate if req.rate is not None else -10,
+            pitch=req.pitch if req.pitch is not None else 5,
+        )
 
     # Re-transcribe with Whisper (keep old words as fallback)
     words_path = job_dir / "words.json"
@@ -894,3 +1145,18 @@ async def storage_stats(
     db: AsyncSession = Depends(get_db),
 ):
     return await _build_storage_stats(db)
+
+
+@router.get(
+    "/public/stats",
+    summary="Public stats",
+    description="Public platform statistics for landing page.",
+    responses={200: {"description": "Stats"}}
+)
+@limiter.limit("30/minute")
+async def public_stats(request: Request, db: AsyncSession = Depends(get_db)):
+    """Return public stats (total videos generated). No auth required."""
+    from sqlalchemy import func
+    result = await db.execute(select(func.count()).select_from(Job).where(Job.status == "completed"))
+    total_videos = result.scalar() or 0
+    return {"total_videos": total_videos}
