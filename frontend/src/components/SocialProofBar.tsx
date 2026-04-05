@@ -1,48 +1,16 @@
 'use client'
 
-import SocialProofCanvas from './SocialProofCanvas'
+import { CinematicSection } from './ui/CinematicSection'
+import { AnimatedCounter } from './ui/AnimatedCounter'
 
 export default function SocialProofBar() {
   return (
-    <div className="py-8 px-4">
-      <div className="max-w-3xl mx-auto flex items-center justify-center gap-6 md:gap-12">
-        <div className="text-center flex flex-col items-center">
-          <SocialProofCanvas
-            target={500}
-            suffix="+"
-            format={(n) => Math.floor(n) + '+'}
-            gradientFrom="#c084fc"
-            gradientTo="#f0abfc"
-          />
-          <span className="text-xs md:text-sm text-gray-500 mt-1 block">vídeos criados</span>
-        </div>
-
-        <div className="w-px h-10 bg-gray-700/50" />
-
-        <div className="text-center flex flex-col items-center">
-          <SocialProofCanvas
-            target={2}
-            suffix="min"
-            format={(n) => Math.floor(n) + 'min'}
-            gradientFrom="#60a5fa"
-            gradientTo="#22d3ee"
-          />
-          <span className="text-xs md:text-sm text-gray-500 mt-1 block">tempo médio</span>
-        </div>
-
-        <div className="w-px h-10 bg-gray-700/50" />
-
-        <div className="text-center flex flex-col items-center">
-          <SocialProofCanvas
-            target={3}
-            suffix=""
-            format={(n) => Math.floor(n) + ''}
-            gradientFrom="#22d3ee"
-            gradientTo="#4ade80"
-          />
-          <span className="text-xs md:text-sm text-gray-500 mt-1 block">vozes pt-BR</span>
-        </div>
+    <CinematicSection background="none" spacing="md" className="border-b border-white/5">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-12 md:gap-8 divide-y md:divide-y-0 md:divide-x divide-white/10">
+        <AnimatedCounter value={500} suffix="+" label="Vídeos criados" />
+        <AnimatedCounter value={2} suffix="min" label="Tempo médio" />
+        <AnimatedCounter value={3} suffix="" label="Vozes pt-BR" />
       </div>
-    </div>
+    </CinematicSection>
   )
 }

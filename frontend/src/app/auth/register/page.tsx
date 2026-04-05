@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { useAuth } from "@/contexts/AuthContext";
 import Logo from "@/components/brand/Logo";
+import { FilmstripBackground } from "@/components/ui/FilmstripBackground";
 
 export default function RegisterPage() {
   const [name, setName] = useState("");
@@ -35,27 +36,30 @@ export default function RegisterPage() {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center px-4">
-      <div className="card w-full max-w-md p-8">
-        <div className="flex justify-center mb-4">
+    <div className="min-h-screen flex items-center justify-center px-4 relative overflow-hidden bg-[#0f0b1a]">
+      <FilmstripBackground speed={35} opacity={0.05} />
+      <div className="absolute top-1/3 right-1/4 w-[500px] h-[500px] bg-purple-600/20 blur-[150px] rounded-full pointer-events-none"></div>
+
+      <div className="card w-full max-w-md p-8 relative z-10 bg-[#1a1425]/80 backdrop-blur-xl border border-white/10 shadow-2xl">
+        <div className="flex justify-center mb-6">
           <Logo size="lg" />
         </div>
-        <h1 className="text-xl font-semibold text-center mb-2 text-gray-200">
+        <h1 className="text-2xl font-bold text-center mb-2 text-white tracking-tight">
           {strings.auth.register.title}
         </h1>
         <p className="text-slate-400 text-center text-sm mb-8">
           {strings.auth.register.subtitle}
         </p>
 
-        <form onSubmit={handleSubmit} className="space-y-4">
+        <form onSubmit={handleSubmit} className="space-y-5">
           {error && (
-            <div className="bg-red-500/10 border border-red-500/20 rounded-lg p-3 text-red-400 text-sm">
+            <div className="bg-red-500/10 border border-red-500/20 rounded-xl p-4 text-red-400 text-sm font-medium">
               {error}
             </div>
           )}
 
           <div>
-            <label htmlFor="name" className="block text-sm text-slate-300 mb-1">
+            <label htmlFor="name" className="block text-sm font-medium text-slate-300 mb-1.5">
               {strings.auth.register.name}
             </label>
             <input
@@ -64,13 +68,13 @@ export default function RegisterPage() {
               value={name}
               onChange={(e) => setName(e.target.value)}
               required
-              className="w-full px-4 py-2.5 rounded-lg bg-white/5 border border-white/10 text-white placeholder-slate-500 focus:outline-none focus:border-purple-500/50"
+              className="w-full px-4 py-3 rounded-xl bg-white/5 border border-white/10 text-white placeholder-slate-500 focus:outline-none focus:border-purple-500/50 focus:bg-white/10 transition-colors"
               placeholder="Seu nome"
             />
           </div>
 
           <div>
-            <label htmlFor="email" className="block text-sm text-slate-300 mb-1">
+            <label htmlFor="email" className="block text-sm font-medium text-slate-300 mb-1.5">
               {strings.auth.login.email}
             </label>
             <input
@@ -79,13 +83,13 @@ export default function RegisterPage() {
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               required
-              className="w-full px-4 py-2.5 rounded-lg bg-white/5 border border-white/10 text-white placeholder-slate-500 focus:outline-none focus:border-purple-500/50"
+              className="w-full px-4 py-3 rounded-xl bg-white/5 border border-white/10 text-white placeholder-slate-500 focus:outline-none focus:border-purple-500/50 focus:bg-white/10 transition-colors"
               placeholder="seu@email.com"
             />
           </div>
 
           <div>
-            <label htmlFor="password" className="block text-sm text-slate-300 mb-1">
+            <label htmlFor="password" className="block text-sm font-medium text-slate-300 mb-1.5">
               {strings.auth.login.password}
             </label>
             <input
@@ -95,7 +99,7 @@ export default function RegisterPage() {
               onChange={(e) => setPassword(e.target.value)}
               required
               minLength={6}
-              className="w-full px-4 py-2.5 rounded-lg bg-white/5 border border-white/10 text-white placeholder-slate-500 focus:outline-none focus:border-purple-500/50"
+              className="w-full px-4 py-3 rounded-xl bg-white/5 border border-white/10 text-white placeholder-slate-500 focus:outline-none focus:border-purple-500/50 focus:bg-white/10 transition-colors"
               placeholder="Mínimo 6 caracteres"
             />
           </div>
@@ -103,15 +107,15 @@ export default function RegisterPage() {
           <button
             type="submit"
             disabled={loading}
-            className="btn-primary w-full py-2.5 rounded-lg font-semibold disabled:opacity-50"
+            className="w-full py-3.5 rounded-xl bg-gradient-to-r from-purple-600 to-blue-600 text-white font-bold disabled:opacity-50 hover:opacity-90 transition shadow-lg shadow-purple-500/25 mt-2"
           >
             {loading ? strings.auth.register.loading : strings.auth.register.submit}
           </button>
         </form>
 
-        <p className="text-center text-sm text-slate-400 mt-6">
+        <p className="text-center text-sm text-slate-400 mt-8">
           {strings.auth.register.hasAccount}{" "}
-          <Link href="/auth/login" className="text-purple-400 hover:text-purple-300">
+          <Link href="/auth/login" className="text-white font-semibold hover:text-purple-300 transition border-b border-white/20 pb-0.5">
             {strings.auth.login.submit}
           </Link>
         </p>

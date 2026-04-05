@@ -2,6 +2,10 @@
 
 import { useRef, useCallback, useEffect } from 'react'
 import ShowcasePretextOverlay from '@/components/ShowcasePretextOverlay'
+import { CinematicSection } from './ui/CinematicSection'
+import { GlowCard } from './ui/GlowCard'
+import { PretextHeading } from './ui/PretextHeading'
+import Link from 'next/link'
 
 const SHOWCASE_ITEMS = [
   {
@@ -36,11 +40,10 @@ const SHOWCASE_ITEMS = [
   },
 ]
 
-function ShowcaseCard({ item }: { item: (typeof SHOWCASE_ITEMS)[number] }) {
+function ShowcaseCard({ item, featured = false }: { item: (typeof SHOWCASE_ITEMS)[number], featured?: boolean }) {
   const videoRef = useRef<HTMLVideoElement>(null)
   const cardRef = useRef<HTMLDivElement>(null)
 
-  // Force play when visible — some browsers pause offscreen autoplay videos
   useEffect(() => {
     const card = cardRef.current
     const video = videoRef.current
@@ -75,89 +78,81 @@ function ShowcaseCard({ item }: { item: (typeof SHOWCASE_ITEMS)[number] }) {
   }, [])
 
   return (
-    <div
-      ref={cardRef}
-      className="rounded-2xl overflow-hidden border group transition cursor-pointer"
-      style={{ background: 'var(--bg-surface)', borderColor: 'var(--border-subtle)' }}
-      onMouseEnter={handleEnter}
-      onMouseLeave={handleLeave}
-      onTouchStart={handleEnter}
-      onTouchEnd={handleLeave}
-    >
-      <div className="relative aspect-[9/16] overflow-hidden">
-        {item.video ? (
-          <video
-            ref={videoRef}
-            autoPlay
-            muted
-            loop
-            playsInline
-            preload="auto"
-            className="w-full h-full object-cover"
-            src={item.video}
-          />
-        ) : (
-          <div className={`w-full h-full bg-gradient-to-br ${item.gradient} flex flex-col items-center justify-center relative`}>
-            <span className="text-6xl opacity-30 group-hover:opacity-50 transition">{item.icon}</span>
-            <ShowcasePretextOverlay phrase={item.phrase} style={item.captionStyle} accent={item.captionAccent} />
-          </div>
-        )}
-
-        {/* Hover audio hint */}
-        {item.video && (
-          <div className="absolute top-3 right-3 z-10 opacity-0 group-hover:opacity-100 transition">
-            <div className="w-7 h-7 rounded-full bg-black/50 backdrop-blur-sm flex items-center justify-center">
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="white">
-                <polygon points="11,5 6,9 2,9 2,15 6,15 11,19" />
-                <path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" />
-              </svg>
+    <GlowCard className={`h-full ${featured ? 'md:col-span-2' : ''}`}>
+      <div
+        ref={cardRef}
+        className="w-full h-full relative cursor-pointer"
+        onMouseEnter={handleEnter}
+        onMouseLeave={handleLeave}
+        onTouchStart={handleEnter}
+        onTouchEnd={handleLeave}
+      >
+        <div className="relative w-full h-full aspect-[9/16] md:aspect-auto md:min-h-[500px] overflow-hidden">
+          {item.video ? (
+            <video
+              ref={videoRef}
+              autoPlay
+              muted
+              loop
+              playsInline
+              preload="auto"
+              className="w-full h-full object-cover"
+              src={item.video}
+            />
+          ) : (
+            <div className={`w-full h-full bg-gradient-to-br ${item.gradient} flex flex-col items-center justify-center relative`}>
+              <span className="text-6xl opacity-30 group-hover:opacity-50 transition">{item.icon}</span>
+              <ShowcasePretextOverlay phrase={item.phrase} style={item.captionStyle} accent={item.captionAccent} />
             </div>
-          </div>
-        )}
+          )}
 
-        {/* Bottom overlay */}
-        <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 to-transparent p-4">
-          <p className="text-sm font-medium text-white leading-snug">{item.title}</p>
-          <span className="inline-block mt-1.5 text-[10px] px-2 py-0.5 rounded-full bg-purple-500/30 text-purple-300">
-            {item.template}
-          </span>
+          {item.video && (
+            <div className="absolute top-4 right-4 z-10 opacity-0 group-hover:opacity-100 transition">
+              <div className="w-10 h-10 rounded-full bg-black/50 backdrop-blur-md flex items-center justify-center border border-white/10">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="white">
+                  <polygon points="11,5 6,9 2,9 2,15 6,15 11,19" />
+                  <path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" />
+                </svg>
+              </div>
+            </div>
+          )}
+
+          <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-[#0f0b1a] via-[#0f0b1a]/80 to-transparent p-6 pt-24">
+            <h3 className={`font-bold text-white leading-tight ${featured ? 'text-2xl' : 'text-lg'}`}>{item.title}</h3>
+            <span className="inline-block mt-3 text-xs px-3 py-1 rounded-full bg-white/10 text-white/80 backdrop-blur-md border border-white/5">
+              {item.template}
+            </span>
+          </div>
         </div>
       </div>
-    </div>
+    </GlowCard>
   )
 }
 
 export default function ShowcaseSection() {
   return (
-    <section id="showcase" className="py-24 px-4">
-      <div className="max-w-5xl mx-auto">
-        <div className="text-center mb-12">
-          <h2 className="text-3xl md:text-4xl font-bold">
-            Veja o que a IA cria em{' '}
-            <span className="bg-gradient-to-r from-purple-400 to-blue-400 bg-clip-text text-transparent">
-              2 minutos
-            </span>
-          </h2>
-          <p className="mt-3 text-sm md:text-base" style={{ color: 'var(--text-secondary)' }}>
-            Veja o que a plataforma consegue criar automaticamente
-          </p>
-        </div>
-
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
-          {SHOWCASE_ITEMS.map((item) => (
-            <ShowcaseCard key={item.title} item={item} />
-          ))}
-        </div>
-
-        <div className="text-center mt-10">
-          <a
-            href="/auth/register"
-            className="inline-block px-8 py-3 rounded-xl bg-gradient-to-r from-purple-600 to-blue-600 text-white font-semibold hover:opacity-90 transition"
-          >
-            Criar meu primeiro vídeo
-          </a>
-        </div>
+    <CinematicSection background="none" spacing="xl" reveal="fade-up" className="border-b border-white/5">
+      <div className="text-center mb-16 max-w-3xl mx-auto">
+        <PretextHeading text="O que a IA cria em 2 minutos" animation="blur-focus" color="#ffffff" className="mb-6" />
+        <p className="text-xl text-slate-400">
+          Você digita a ideia. A IA escreve, narra e edita com legendas dinâmicas.
+        </p>
       </div>
-    </section>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 max-w-6xl mx-auto">
+        {SHOWCASE_ITEMS.map((item, i) => (
+          <ShowcaseCard key={item.title} item={item} featured={i === 0} />
+        ))}
+      </div>
+
+      <div className="text-center mt-16">
+        <Link
+          href="/auth/register"
+          className="inline-block px-8 py-4 rounded-xl bg-purple-600/20 text-purple-300 font-semibold hover:bg-purple-600/30 border border-purple-500/30 transition-all"
+        >
+          Criar meu primeiro vídeo
+        </Link>
+      </div>
+    </CinematicSection>
   )
 }

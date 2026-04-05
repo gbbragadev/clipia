@@ -66,6 +66,15 @@ export default function UserDropdown({ name, plan, onLogout }: UserDropdownProps
           >
             Meus Créditos
           </a>
+          {plan === 'admin' && (
+            <a
+              href="/dashboard/admin"
+              className="block px-4 py-2 text-sm transition hover:opacity-80"
+              style={{ color: '#86efac' }}
+            >
+              Admin
+            </a>
+          )}
           <a
             href="/dashboard/settings"
             className="block px-4 py-2 text-sm transition hover:opacity-80"

@@ -1,5 +1,6 @@
-import { strings } from '@/lib/strings';
 'use client'
+
+import { strings } from '@/lib/strings';
 
 interface LogoProps {
   size?: 'sm' | 'md' | 'lg'

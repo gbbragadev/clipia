@@ -18,6 +18,15 @@ export default function DashboardNavbar() {
 
           {user && (
             <div className="flex items-center gap-3">
+              {user.plan === 'admin' && (
+                <a
+                  href="/dashboard/admin"
+                  className="hidden rounded-full border px-3 py-1 text-xs font-semibold uppercase tracking-[0.16em] md:inline-flex"
+                  style={{ borderColor: 'rgba(34,197,94,0.25)', color: '#86efac', background: 'rgba(34,197,94,0.08)' }}
+                >
+                  Admin
+                </a>
+              )}
               <a href="/dashboard/credits" className="transition-opacity hover:opacity-80">
                 <CreditsBadge credits={user.credits} />
               </a>

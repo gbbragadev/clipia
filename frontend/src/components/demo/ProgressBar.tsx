@@ -1,5 +1,6 @@
-import { strings } from '@/lib/strings';
 'use client'
+
+import { strings } from '@/lib/strings';
 
 const STEPS = [
   { key: 'scripting', label: 'Roteiro' },

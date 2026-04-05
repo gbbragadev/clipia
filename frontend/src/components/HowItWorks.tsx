@@ -1,34 +1,35 @@
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
-import HowItWorksStepCanvas from './HowItWorksStepCanvas'
+import { CinematicSection } from './ui/CinematicSection'
+import { PretextHeading } from './ui/PretextHeading'
+import { GlowCard } from './ui/GlowCard'
 
 const steps = [
   {
     number: '01',
     title: 'Escolha um tema',
     description: 'Digite qualquer assunto e a IA gera um roteiro envolvente em pt-BR.',
-    gradient: 'linear-gradient(135deg, #7c3aed, #3b82f6)',
+    gradient: 'from-purple-900/60 to-blue-900/60',
     icon: 'edit',
   },
   {
     number: '02',
     title: 'A IA cria tudo',
-    description: 'Narracao com voz natural, legendas sincronizadas e midia selecionada automaticamente.',
-    gradient: 'linear-gradient(135deg, #d946ef, #7c3aed)',
+    description: 'Narração com voz natural, legendas sincronizadas e mídia selecionada automaticamente.',
+    gradient: 'from-fuchsia-900/60 to-purple-900/60',
     icon: 'play',
   },
   {
     number: '03',
     title: 'Edite e publique',
     description: 'Baixe em 9:16 e publique direto no YouTube Shorts, Reels ou TikTok.',
-    gradient: 'linear-gradient(135deg, #22d3ee, #3b82f6)',
+    gradient: 'from-cyan-900/60 to-blue-900/60',
     icon: 'upload',
   },
 ]
 
 function StepIcon({ type }: { type: string }) {
-  const size = 32
+  const size = 28
   if (type === 'edit') {
     return (
       <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -40,7 +41,7 @@ function StepIcon({ type }: { type: string }) {
   if (type === 'play') {
     return (
       <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-        <polygon points="5 3 19 12 5 21 5 3" fill="rgba(255,255,255,0.3)" />
+        <polygon points="5 3 19 12 5 21 5 3" fill="rgba(255,255,255,0.8)" />
       </svg>
     )
   }
@@ -54,84 +55,46 @@ function StepIcon({ type }: { type: string }) {
 }
 
 export default function HowItWorks() {
-  const [visible, setVisible] = useState(false)
-  const ref = useRef<HTMLDivElement>(null)
-
-  useEffect(() => {
-    const el = ref.current
-    if (!el) return
-    const obs = new IntersectionObserver(([e]) => { if (e.isIntersecting) setVisible(true) }, { threshold: 0.1 })
-    obs.observe(el)
-    return () => obs.disconnect()
-  }, [])
-
   return (
-    <section id="como-funciona" style={{ padding: '80px 16px' }} ref={ref}>
-      <div style={{ maxWidth: 1000, margin: '0 auto' }}>
-        <p style={{ textAlign: 'center', fontSize: 13, fontWeight: 500, color: '#7c3aed', letterSpacing: '0.1em', textTransform: 'uppercase', marginBottom: 8 }}>
-          Como funciona
-        </p>
-        <h2 style={{ textAlign: 'center', fontSize: 'clamp(1.8rem, 3vw, 2.5rem)', fontWeight: 800, color: 'white', marginBottom: 56 }}>
-          Do tema ao video em 3 passos
-        </h2>
-
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 24 }}>
-          {steps.map((step, i) => (
-            <div
-              key={step.number}
-              style={{
-                borderRadius: 20,
-                overflow: 'hidden',
-                opacity: 1,
-              }}
-            >
-              {/* Gradient header with icon */}
-              <div style={{
-                background: step.gradient,
-                padding: '40px 28px 32px',
-                display: 'flex',
-                flexDirection: 'column',
-                alignItems: 'center',
-                gap: 16,
-                position: 'relative',
-              }}>
-                <div style={{
-                  width: 64,
-                  height: 64,
-                  borderRadius: 16,
-                  background: 'rgba(255,255,255,0.15)',
-                  backdropFilter: 'blur(8px)',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                }}>
-                  <StepIcon type={step.icon} />
-                </div>
-                <div style={{ position: 'absolute', top: 12, right: 20 }}>
-                  <HowItWorksStepCanvas number={step.number} />
-                </div>
-              </div>
-
-              {/* Text content */}
-              <div style={{
-                background: 'rgba(255,255,255,0.03)',
-                border: '1px solid rgba(255,255,255,0.06)',
-                borderTop: 'none',
-                padding: '24px 28px 32px',
-                borderRadius: '0 0 20px 20px',
-              }}>
-                <h3 style={{ fontSize: 20, fontWeight: 700, color: 'white', marginBottom: 8 }}>
-                  {step.title}
-                </h3>
-                <p style={{ fontSize: 14, lineHeight: 1.7, color: '#94a3b8' }}>
-                  {step.description}
-                </p>
-              </div>
-            </div>
-          ))}
+    <CinematicSection background="grain" spacing="xl" reveal="fade-up" className="border-b border-white/5 relative">
+      <div className="absolute top-0 bottom-0 left-1/2 w-px bg-gradient-to-b from-transparent via-purple-500/20 to-transparent hidden lg:block -translate-x-1/2 z-0" />
+      
+      <div className="max-w-4xl mx-auto relative z-10">
+        <div className="text-center mb-20">
+          <p className="text-purple-400 font-medium tracking-[0.2em] uppercase text-xs mb-4">Pipeline Automático</p>
+          <PretextHeading text="Do tema ao vídeo pronto" animation="typewriter" color="#ffffff" className="mb-6" />
         </div>
 
+        <div className="space-y-24">
+          {steps.map((step, i) => {
+            const isEven = i % 2 !== 0
+            return (
+              <div key={step.number} className={`flex flex-col lg:flex-row items-center gap-12 lg:gap-24 ${isEven ? 'lg:flex-row-reverse' : ''}`}>
+                <div className={`flex-1 w-full text-center lg:text-left ${isEven ? 'lg:text-right' : ''}`}>
+                  <span className="text-6xl md:text-8xl font-black text-transparent bg-clip-text bg-gradient-to-b from-white/10 to-transparent block mb-4">
+                    {step.number}
+                  </span>
+                  <h3 className="text-2xl md:text-3xl font-bold text-white mb-4">{step.title}</h3>
+                  <p className={`text-lg text-slate-400 leading-relaxed max-w-md mx-auto lg:mx-0 ${isEven ? 'lg:ml-auto lg:mr-0' : ''}`}>
+                    {step.description}
+                  </p>
+                </div>
+                
+                <div className="flex-1 w-full max-w-sm">
+                  <GlowCard intensity={0.4}>
+                    <div className={`aspect-square w-full bg-gradient-to-br ${step.gradient} rounded-2xl flex items-center justify-center relative overflow-hidden p-8`}>
+                      <div className="absolute inset-0 bg-[url(/noise.svg)] opacity-20 mix-blend-overlay" />
+                      <div className="w-24 h-24 rounded-full bg-black/40 backdrop-blur-xl border border-white/10 flex items-center justify-center shadow-2xl relative z-10 transform hover:scale-110 transition duration-500">
+                        <StepIcon type={step.icon} />
+                      </div>
+                    </div>
+                  </GlowCard>
+                </div>
+              </div>
+            )
+          })}
+        </div>
       </div>
-    </section>
+    </CinematicSection>
   )
 }
