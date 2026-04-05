@@ -13,7 +13,7 @@ from alembic import op
 from app.db.types import GUID
 
 revision: str = "a8a59ff9f7fd"
-down_revision: Union[str, None] = "f2b6c6a9d51b"
+down_revision: Union[str, None] = "4b6ee1a62487"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
