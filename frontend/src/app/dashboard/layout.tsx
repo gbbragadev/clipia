@@ -1,31 +1,11 @@
-'use client'
+import { Metadata } from 'next'
+import DashboardLayoutClient from './DashboardLayoutClient'
 
-import { useEffect, type ReactNode } from 'react'
-import { useRouter } from 'next/navigation'
-import { getToken } from '@/lib/auth'
-import { useAuth } from '@/contexts/AuthContext'
-import DashboardNavbar from '@/components/dashboard/DashboardNavbar'
+export const metadata: Metadata = {
+  title: 'Dashboard | ClipIA',
+  description: 'Gere e gerencie seus vídeos curtos com IA.',
+}
 
-export default function DashboardLayout({ children }: { children: ReactNode }) {
-  const router = useRouter()
-  const { loading } = useAuth()
-
-  useEffect(() => {
-    if (!loading && !getToken()) {
-      router.replace('/auth/login')
-    }
-  }, [loading, router])
-
-  if (loading) {
-    return <div className="min-h-screen" style={{ background: 'var(--bg-raised)' }} />
-  }
-
-  return (
-    <div className="min-h-screen font-sans" style={{ background: 'var(--bg-raised)', color: 'var(--text-primary)' }}>
-      <DashboardNavbar />
-      <main className="pt-14">
-        {children}
-      </main>
-    </div>
-  )
+export default function DashboardLayout({ children }: { children: React.ReactNode }) {
+  return <DashboardLayoutClient>{children}</DashboardLayoutClient>
 }

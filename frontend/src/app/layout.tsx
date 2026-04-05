@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { Inter, Space_Grotesk } from "next/font/google";
 import "./globals.css";
 import FilmGrain from "@/components/FilmGrain";
-import { AuthProvider } from "@/contexts/AuthContext";
+import AppProviders from "@/components/providers/AppProviders";
 
 const inter = Inter({
   variable: "--font-inter",
@@ -16,9 +16,9 @@ const spaceGrotesk = Space_Grotesk({
 });
 
 export const metadata: Metadata = {
-  title: "ClipIA - Crie videos curtos com IA",
+  title: "ClipIA - Crie vídeos curtos com IA",
   description:
-    "Transforme qualquer tema em video pronto para publicar. Roteiro, narracao, legendas e edicao — tudo automatico com IA.",
+    "Transforme qualquer tema em vídeo pronto para publicar. Roteiro, narração, legendas e edição — tudo automático com IA.",
   icons: {
     icon: [
       { url: "/favicon-icon.svg", type: "image/svg+xml" },
@@ -26,9 +26,9 @@ export const metadata: Metadata = {
     apple: "/apple-touch-icon.png",
   },
   openGraph: {
-    title: "ClipIA - Crie videos curtos com IA",
+    title: "ClipIA - Crie vídeos curtos com IA",
     description:
-      "Transforme qualquer tema em video pronto para publicar. Roteiro, narracao, legendas e edicao — tudo automatico com IA.",
+      "Transforme qualquer tema em vídeo pronto para publicar. Roteiro, narração, legendas e edição — tudo automático com IA.",
     url: "https://clipia.com.br",
     siteName: "ClipIA",
     images: [
@@ -61,11 +61,32 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="pt-BR" className={`${inter.variable} ${spaceGrotesk.variable} h-full antialiased`}>
+      <head>
+        <script
+          type="application/ld+json"
+          dangerouslySetInnerHTML={{
+            __html: JSON.stringify({
+              "@context": "https://schema.org",
+              "@type": "SoftwareApplication",
+              "name": "ClipIA",
+              "applicationCategory": "MultimediaApplication",
+              "operatingSystem": "Web",
+              "offers": {
+                "@type": "Offer",
+                "price": "0",
+                "priceCurrency": "BRL"
+              },
+              "description": "Plataforma de geração automatizada de vídeos curtos com IA",
+              "url": "https://clipia.com.br"
+            })
+          }}
+        />
+      </head>
       <body className="min-h-full flex flex-col">
         <FilmGrain />
-        <AuthProvider>
+        <AppProviders>
           {children}
-        </AuthProvider>
+        </AppProviders>
       </body>
     </html>
   );

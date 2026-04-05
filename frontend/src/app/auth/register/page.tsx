@@ -1,5 +1,6 @@
 "use client";
 
+import { strings } from '@/lib/strings';
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
@@ -40,10 +41,10 @@ export default function RegisterPage() {
           <Logo size="lg" />
         </div>
         <h1 className="text-xl font-semibold text-center mb-2 text-gray-200">
-          Crie sua conta
+          {strings.auth.register.title}
         </h1>
         <p className="text-slate-400 text-center text-sm mb-8">
-          Verifique seu email e ganhe 2 créditos grátis
+          {strings.auth.register.subtitle}
         </p>
 
         <form onSubmit={handleSubmit} className="space-y-4">
@@ -55,7 +56,7 @@ export default function RegisterPage() {
 
           <div>
             <label htmlFor="name" className="block text-sm text-slate-300 mb-1">
-              Nome
+              {strings.auth.register.name}
             </label>
             <input
               id="name"
@@ -70,7 +71,7 @@ export default function RegisterPage() {
 
           <div>
             <label htmlFor="email" className="block text-sm text-slate-300 mb-1">
-              Email
+              {strings.auth.login.email}
             </label>
             <input
               id="email"
@@ -85,7 +86,7 @@ export default function RegisterPage() {
 
           <div>
             <label htmlFor="password" className="block text-sm text-slate-300 mb-1">
-              Senha
+              {strings.auth.login.password}
             </label>
             <input
               id="password"
@@ -104,14 +105,14 @@ export default function RegisterPage() {
             disabled={loading}
             className="btn-primary w-full py-2.5 rounded-lg font-semibold disabled:opacity-50"
           >
-            {loading ? "Criando conta..." : "Criar conta grátis"}
+            {loading ? strings.auth.register.loading : strings.auth.register.submit}
           </button>
         </form>
 
         <p className="text-center text-sm text-slate-400 mt-6">
-          Já tem conta?{" "}
+          {strings.auth.register.hasAccount}{" "}
           <Link href="/auth/login" className="text-purple-400 hover:text-purple-300">
-            Entrar
+            {strings.auth.login.submit}
           </Link>
         </p>
       </div>

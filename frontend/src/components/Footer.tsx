@@ -1,3 +1,6 @@
+import { strings } from '@/lib/strings';
+import Link from 'next/link'
+
 export default function Footer() {
   return (
     <footer>
@@ -5,9 +8,13 @@ export default function Footer() {
       <div className="py-8 px-4">
         <div className="max-w-5xl mx-auto flex flex-col md:flex-row items-center justify-between gap-4 text-sm text-gray-500">
           <span className="font-semibold">
-            Clip<span className="bg-gradient-to-r from-purple-400 to-blue-400 bg-clip-text text-transparent">IA</span>
+            Clip<span className="bg-gradient-to-r from-purple-400 to-blue-400 bg-clip-text text-transparent">{strings.editor.ai}</span>
           </span>
-          <span className="text-gray-600 text-xs">Transforme temas em videos com IA</span>
+          <span className="text-gray-600 text-xs">Transforme ideias em vídeos virais com IA</span>
+          <div className="flex gap-4">
+            <Link href="/termos" className="hover:text-purple-400">Termos de Uso</Link>
+            <Link href="/privacidade" className="hover:text-purple-400">Política de Privacidade</Link>
+          </div>
           <span>ClipIA &middot; {new Date().getFullYear()}</span>
         </div>
       </div>

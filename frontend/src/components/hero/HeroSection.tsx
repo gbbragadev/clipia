@@ -30,7 +30,7 @@ export default function HeroSection() {
                 fontSize: 'clamp(2.5rem, 5vw, 4.5rem)', fontWeight: 900,
                 color: 'white', lineHeight: 1.05, letterSpacing: '-0.03em', marginBottom: 20,
               }}>
-                Crie videos curtos
+                Crie vídeos virais
                 <br />
                 <span style={{ color: '#a78bfa' }}>com IA</span>
               </h1>
@@ -39,7 +39,7 @@ export default function HeroSection() {
 
             <p style={{ fontSize: 18, lineHeight: 1.7, color: '#94a3b8', maxWidth: 440, marginBottom: 24 }}>
               Digite um tema e receba um video pronto para publicar.
-              Roteiro, narracao, legendas e edicao — tudo automatico em minutos.
+              Roteiro, narração, legendas e edição — tudo automático em minutos.
             </p>
 
             {/* Pretext live subtitle preview */}
@@ -64,9 +64,14 @@ export default function HeroSection() {
             </div>
 
             {/* CTAs */}
-            <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
-              <a href="#demo" className="btn-primary">Experimentar agora</a>
-              <a href="#como-funciona" className="btn-outline">Como funciona</a>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginBottom: 24 }}>
+              <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+                <a href="/auth/register" className="btn-primary">Criar meu primeiro vídeo grátis</a>
+                <a href="#demo" className="btn-outline">Ver demo</a>
+              </div>
+              <p style={{ fontSize: 13, color: '#94a3b8', margin: 0 }}>
+                2 vídeos grátis &bull; Sem cartão de crédito
+              </p>
             </div>
           </div>
 

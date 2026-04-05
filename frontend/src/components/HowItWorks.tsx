@@ -6,21 +6,21 @@ import HowItWorksStepCanvas from './HowItWorksStepCanvas'
 const steps = [
   {
     number: '01',
-    title: 'Escolha o tema',
+    title: 'Escolha um tema',
     description: 'Digite qualquer assunto e a IA gera um roteiro envolvente em pt-BR.',
     gradient: 'linear-gradient(135deg, #7c3aed, #3b82f6)',
     icon: 'edit',
   },
   {
     number: '02',
-    title: 'IA cria o video',
+    title: 'A IA cria tudo',
     description: 'Narracao com voz natural, legendas sincronizadas e midia selecionada automaticamente.',
     gradient: 'linear-gradient(135deg, #d946ef, #7c3aed)',
     icon: 'play',
   },
   {
     number: '03',
-    title: 'Publique',
+    title: 'Edite e publique',
     description: 'Baixe em 9:16 e publique direto no YouTube Shorts, Reels ou TikTok.',
     gradient: 'linear-gradient(135deg, #22d3ee, #3b82f6)',
     icon: 'upload',

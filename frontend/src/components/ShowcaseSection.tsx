@@ -133,9 +133,9 @@ export default function ShowcaseSection() {
       <div className="max-w-5xl mx-auto">
         <div className="text-center mb-12">
           <h2 className="text-3xl md:text-4xl font-bold">
-            Vídeos criados com{' '}
+            Veja o que a IA cria em{' '}
             <span className="bg-gradient-to-r from-purple-400 to-blue-400 bg-clip-text text-transparent">
-              ClipIA
+              2 minutos
             </span>
           </h2>
           <p className="mt-3 text-sm md:text-base" style={{ color: 'var(--text-secondary)' }}>
