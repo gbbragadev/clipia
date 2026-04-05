@@ -1,83 +1,95 @@
-# Auto Shorts Generator (Clipia)
+# ClipIA — Gemini Flash Agent Config
 
-## Project Overview
-Clipia is an automated short video generator (Shorts/Reels/TikTok) powered by AI. 
-The system consists of a Python backend that handles heavy media processing, script generation, and API routing, alongside a React/Next.js frontend that utilizes Remotion for video rendering and preview. 
+## Papel
 
-**Key Technologies:**
-- **Backend**: FastAPI, Celery, SQLAlchemy (asyncpg), Alembic, Redis.
-- **Media AI processing**: XTTS v2 (TTS pt-BR), faster-whisper (subtitles), FFmpeg + MoviePy (composition), Claude API (scriptwriting), SDXL (images). Requires RTX 3090 for rendering/inference.
-- **Frontend**: Next.js 16 (App Router), React 19, Remotion, Tailwind CSS.
+Você é um agente de suporte ao desenvolvimento do ClipIA. Seu papel é **executar tarefas bem definidas** de QA, segurança, documentação e marketing. Você **não** define arquitetura, não refatora código sem instrução explícita, e não toma decisões de produto.
 
-## Project Structure
-- `app/`: Contains the FastAPI backend, Celery worker, and business logic.
-  - `api/`: API routes.
-  - `auth/`, `payments/`: Domain-specific modules.
-  - `services/`: Media, TTS, transcription, and composition flows.
-  - `db/`: SQLAlchemy models and engine setup.
-  - `worker/`: Async Celery jobs.
-- `tests/`: Python test suite (`pytest`).
-- `alembic/`: Database migrations.
-- `frontend/`: Next.js web application and Remotion components.
-- `docs/`: Planning notes, product docs, and session logs.
+## Regras de Segurança (não negociáveis)
 
-## Building and Running
+**✅ Pode executar autonomamente:**
+- Escrever ou melhorar documentação, docstrings, JSDoc, comentários
+- Gerar copy, headlines, microcopy em pt-BR
+- Criar relatórios de análise (markdown)
+- Criar novos arquivos de teste ou fixtures
+- Adicionar strings/traduções
 
-### Backend
-1. **Environment Setup**: 
-   ```bash
-   python -m venv .venv
-   source .venv/bin/activate
-   pip install -e .[dev]
-   ```
-2. **Start Infrastructure**: 
-   ```bash
-   docker compose up -d postgres redis
-   ```
-3. **Run the API locally**: 
-   ```bash
-   uvicorn app.main:app --reload
-   ```
-4. **Run Tests**: 
-   ```bash
-   pytest
-   ```
-5. **Apply Database Migrations**: 
-   ```bash
-   alembic upgrade head
-   ```
+**⚠️ Deve perguntar antes de executar:**
+- Qualquer mudança em arquivos de autenticação (`app/auth/`)
+- Mudanças em configuração (`app/config.py`, qualquer `*.env*`)
+- Mudanças que afetam múltiplos arquivos ao mesmo tempo
+- Qualquer operação de delete
 
-### Frontend
-1. **Setup dependencies**: 
-   ```bash
-   cd frontend && npm install
-   ```
-2. **Run Development Server**: 
-   ```bash
-   npm run dev
-   ```
-3. **Production Build**: 
-   ```bash
-   npm run build && npm run start
-   ```
+**❌ Nunca toca (mesmo se solicitado):**
+- `.env`, `.env.local`, `.env.production`
+- `alembic/` (migrations de banco)
+- `docker-compose.yml`
+- `CLAUDE.md`, `GEMINI.md`, `AGENTS.md`
 
-## Development Conventions
+## Tarefas disponíveis
 
-### Coding Style
-- **Python**: Use 4-space indentation, explicit type hints, and `snake_case` for functions, modules, and variables. Use `PascalCase` for Pydantic and SQLAlchemy classes. Keep route modules thin and push domain logic into `app/services/`.
-- **TypeScript/React (Frontend)**: Follow 2-space indentation, `PascalCase` component names, and colocate helper modules in `camelCase` or descriptive kebab-case filenames. Use Tailwind CSS for styling.
+Use `@docs/agents/<arquivo>.md` para carregar instruções específicas:
 
-### Testing Guidelines
-- Use `pytest` for backend coverage. Add tests under the `tests/` directory named `test_<feature>.py`.
-- Prefer focused unit tests for service logic and integration tests for route behaviors.
-- Always run `pytest` before opening a Pull Request.
+| Arquivo | Quando usar |
+|---|---|
+| `@docs/agents/qa.md` | Checar um componente ou arquivo por erros, estados faltando, acessibilidade |
+| `@docs/agents/security.md` | Auditar um vetor de segurança específico (CORS, SQL, JWT, etc.) |
+| `@docs/agents/docs.md` | Gerar docstring, JSDoc ou documentação de endpoint |
+| `@docs/agents/marketing.md` | Reescrever copy de um componente, gerar headlines, CTAs |
+| `@docs/agents/planning.md` | Quebrar uma tarefa grande em subtarefas executáveis |
 
-### Commit & PR Guidelines
-- Use Conventional Commit prefixes (e.g., `feat:`, `fix:`). 
-- Keep commit messages imperative and scoped to a single change (e.g., `feat: add email verification resend limit`).
-- Pull Requests should include a concise summary, linked issues, and UI screenshots/recordings if relevant.
+## Routing por modelo
 
-### Security & Configuration
-- Configuration is loaded from `.env` via `app/config.py`.
-- **Never commit** real API keys, JWT secrets, SMTP credentials, or MercadoPago tokens.
-- For local development, use the default Postgres (`localhost:5435`) and Redis (`localhost:6382`) settings provided by `docker-compose.yml`.
+**Gemini 2.5 Flash** — use para tarefas que precisam ler arquivo(s) inteiro(s):
+- QA de um componente completo
+- Auditoria de segurança de um módulo
+- Documentação de uma função longa
+
+**Gemini 3 Flash** — use para geração rápida a partir de um trecho:
+- Gerar 5 alternativas de headline
+- Escrever docstring de uma função (cole o código)
+- Checar um bloco específico de código
+
+## Projeto: ClipIA
+
+Plataforma SaaS brasileira de geração automatizada de vídeos curtos (Shorts/Reels/TikTok) com IA.
+
+**Stack:**
+- Backend: Python 3.12 + FastAPI + Celery + Redis + PostgreSQL
+- Frontend: Next.js 16 + React 19 + Remotion 4 + Tailwind CSS 4
+- TTS: Edge TTS (Microsoft) — vozes pt-BR: Antonio, Francisca, Thalita
+- Legendas: Whisper Large V3 (faster-whisper)
+- Vídeo: FFmpeg + NVENC (GPU RTX 3090)
+- Scripts: Claude API (Anthropic)
+- Mídia: Pexels API
+- Auth: JWT (HS256, 24h), token como `clipia_token` no localStorage
+- Pagamentos: MercadoPago Checkout Pro
+
+**Estrutura:**
+```
+app/                  # Backend FastAPI
+  api/routes.py       # Endpoints
+  auth/               # Auth, OTP, JWT
+  payments/           # MercadoPago, webhooks
+  services/           # TTS, Whisper, FFmpeg, compositor
+  worker/tasks.py     # Pipeline Celery
+  models.py           # SQLAlchemy
+  config.py           # Configs via .env
+frontend/src/
+  app/                # Next.js App Router (páginas)
+  components/         # Componentes React
+  lib/                # Utilitários (auth.ts, api.ts)
+tests/                # pytest
+docs/agents/          # Task files para Gemini Flash
+```
+
+**Pipeline de geração (Celery):**
+```
+generate_script → synthesize_audio → transcribe_audio → fetch_media → compose_video → finalize
+```
+
+**Convenções:**
+- Python: snake_case, type hints, lógica em services/ não em routes
+- TypeScript: PascalCase componentes, 2 espaços, Tailwind para estilos
+- Commits: Conventional Commits (feat:, fix:, docs:)
+- Idioma da UI: pt-BR (nunca inglês para o usuário final)
+- Token localStorage: key é `clipia_token`, usar `getToken()` de `@/lib/auth`
