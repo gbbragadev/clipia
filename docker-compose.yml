@@ -30,6 +30,35 @@ services:
       timeout: 5s
       retries: 3
 
+  backend:
+    build: .
+    ports:
+      - "8005:8005"
+    env_file: .env
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    volumes:
+      - ./storage:/app/storage
+      - ./fonts:/app/fonts
+
+  worker:
+    build: .
+    command: celery -A app.worker.celery_app worker -l info --concurrency=1
+    env_file: .env
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    volumes:
+      - ./storage:/app/storage
+      - ./fonts:/app/fonts
+
 volumes:
   pgdata:
   redisdata:
