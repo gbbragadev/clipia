@@ -1,9 +1,21 @@
-import type { MetadataRoute } from 'next'
+import type { MetadataRoute } from "next";
+import { blogPosts } from "@/lib/blog-posts";
 
 export default function sitemap(): MetadataRoute.Sitemap {
-  return [
-    { url: 'https://clipia.com.br', lastModified: new Date(), changeFrequency: 'weekly', priority: 1 },
-    { url: 'https://clipia.com.br/auth/login', lastModified: new Date(), changeFrequency: 'monthly', priority: 0.5 },
-    { url: 'https://clipia.com.br/auth/register', lastModified: new Date(), changeFrequency: 'monthly', priority: 0.7 },
-  ]
+  const base = "https://clipia.com.br";
+
+  const staticPages: MetadataRoute.Sitemap = [
+    { url: base, changeFrequency: "daily", priority: 1 },
+    { url: `${base}/auth/login`, changeFrequency: "monthly", priority: 0.3 },
+    { url: `${base}/auth/register`, changeFrequency: "monthly", priority: 0.5 },
+  ];
+
+  const blogPages: MetadataRoute.Sitemap = blogPosts.map((post) => ({
+    url: `${base}/blog/${post.slug}`,
+    lastModified: post.date,
+    changeFrequency: "monthly" as const,
+    priority: 0.7,
+  }));
+
+  return [...staticPages, ...blogPages];
 }
