@@ -33,17 +33,23 @@ async def test_register_rejects_blank_space_email_and_short_password(client):
 
 @pytest.mark.asyncio
 async def test_topic_length_boundaries_are_enforced(client, verified_user, auth_headers):
+    below_min = await client.post(
+        "/api/v1/generate",
+        headers=auth_headers(verified_user),
+        json={"topic": "a" * 9, "style": "educational", "duration_target": 45, "template_id": "stock_narration"},
+    )
     at_limit = await client.post(
         "/api/v1/generate",
         headers=auth_headers(verified_user),
-        json={"topic": "a" * 500, "style": "educational", "duration_target": 45},
+        json={"topic": "a" * 500, "style": "educational", "duration_target": 45, "template_id": "stock_narration"},
     )
     over_limit = await client.post(
         "/api/v1/generate",
         headers=auth_headers(verified_user),
-        json={"topic": "a" * 501, "style": "educational", "duration_target": 45},
+        json={"topic": "a" * 501, "style": "educational", "duration_target": 45, "template_id": "stock_narration"},
     )
 
+    assert below_min.status_code == 422, "Topics shorter than 10 characters should be rejected."
     assert at_limit.status_code == 200, "500-character topics should be accepted."
     assert over_limit.status_code == 422, "Topics longer than 500 characters should be rejected."
 

@@ -6,6 +6,7 @@ from unittest.mock import MagicMock
 
 import pytest
 import pytest_asyncio
+from tests.fixtures import TEST_USERS, SAMPLE_SCRIPTS
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import event
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
@@ -29,6 +30,7 @@ from app.worker import tasks as worker_tasks
 class FakeRedis:
     def __init__(self):
         self.data: dict[str, dict[str, str]] = {}
+        self.values: dict[str, str] = {}
 
     def hset(self, key: str, mapping: dict[str, str]):
         self.data.setdefault(key, {}).update({k: str(v) for k, v in mapping.items()})
@@ -36,11 +38,22 @@ class FakeRedis:
     def hgetall(self, key: str) -> dict[str, str]:
         return dict(self.data.get(key, {}))
 
+    def hget(self, key: str, field: str) -> str | None:
+        return self.data.get(key, {}).get(field)
+
+    def set(self, key: str, value: str):
+        self.values[key] = str(value)
+
+    def get(self, key: str) -> str | None:
+        return self.values.get(key)
+
     def delete(self, key: str):
         self.data.pop(key, None)
+        self.values.pop(key, None)
 
     def clear(self):
         self.data.clear()
+        self.values.clear()
 
 
 @pytest.fixture(autouse=True)
@@ -103,6 +116,8 @@ async def app(test_db, monkeypatch):
     monkeypatch.setattr(api_routes, "dispatch_pipeline", dispatch_pipeline)
     monkeypatch.setattr(worker_tasks, "task_rerender_video", rerender_task)
     monkeypatch.setattr(auth_routes, "send_verification_email", MagicMock(return_value=True))
+    monkeypatch.setattr(auth_routes, "send_password_reset_email", MagicMock(return_value=True))
+    monkeypatch.setattr(auth_routes, "send_account_deleted_email", MagicMock(return_value=True))
 
     app = create_app()
     app.dependency_overrides[get_db] = test_db["override_get_db"]
@@ -158,6 +173,7 @@ async def user_factory(test_db):
         name: str = "Test User",
         password_hash: str = "hashed-password",
         credits: int = 0,
+        plan: str = "free",
         verified: bool = False,
         verification_code: str | None = "123456",
         verification_expires=None,
@@ -173,6 +189,7 @@ async def user_factory(test_db):
                 name=name,
                 password_hash=password_hash,
                 credits=credits,
+                plan=plan,
                 email_verified=verified,
                 verification_code=verification_code if not verified else None,
                 verification_expires=verification_expires if not verified else None,
@@ -193,6 +210,36 @@ async def verified_user(user_factory):
         email="verified@example.com",
         password_hash=hash_password("supersecret"),
         credits=5,
+        verified=True,
+        verification_code=None,
+        verification_expires=None,
+    )
+
+
+@pytest_asyncio.fixture
+async def other_verified_user(user_factory):
+    from app.auth.service import hash_password
+
+    return await user_factory(
+        email="other-verified@example.com",
+        password_hash=hash_password("supersecret"),
+        credits=5,
+        verified=True,
+        verification_code=None,
+        verification_expires=None,
+    )
+
+
+@pytest_asyncio.fixture
+async def admin_user(user_factory):
+    from app.auth.service import hash_password
+
+    return await user_factory(
+        email="admin@example.com",
+        name="Admin User",
+        password_hash=hash_password("supersecret"),
+        credits=10,
+        plan="admin",
         verified=True,
         verification_code=None,
         verification_expires=None,

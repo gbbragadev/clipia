@@ -19,9 +19,9 @@ async def test_invalid_json_and_missing_fields_return_422(client):
 @pytest.mark.asyncio
 async def test_invalid_uuid_and_missing_files_are_handled_gracefully(client, verified_user, auth_headers):
     invalid_uuid = await client.get("/api/v1/jobs/not-a-uuid/composition", headers=auth_headers(verified_user))
-    missing_video = await client.get("/api/v1/jobs/does-not-exist/download")
+    missing_video = await client.get(f"/api/v1/jobs/{'0' * 8}-{ '0' * 4}-{ '0' * 4}-{ '0' * 4}-{ '0' * 12}/download", headers=auth_headers(verified_user))
 
-    assert invalid_uuid.status_code in {404, 422}, "Invalid job ids should not crash the composition endpoint."
+    assert invalid_uuid.status_code == 422, "Invalid job ids should be rejected before touching storage."
     assert missing_video.status_code == 404, "Missing downloads should return 404."
 
 
