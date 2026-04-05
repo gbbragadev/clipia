@@ -69,9 +69,9 @@
             <label for="style">Estilo</label>
             <select id="style">
               <option value="educational">Educativo</option>
-              <option value="curiosity">Curiosidades</option>
               <option value="storytelling">Narrativa</option>
               <option value="news">Noticias</option>
+              <option value="comedy">Comedia</option>
             </select>
           </div>
 
@@ -84,14 +84,14 @@
               <input
                 type="range"
                 id="duration"
-                min="20"
-                max="60"
+                min="15"
+                max="180"
                 value="45"
                 step="5"
               />
               <div class="slider-labels">
-                <span>20s</span>
-                <span>60s</span>
+                <span>15s</span>
+                <span>180s</span>
               </div>
             </div>
           </div>
@@ -414,8 +414,8 @@
       var style    = document.getElementById('style').value;
       var duration = parseInt(durationInput.value, 10);
 
-      if (topic.length < 5) {
-        showError('O tema precisa ter pelo menos 5 caracteres.');
+      if (topic.length < 10) {
+        showError('O tema precisa ter pelo menos 10 caracteres.');
         return;
       }
 

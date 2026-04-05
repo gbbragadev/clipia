@@ -1,11 +1,14 @@
 import asyncio
 import json
 import logging
+import smtplib
 import shutil
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
+from email.mime.text import MIMEText
 from pathlib import Path
 
 import redis
+from celery.exceptions import SoftTimeLimitExceeded
 
 from app.config import settings
 from app.services.compositor import compose_short
@@ -13,7 +16,7 @@ from app.services.media import download_media, search_media_for_scene
 from app.services.scriptwriter import generate_script
 from app.services.transcriber import transcribe_with_timestamps
 from app.services.tts import synthesize_narration
-from app.utils.files import cleanup_job_dir, get_job_dir, get_output_dir
+from app.utils.files import bytes_to_gb, cleanup_job_dir, get_job_dir, get_output_dir, remove_path
 from app.worker.celery_app import celery_app
 
 logger = logging.getLogger(__name__)
@@ -21,17 +24,73 @@ logger = logging.getLogger(__name__)
 _redis = redis.Redis.from_url(settings.REDIS_URL, decode_responses=True)
 
 
-def _update_job(job_id: str, status: str, step: str | None = None, progress: float = 0.0, error: str | None = None):
-    data = {"status": status, "current_step": step or "", "progress": str(progress), "error": error or ""}
+def _update_job(
+    job_id: str,
+    status: str,
+    step: str | None = None,
+    progress: float = 0.0,
+    error: str | None = None,
+    detail: str | None = None,
+):
+    data = {
+        "status": status,
+        "current_step": step or "",
+        "progress": str(progress),
+        "error": error or "",
+        "detail": detail or "",
+    }
     _redis.hset(f"job:{job_id}", mapping=data)
 
 
-def _fail_job(job_id: str, error: str):
-    """Mark job as failed and attempt credit refund."""
-    logger.error(f"Job {job_id} failed: {error}")
-    _update_job(job_id, "error", error=error)
+def _redis_get(key: str) -> str | None:
+    getter = getattr(_redis, "get", None)
+    return getter(key) if getter else None
 
-    # Refund credit in PostgreSQL
+
+def _redis_set(key: str, value: str) -> None:
+    setter = getattr(_redis, "set", None)
+    if setter:
+        setter(key, value)
+
+
+def _redis_hget(key: str, field: str) -> str | None:
+    getter = getattr(_redis, "hget", None)
+    if getter:
+        return getter(key, field)
+    return _redis.hgetall(key).get(field)
+
+
+def _send_admin_alert(subject: str, message: str) -> None:
+    if not settings.SMTP_HOST:
+        return
+
+    msg = MIMEText(message)
+    msg["Subject"] = subject
+    msg["From"] = settings.SMTP_FROM
+    msg["To"] = settings.SMTP_FROM
+
+    try:
+        with smtplib.SMTP(settings.SMTP_HOST, settings.SMTP_PORT) as server:
+            server.starttls()
+            server.login(settings.SMTP_USER, settings.SMTP_PASSWORD)
+            server.send_message(msg)
+    except Exception:
+        logger.exception("Failed to send admin alert email")
+
+
+def _enqueue_dead_letter(job_id: str, error: str) -> None:
+    timestamp = datetime.now(timezone.utc).isoformat()
+    _redis_set(f"failed_jobs:{job_id}", timestamp)
+    _send_admin_alert(
+        "ClipIA - job na dead letter queue",
+        f"Job {job_id} entrou na fila de revisao em {timestamp}.\n\nErro: {error}",
+    )
+
+
+def _refund_job_credit(job_id: str, status_value: str, error: str, cleanup_files: bool = False):
+    """Persist final state and refund the original generation credit once."""
+    _update_job(job_id, status_value, error=error, detail=error)
+
     try:
         from sqlalchemy import select, update
         from app.db.engine import async_session
@@ -42,17 +101,65 @@ def _fail_job(job_id: str, error: str):
                 result = await session.execute(select(Job).where(Job.id == job_id))
                 job = result.scalar_one_or_none()
                 if job:
-                    job.status = "failed"
+                    if cleanup_files:
+                        cleanup_job_dir(job_id)
+                        remove_path(get_output_dir() / f"{job_id}.mp4")
+                    if job.status in {"failed", "cancelled"}:
+                        job.status = status_value
+                        job.error = error
+                        await session.commit()
+                        return
+                    job.status = status_value
                     job.error = error
                     await session.execute(
                         update(User).where(User.id == job.user_id).values(credits=User.credits + 1)
                     )
                     await session.commit()
-                    logger.info(f"Refunded 1 credit for failed job {job_id}")
+                    logger.info("Refunded 1 credit for %s job %s", status_value, job_id)
 
         asyncio.run(_refund())
     except Exception as e:
-        logger.error(f"Failed to refund credit for job {job_id}: {e}")
+        logger.error("Failed to refund credit for job %s: %s", job_id, e)
+
+
+def _fail_job(job_id: str, error: str):
+    """Mark job as failed, refund, and enqueue for review."""
+    logger.exception("Job %s failed: %s", job_id, error)
+    _refund_job_credit(job_id, "failed", error)
+    _enqueue_dead_letter(job_id, error)
+
+
+def _is_cancelled(job_id: str) -> bool:
+    return _redis_get(f"job:{job_id}:cancelled") == "true"
+
+
+def _cancel_job(job_id: str, detail: str = "Processamento cancelado pelo usuario.") -> None:
+    logger.info("Job %s cancelled", job_id)
+    _refund_job_credit(job_id, "cancelled", detail, cleanup_files=True)
+
+
+def _check_cancelled(job_id: str) -> bool:
+    if _is_cancelled(job_id):
+        _cancel_job(job_id)
+        return True
+    return False
+
+
+def _retry_or_fail(self, job_id: str, exc: Exception, message: str, countdowns: list[int]):
+    attempt = int(getattr(getattr(self, "request", None), "retries", 0))
+    if attempt < len(countdowns):
+        countdown = countdowns[attempt]
+        _update_job(job_id, "processing", progress=0.0, detail=f"{message} Tentando novamente em {countdown}s.")
+        raise self.retry(exc=exc, countdown=countdown, max_retries=len(countdowns))
+    _fail_job(job_id, message)
+    raise exc
+
+
+def _handle_soft_timeout(job_id: str, task_name: str):
+    message = "Video demorou demais para gerar. Tente novamente."
+    logger.error("Task %s exceeded soft time limit for job %s", task_name, job_id)
+    _refund_job_credit(job_id, "failed", message)
+    _enqueue_dead_letter(job_id, f"{task_name} soft timeout")
 
 
 def dispatch_pipeline(job_id: str, topic: str, style: str, duration_target: int, template_id: str = "stock_narration"):
@@ -63,6 +170,7 @@ def dispatch_pipeline(job_id: str, topic: str, style: str, duration_target: int,
         "current_step": "",
         "progress": "0",
         "error": "",
+        "detail": "",
         "created_at": datetime.now(timezone.utc).isoformat(),
         "template_id": template_id,
     })
@@ -77,10 +185,106 @@ def dispatch_pipeline(job_id: str, topic: str, style: str, duration_target: int,
     pipeline.apply_async()
 
 
+async def _cleanup_old_jobs_async() -> dict[str, int]:
+    from sqlalchemy import select
+    from app.db.engine import async_session
+    from app.db.models import Job
+
+    now = datetime.now(timezone.utc)
+    failed_cutoff = now - timedelta(days=7)
+    completed_cutoff = now - timedelta(days=30)
+
+    total_reclaimed = 0
+    removed_jobs = 0
+    removed_outputs = 0
+
+    async with async_session() as session:
+        result = await session.execute(
+            select(Job).where(
+                (
+                    (Job.status == "failed") & (Job.created_at <= failed_cutoff)
+                )
+                | (
+                    (Job.status.in_(("completed", "editable"))) & (Job.created_at <= completed_cutoff)
+                )
+            )
+        )
+        jobs = result.scalars().all()
+
+        for job in jobs:
+            job_dir = settings.STORAGE_DIR / "jobs" / str(job.id)
+            output_path = settings.STORAGE_DIR / "output" / f"{job.id}.mp4"
+            if output_path.exists():
+                removed_outputs += 1
+            total_reclaimed += remove_path(job_dir)
+            total_reclaimed += remove_path(output_path)
+            if job.video_url is not None:
+                job.video_url = None
+            removed_jobs += 1
+
+        await session.commit()
+
+    logger.info(
+        "cleanup_old_jobs removed %s jobs and reclaimed %.2f GB",
+        removed_jobs,
+        bytes_to_gb(total_reclaimed),
+    )
+    return {"removed_jobs": removed_jobs, "removed_outputs": removed_outputs, "reclaimed_bytes": total_reclaimed}
+
+
+async def _cleanup_orphan_files_async() -> dict[str, int]:
+    from sqlalchemy import select
+    from app.db.engine import async_session
+    from app.db.models import Job
+
+    total_reclaimed = 0
+    removed_dirs = 0
+    removed_outputs = 0
+
+    jobs_dir = settings.STORAGE_DIR / "jobs"
+    output_dir = settings.STORAGE_DIR / "output"
+    jobs_dir.mkdir(parents=True, exist_ok=True)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    async with async_session() as session:
+        result = await session.execute(select(Job.id))
+        job_ids = {str(job_id) for job_id in result.scalars().all()}
+
+    for entry in jobs_dir.iterdir():
+        if entry.is_dir() and entry.name not in job_ids:
+            total_reclaimed += remove_path(entry)
+            removed_dirs += 1
+
+    for entry in output_dir.glob("*.mp4"):
+        if entry.stem not in job_ids:
+            total_reclaimed += remove_path(entry)
+            removed_outputs += 1
+
+    logger.info(
+        "cleanup_orphan_files removed %s dirs and %s outputs, reclaimed %.2f GB",
+        removed_dirs,
+        removed_outputs,
+        bytes_to_gb(total_reclaimed),
+    )
+    return {"removed_dirs": removed_dirs, "removed_outputs": removed_outputs, "reclaimed_bytes": total_reclaimed}
+
+
+@celery_app.task(name="cleanup_old_jobs")
+def cleanup_old_jobs() -> dict[str, int]:
+    return asyncio.run(_cleanup_old_jobs_async())
+
+
+@celery_app.task(name="cleanup_orphan_files")
+def cleanup_orphan_files() -> dict[str, int]:
+    return asyncio.run(_cleanup_orphan_files_async())
+
+
 @celery_app.task(name="generate_script", bind=True)
 def task_generate_script(self, job_id: str, topic: str, style: str, duration_target: int, template_id: str = "stock_narration") -> dict:
     try:
-        _update_job(job_id, "processing", "scripting", 0.1)
+        if _check_cancelled(job_id):
+            return {"cancelled": True}
+        _update_job(job_id, "processing", "scripting", 0.1, detail="Gerando roteiro com IA...")
         script = generate_script(topic, style, duration_target, template_id=template_id)
         job_dir = get_job_dir(job_id)
         (job_dir / "script.json").write_text(json.dumps(script, ensure_ascii=False, indent=2))
@@ -92,21 +296,27 @@ def task_generate_script(self, job_id: str, topic: str, style: str, duration_tar
         total_dur = sum(s.get("duration_hint", 7) for s in scenes)
         logger.info(f"Script: {len(scenes)} scenes, {total_dur}s total, {len(script.get('narration', '').split())} words")
 
-        _update_job(job_id, "processing", "scripting", 0.16)
+        _update_job(job_id, "processing", "scripting", 0.16, detail="Roteiro gerado com sucesso.")
         script["_duration_target"] = duration_target
         return script
-    except Exception as e:
-        _fail_job(job_id, f"Script generation failed: {e}")
+    except SoftTimeLimitExceeded:
+        _handle_soft_timeout(job_id, "generate_script")
         raise
+    except Exception as e:
+        _retry_or_fail(self, job_id, e, f"Script generation failed: {e}", [10, 30])
 
 
 @celery_app.task(name="synthesize_audio", bind=True)
 def task_synthesize_audio(self, script: dict, job_id: str, template_id: str = "stock_narration") -> str:
     try:
+        if isinstance(script, dict) and script.get("cancelled"):
+            return ""
+        if _check_cancelled(job_id):
+            return ""
         from app.templates import get_template
         template = get_template(template_id)
 
-        _update_job(job_id, "processing", "tts", 0.2)
+        _update_job(job_id, "processing", "tts", 0.25, detail="Sintetizando narracao...")
         job_dir = get_job_dir(job_id)
         output_path = str(job_dir / "narration.wav")
         duration_target = script.get("_duration_target", 0)
@@ -127,18 +337,23 @@ def task_synthesize_audio(self, script: dict, job_id: str, template_id: str = "s
         if size < 10000:  # < 10KB = probably empty/corrupt
             raise RuntimeError(f"TTS output too small ({size} bytes)")
 
-        _update_job(job_id, "processing", "tts", 0.4)
+        _update_job(job_id, "processing", "tts", 0.35, detail="Validando audio...")
+        _update_job(job_id, "processing", "tts", 0.4, detail="Narracao pronta.")
         logger.info(f"TTS output: {size / 1024:.0f}KB")
         return output_path
-    except Exception as e:
-        _fail_job(job_id, f"TTS failed: {e}")
+    except SoftTimeLimitExceeded:
+        _handle_soft_timeout(job_id, "synthesize_audio")
         raise
+    except Exception as e:
+        _retry_or_fail(self, job_id, e, f"TTS failed: {e}", [5, 15])
 
 
 @celery_app.task(name="transcribe_audio", bind=True)
 def task_transcribe_audio(self, audio_path: str, job_id: str) -> dict:
     try:
-        _update_job(job_id, "processing", "transcribing", 0.45)
+        if not audio_path or _check_cancelled(job_id):
+            return {"cancelled": True}
+        _update_job(job_id, "processing", "transcribing", 0.45, detail="Transcrevendo com Whisper...")
         words = transcribe_with_timestamps(audio_path)
         job_dir = get_job_dir(job_id)
         (job_dir / "words.json").write_text(json.dumps(words, ensure_ascii=False))
@@ -148,8 +363,11 @@ def task_transcribe_audio(self, audio_path: str, job_id: str) -> dict:
             raise RuntimeError("Whisper produced no word timestamps")
 
         logger.info(f"Transcription: {len(words)} words, last word at {words[-1]['end']:.1f}s")
-        _update_job(job_id, "processing", "transcribing", 0.5)
+        _update_job(job_id, "processing", "transcribing", 0.5, detail="Transcricao concluida.")
         return {"words": words, "script": script, "audio_path": audio_path}
+    except SoftTimeLimitExceeded:
+        _handle_soft_timeout(job_id, "transcribe_audio")
+        raise
     except Exception as e:
         _fail_job(job_id, f"Transcription failed: {e}")
         raise
@@ -158,11 +376,13 @@ def task_transcribe_audio(self, audio_path: str, job_id: str) -> dict:
 @celery_app.task(name="fetch_media", bind=True)
 def task_fetch_media(self, data: dict, job_id: str, template_id: str = "stock_narration") -> dict:
     try:
+        if data.get("cancelled") or _check_cancelled(job_id):
+            return {"cancelled": True}
         from app.templates import get_template
         from app.services.media_library import pick_clip
 
         template = get_template(template_id)
-        _update_job(job_id, "processing", "media", 0.55)
+        _update_job(job_id, "processing", "media", 0.55, detail="Buscando videos...")
         script = data["script"]
         job_dir = get_job_dir(job_id)
         media_dir = job_dir / "media"
@@ -182,7 +402,16 @@ def task_fetch_media(self, data: dict, job_id: str, template_id: str = "stock_na
         else:
             # Original Pexels behavior (per-scene search)
             for i, scene in enumerate(script["scenes"]):
+                if _check_cancelled(job_id):
+                    return {"cancelled": True}
                 keywords = scene.get("keywords_en", ["nature"])
+                _update_job(
+                    job_id,
+                    "processing",
+                    "media",
+                    0.55,
+                    detail=f"Buscando videos (cena {i + 1}/{len(script['scenes'])})...",
+                )
                 results = asyncio.run(search_media_for_scene(keywords))
                 if results:
                     dest = str(media_dir / f"scene_{i}.mp4")
@@ -205,21 +434,25 @@ def task_fetch_media(self, data: dict, job_id: str, template_id: str = "stock_na
             raise RuntimeError("No media available")
 
         logger.info(f"Media: {len(media_paths)} file(s) ready")
-        _update_job(job_id, "processing", "media", 0.65)
+        _update_job(job_id, "processing", "media", 0.65, detail="Midias prontas.")
         data["media_paths"] = media_paths
         return data
-    except Exception as e:
-        _fail_job(job_id, f"Media fetch failed: {e}")
+    except SoftTimeLimitExceeded:
+        _handle_soft_timeout(job_id, "fetch_media")
         raise
+    except Exception as e:
+        _retry_or_fail(self, job_id, e, f"Media fetch failed: {e}", [10, 30, 60])
 
 
 @celery_app.task(name="compose_video", bind=True)
 def task_compose_video(self, data: dict, job_id: str, template_id: str = "stock_narration") -> str:
     try:
+        if data.get("cancelled") or _check_cancelled(job_id):
+            return ""
         from app.templates import get_template
         template = get_template(template_id)
 
-        _update_job(job_id, "processing", "compositing", 0.7)
+        _update_job(job_id, "processing", "compositing", 0.7, detail="Montando video com FFmpeg...")
         job_dir = get_job_dir(job_id)
         output_path = str(job_dir / "final.mp4")
         compose_short(
@@ -230,8 +463,11 @@ def task_compose_video(self, data: dict, job_id: str, template_id: str = "stock_
             output_path=output_path,
             layout=template.layout,
         )
-        _update_job(job_id, "processing", "compositing", 0.9)
+        _update_job(job_id, "processing", "compositing", 0.9, detail="Video montado.")
         return output_path
+    except SoftTimeLimitExceeded:
+        _handle_soft_timeout(job_id, "compose_video")
+        raise
     except Exception as e:
         _fail_job(job_id, f"Compositing failed: {e}")
         raise
@@ -240,7 +476,9 @@ def task_compose_video(self, data: dict, job_id: str, template_id: str = "stock_
 @celery_app.task(name="finalize", bind=True)
 def task_finalize(self, video_path: str, job_id: str) -> str:
     try:
-        _update_job(job_id, "processing", "finalizing", 0.95)
+        if not video_path or _check_cancelled(job_id):
+            return ""
+        _update_job(job_id, "processing", "finalizing", 0.95, detail="Salvando video final...")
         output_dir = get_output_dir()
         final_path = str(output_dir / f"{job_id}.mp4")
         shutil.copy2(video_path, final_path)
@@ -270,8 +508,11 @@ def task_finalize(self, video_path: str, job_id: str) -> str:
         except Exception as e:
             logger.warning(f"Could not save script to DB: {e}")
 
-        _update_job(job_id, "completed", None, 1.0)
+        _update_job(job_id, "completed", None, 1.0, detail="Video final pronto para download.")
         return final_path
+    except SoftTimeLimitExceeded:
+        _handle_soft_timeout(job_id, "finalize")
+        raise
     except Exception as e:
         _fail_job(job_id, f"Finalize failed: {e}")
         raise
@@ -284,7 +525,9 @@ def task_rerender_video(self, job_id: str) -> str:
     Runs in background — user never waits. Previous version stays available.
     """
     try:
-        _update_job(job_id, "rendering", "preparing", 0.05)
+        if _check_cancelled(job_id):
+            return ""
+        _update_job(job_id, "rendering", "preparing", 0.05, detail="Preparando arquivos para re-render...")
         job_dir = get_job_dir(job_id)
         from app.config import BASE_DIR
         from app.services.compositor import compose_short
@@ -335,12 +578,12 @@ def task_rerender_video(self, job_id: str) -> str:
 
         output_path = str(job_dir / "final_edited.mp4")
 
-        _update_job(job_id, "rendering", "encoding", 0.2)
+        _update_job(job_id, "rendering", "encoding", 0.2, detail="Re-renderizando video...")
         logger.info(f"Starting FFmpeg+NVENC re-render for job {job_id}")
 
         # Get template layout for re-render
         from app.templates import get_template
-        re_template_id = _redis.hget(f"job:{job_id}", "template_id") or "stock_narration"
+        re_template_id = _redis_hget(f"job:{job_id}", "template_id") or "stock_narration"
         re_template = get_template(re_template_id)
 
         compose_short(
@@ -355,17 +598,20 @@ def task_rerender_video(self, job_id: str) -> str:
             layout=re_template.layout,
         )
 
-        _update_job(job_id, "rendering", "finalizing", 0.9)
+        _update_job(job_id, "rendering", "finalizing", 0.9, detail="Finalizando re-render...")
 
         # Copy to output dir (becomes downloadable version)
         output_dir = get_output_dir()
         final_path = str(output_dir / f"{job_id}.mp4")
         shutil.copy2(output_path, final_path)
 
-        _update_job(job_id, "completed", None, 1.0)
+        _update_job(job_id, "completed", None, 1.0, detail="Re-render concluido.")
         logger.info(f"Re-render completed for job {job_id}")
         return final_path
+    except SoftTimeLimitExceeded:
+        _handle_soft_timeout(job_id, "rerender_video")
+        raise
     except Exception as e:
-        _update_job(job_id, "error", error=str(e))
+        _update_job(job_id, "error", error=str(e), detail=str(e))
         logger.error(f"Re-render failed for job {job_id}: {e}")
         raise

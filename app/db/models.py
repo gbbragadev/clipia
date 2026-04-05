@@ -47,7 +47,7 @@ class Job(Base):
     __tablename__ = "jobs"
 
     id: Mapped[uuid.UUID] = mapped_column(GUID(), primary_key=True, default=uuid.uuid4)
-    user_id: Mapped[uuid.UUID] = mapped_column(GUID(), ForeignKey("users.id"), nullable=False)
+    user_id: Mapped[uuid.UUID] = mapped_column(GUID(), ForeignKey("users.id"), nullable=False, index=True)
     topic: Mapped[str] = mapped_column(String(500), nullable=False)
     style: Mapped[str] = mapped_column(String(50), nullable=False)
     duration_target: Mapped[int] = mapped_column(Integer, nullable=False)

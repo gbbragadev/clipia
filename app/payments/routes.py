@@ -23,11 +23,18 @@ from app.payments.schemas import (
 from app.payments.service import create_checkout, process_webhook
 
 logger = logging.getLogger(__name__)
-router = APIRouter()
+router = APIRouter(tags=["payments"])
 
 
-@router.get("/credits/packages", response_model=list[PackageResponse])
+@router.get(
+    "/credits/packages",
+    response_model=list[PackageResponse],
+    summary="List packages",
+    description="Returns available credit packages.",
+    responses={200: {"description": "List of packages"}}
+)
 async def list_packages(user: User = Depends(get_current_user)):
+    """Get available credit packages."""
     packages = []
     for key, pkg in CREDIT_PACKAGES.items():
         price = pkg["price_brl"]
@@ -45,12 +52,19 @@ async def list_packages(user: User = Depends(get_current_user)):
     return packages
 
 
-@router.post("/credits/checkout", response_model=CheckoutResponse)
+@router.post(
+    "/credits/checkout",
+    response_model=CheckoutResponse,
+    summary="Checkout package",
+    description="Creates a checkout URL to buy credits.",
+    responses={200: {"description": "Checkout URL"}}
+)
 async def checkout(
     req: CheckoutRequest,
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
+    """Initiate a credit purchase."""
     if req.package not in CREDIT_PACKAGES:
         raise HTTPException(status_code=400, detail="Pacote invalido")
 
@@ -58,11 +72,18 @@ async def checkout(
     return CheckoutResponse(checkout_url=checkout_url, purchase_id=purchase_id)
 
 
-@router.post("/webhooks/mercadopago", status_code=200)
+@router.post(
+    "/webhooks/mercadopago",
+    status_code=200,
+    summary="Mercado Pago Webhook",
+    description="Receives payment updates from MercadoPago.",
+    responses={200: {"description": "Processed"}}
+)
 async def mercadopago_webhook(
     request: Request,
     db: AsyncSession = Depends(get_db),
 ):
+    """Process payment webhook."""
     body = await request.body()
     try:
         parsed = json.loads(body)
@@ -121,11 +142,18 @@ async def mercadopago_webhook(
     return {"status": "credited" if credited else "not_credited"}
 
 
-@router.get("/credits/history", response_model=PurchaseHistoryResponse)
+@router.get(
+    "/credits/history",
+    response_model=PurchaseHistoryResponse,
+    summary="Purchase history",
+    description="Returns a list of user credit purchases.",
+    responses={200: {"description": "Purchase history"}}
+)
 async def purchase_history(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
+    """Retrieve purchase history."""
     stmt = (
         select(CreditPurchase)
         .where(CreditPurchase.user_id == user.id)

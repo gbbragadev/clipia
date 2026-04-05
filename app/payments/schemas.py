@@ -1,7 +1,7 @@
 from datetime import datetime
 from uuid import UUID
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 CREDIT_PACKAGES = {
@@ -12,31 +12,31 @@ CREDIT_PACKAGES = {
 
 
 class PackageResponse(BaseModel):
-    id: str
-    name: str
-    credits: int
-    price_brl: int  # centavos
-    price_display: str  # "R$ 19,90"
+    id: str = Field(..., description="Package identifier")
+    name: str = Field(..., description="Package display name")
+    credits: int = Field(..., description="Number of credits included")
+    price_brl: int = Field(..., description="Price in BRL cents")
+    price_display: str = Field(..., description="Formatted price string")
 
 
 class CheckoutRequest(BaseModel):
-    package: str  # "starter", "popular", "pro"
+    package: str = Field(..., description="Package ID to purchase")
 
 
 class CheckoutResponse(BaseModel):
-    checkout_url: str
-    purchase_id: UUID
+    checkout_url: str = Field(..., description="URL to complete payment")
+    purchase_id: UUID = Field(..., description="Internal purchase ID")
 
 
 class PurchaseHistoryItem(BaseModel):
-    id: UUID
-    package_name: str
-    credits_amount: int
-    price_brl: int
-    status: str
-    created_at: datetime
-    paid_at: datetime | None
+    id: UUID = Field(..., description="Purchase ID")
+    package_name: str = Field(..., description="Package name")
+    credits_amount: int = Field(..., description="Credits amount")
+    price_brl: int = Field(..., description="Price in BRL cents")
+    status: str = Field(..., description="Payment status")
+    created_at: datetime = Field(..., description="Creation timestamp")
+    paid_at: datetime | None = Field(default=None, description="Payment timestamp")
 
 
 class PurchaseHistoryResponse(BaseModel):
-    purchases: list[PurchaseHistoryItem]
+    purchases: list[PurchaseHistoryItem] = Field(..., description="List of past purchases")

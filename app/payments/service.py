@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.db.models import CreditPurchase, User
+from app.observability import record_credit_metric
 from app.payments.schemas import CREDIT_PACKAGES
 from app.utils.locks import get_lock
 
@@ -113,5 +114,6 @@ async def process_webhook(payment_id: str, db: AsyncSession) -> bool:
         user.credits += purchase.credits_amount
 
         await db.commit()
+        record_credit_metric("credit", purchase.credits_amount)
         logger.info("Credited %d credits to user %s (purchase %s)", purchase.credits_amount, user.id, purchase.id)
         return True

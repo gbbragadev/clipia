@@ -10,6 +10,10 @@ import edge_tts
 VOICE = "pt-BR-AntonioNeural"
 RATE = "-10%"
 PITCH = "+5Hz"
+SUPPORTED_VOICE_IDS = (
+    "pt-BR-AntonioNeural",
+    "pt-BR-FranciscaNeural",
+)
 
 logger = logging.getLogger(__name__)
 

@@ -1,4 +1,5 @@
 from celery import Celery
+from celery.schedules import crontab
 
 from app.config import settings
 
@@ -13,6 +14,16 @@ celery_app.conf.update(
     worker_concurrency=1,
     worker_prefetch_multiplier=1,
     task_acks_late=True,
+    beat_schedule={
+        "cleanup-old-jobs": {
+            "task": "cleanup_old_jobs",
+            "schedule": crontab(hour=4, minute=0),
+        },
+        "cleanup-orphan-files": {
+            "task": "cleanup_orphan_files",
+            "schedule": crontab(hour=4, minute=30, day_of_week=0),
+        },
+    },
 )
 
 celery_app.autodiscover_tasks(["app.worker"])
