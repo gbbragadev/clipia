@@ -5,7 +5,7 @@ export default function manifest(): MetadataRoute.Manifest {
     name: "ClipIA",
     short_name: "ClipIA",
     description:
-      "Transforme qualquer tema em video pronto para publicar. Roteiro, narracao, legendas e edicao — tudo automatico com IA.",
+      "Transforme qualquer tema em vídeo pronto para publicar. Roteiro, narração, legendas e edição — tudo automático com IA.",
     start_url: "/",
     display: "standalone",
     background_color: "#050509",

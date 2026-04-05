@@ -1,5 +1,6 @@
 'use client'
 
+import { strings } from '@/lib/strings';
 import { useState } from 'react'
 import dynamic from 'next/dynamic'
 import { useEditor } from '@/contexts/EditorContext'
@@ -13,6 +14,7 @@ import { MusicSelector } from './MusicSelector'
 import { AIAssistant } from './AIAssistant'
 import { ExportPanel } from './ExportPanel'
 import { useKeyboardShortcuts } from '@/hooks/useKeyboardShortcuts'
+import { InlineError } from '@/components/ui/feedback'
 
 const VideoPlayer = dynamic(() => import('./VideoPlayer').then((m) => ({ default: m.VideoPlayer })), {
   ssr: false,
@@ -24,11 +26,11 @@ const VideoPlayer = dynamic(() => import('./VideoPlayer').then((m) => ({ default
 })
 
 const PANELS = [
-  { key: 'scenes' as const, label: 'Cenas', icon: '▦' },
-  { key: 'voice' as const, label: 'Voz', icon: '♪' },
-  { key: 'subtitles' as const, label: 'Legendas', icon: 'T' },
-  { key: 'elements' as const, label: 'Elementos', icon: '◈' },
-  { key: 'ai' as const, label: 'IA', icon: '✦' },
+  { key: 'scenes' as const, label: strings.editor.scenes, icon: '▦' },
+  { key: 'voice' as const, label: strings.editor.voice, icon: '♪' },
+  { key: 'subtitles' as const, label: strings.editor.subtitles, icon: 'T' },
+  { key: 'elements' as const, label: strings.editor.elements, icon: '◈' },
+  { key: 'ai' as const, label: strings.editor.ai, icon: '✦' },
 ]
 
 export function EditorLayout() {
@@ -50,11 +52,12 @@ export function EditorLayout() {
 
   if (error) {
     return (
-      <div className="editor">
-        <div className="editor-loading">
-          <div className="editor-loading__title" style={{ color: '#ef4444' }}>Erro ao carregar</div>
-          <div className="editor-loading__sub">{error}</div>
-        </div>
+      <div className="editor" style={{ padding: 24 }}>
+        <InlineError
+          title="Não foi possível carregar o editor"
+          description={error}
+          onRetry={() => window.location.reload()}
+        />
       </div>
     )
   }
@@ -69,10 +72,10 @@ export function EditorLayout() {
           <span className="editor-header__title">{composition?.title || 'Sem titulo'}</span>
         </div>
         <div className="editor-header__right">
-          {saving && <span className="editor-header__status editor-header__status--saving">Salvando...</span>}
-          {dirty && !saving && <span className="editor-header__status editor-header__status--dirty">Nao salvo</span>}
-          {!dirty && !saving && <span className="editor-header__status editor-header__status--saved">Salvo</span>}
-          <button className="editor-header__export" onClick={() => setShowExport(true)}>Exportar Video</button>
+          {saving && <span className="editor-header__status editor-header__status--saving">{strings.editor.saving}</span>}
+          {dirty && !saving && <span className="editor-header__status editor-header__status--dirty">Não salvo</span>}
+          {!dirty && !saving && <span className="editor-header__status editor-header__status--saved">{strings.editor.saved}</span>}
+          <button className="editor-header__export" onClick={() => setShowExport(true)}>Exportar Vídeo</button>
         </div>
       </header>
 

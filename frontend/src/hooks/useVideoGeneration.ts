@@ -1,7 +1,7 @@
 'use client'
 
 import { useCallback, useRef, useState } from 'react'
-import { generateVideo, getJobStatus, getDownloadUrl, type GenerateRequest, type JobStatus } from '@/lib/api'
+import { generateVideo, getDownloadBlobUrl, getJobStatus, type GenerateRequest, type JobStatus } from '@/lib/api'
 
 const STEP_LABELS: Record<string, string> = {
   scripting: 'Gerando roteiro...',
@@ -44,7 +44,7 @@ export function useVideoGeneration() {
           if (job.status === 'completed') {
             stopPolling()
             setIsGenerating(false)
-            setDownloadUrl(getDownloadUrl(job_id))
+            setDownloadUrl(await getDownloadBlobUrl(job_id))
           } else if (job.status === 'failed') {
             stopPolling()
             setIsGenerating(false)

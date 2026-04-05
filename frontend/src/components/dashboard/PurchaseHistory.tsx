@@ -1,7 +1,8 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { fetchHistory, type PurchaseHistoryItem } from '@/lib/payments'
+import { InlineError } from '@/components/ui/feedback'
 
 const STATUS_LABELS: Record<string, { label: string; color: string }> = {
   approved: { label: 'Aprovado', color: '#22c55e' },
@@ -12,13 +13,27 @@ const STATUS_LABELS: Record<string, { label: string; color: string }> = {
 export default function PurchaseHistory() {
   const [purchases, setPurchases] = useState<PurchaseHistoryItem[]>([])
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+  const mountedRef = useRef(true)
+
+  const loadHistory = useCallback(async () => {
+    setError(null)
+    setLoading(true)
+    try {
+      const data = await fetchHistory()
+      if (mountedRef.current) setPurchases(data)
+    } catch (err) {
+      if (mountedRef.current) setError(err instanceof Error ? err.message : 'Erro ao carregar histórico')
+    } finally {
+      if (mountedRef.current) setLoading(false)
+    }
+  }, [])
 
   useEffect(() => {
-    fetchHistory()
-      .then(setPurchases)
-      .catch(console.error)
-      .finally(() => setLoading(false))
-  }, [])
+    mountedRef.current = true
+    loadHistory()
+    return () => { mountedRef.current = false }
+  }, [loadHistory])
 
   if (loading) {
     return (
@@ -27,6 +42,16 @@ export default function PurchaseHistory() {
           <div key={i} className="h-10 rounded-lg" style={{ background: 'var(--bg-surface)' }} />
         ))}
       </div>
+    )
+  }
+
+  if (error) {
+    return (
+      <InlineError
+        title="Não foi possível carregar o histórico"
+        description={error}
+        onRetry={loadHistory}
+      />
     )
   }
 

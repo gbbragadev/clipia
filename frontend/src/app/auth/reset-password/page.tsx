@@ -1,32 +1,27 @@
 "use client";
 
 import { strings } from '@/lib/strings';
-import { useState, useRef, useEffect, Suspense } from "react";
+import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { verifyEmail, resendCode } from "@/lib/auth";
-import { useAuth } from "@/contexts/AuthContext";
+import { Suspense, useEffect, useRef, useState } from "react";
 import Logo from "@/components/brand/Logo";
-import { useToast } from "@/components/ui/feedback";
+import { resetPassword, verifyResetCode } from "@/lib/auth";
 
-function VerifyForm() {
+function ResetPasswordForm() {
   const [code, setCode] = useState(["", "", "", "", "", ""]);
+  const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
-  const [resending, setResending] = useState(false);
-  const [resendCooldown, setResendCooldown] = useState(0);
   const inputs = useRef<(HTMLInputElement | null)[]>([]);
   const params = useSearchParams();
   const email = params.get("email") || "";
   const router = useRouter();
-  const { refreshUser } = useAuth();
-  const { success, error: toastError } = useToast();
 
   useEffect(() => {
-    if (resendCooldown > 0) {
-      const timer = setTimeout(() => setResendCooldown(resendCooldown - 1), 1000);
-      return () => clearTimeout(timer);
+    if (!email) {
+      router.replace("/auth/forgot-password");
     }
-  }, [resendCooldown]);
+  }, [email, router]);
 
   function handleChange(index: number, value: string) {
     if (!/^\d*$/.test(value)) return;
@@ -61,41 +56,25 @@ function VerifyForm() {
       setError(strings.auth.verify.errorIncomplete);
       return;
     }
+    if (password.length < 6) {
+      setError("Senha deve ter pelo menos 6 caracteres");
+      return;
+    }
+
     setError("");
     setLoading(true);
     try {
-      await verifyEmail(email, fullCode);
-      await refreshUser();
-      success("Email verificado", "Sua conta ja esta liberada para uso.");
-      router.push("/dashboard");
+      const { reset_token } = await verifyResetCode(email, fullCode);
+      await resetPassword(reset_token, password);
+      router.push("/auth/login");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Erro ao verificar");
-      toastError("Não foi possível verificar o e-mail", err instanceof Error ? err.message : "Tente novamente.");
+      setError(err instanceof Error ? err.message : "Erro ao redefinir senha");
     } finally {
       setLoading(false);
     }
   }
 
-  async function handleResend() {
-    if (resendCooldown > 0) return;
-    setResending(true);
-    try {
-      await resendCode(email);
-      setResendCooldown(60);
-      setError("");
-      success("Codigo reenviado", `Enviamos um novo codigo para ${email}.`);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Erro ao reenviar");
-      toastError("Não foi possível reenviar o código", err instanceof Error ? err.message : "Tente novamente.");
-    } finally {
-      setResending(false);
-    }
-  }
-
-  if (!email) {
-    router.replace("/auth/register");
-    return null;
-  }
+  if (!email) return null;
 
   return (
     <div className="min-h-screen flex items-center justify-center px-4">
@@ -104,11 +83,10 @@ function VerifyForm() {
           <Logo size="lg" />
         </div>
         <h1 className="text-xl font-semibold text-center mb-2 text-gray-200">
-          {strings.auth.verify.title}
+          Redefinir senha
         </h1>
         <p className="text-slate-400 text-center text-sm mb-8">
-          Enviamos um codigo de 6 digitos para{" "}
-          <span className="text-white">{email}</span>
+          Informe o codigo enviado para <span className="text-white">{email}</span> e a nova senha
         </p>
 
         <form onSubmit={handleSubmit} className="space-y-6">
@@ -136,37 +114,45 @@ function VerifyForm() {
             ))}
           </div>
 
+          <div>
+            <label htmlFor="password" className="block text-sm text-slate-300 mb-1">
+              Nova senha
+            </label>
+            <input
+              id="password"
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              minLength={6}
+              required
+              className="w-full px-4 py-2.5 rounded-lg bg-white/5 border border-white/10 text-white placeholder-slate-500 focus:outline-none focus:border-purple-500/50"
+              placeholder="Mínimo 6 caracteres"
+            />
+          </div>
+
           <button
             type="submit"
             disabled={loading}
             className="btn-primary w-full py-2.5 rounded-lg font-semibold disabled:opacity-50"
           >
-            {loading ? strings.auth.verify.loading : strings.auth.verify.submit}
+            {loading ? "Redefinindo..." : "Redefinir senha"}
           </button>
         </form>
 
-        <div className="text-center mt-6">
-          <button
-            onClick={handleResend}
-            disabled={resending || resendCooldown > 0}
-            className="text-sm text-purple-400 hover:text-purple-300 disabled:text-slate-500 disabled:cursor-not-allowed"
-          >
-            {resendCooldown > 0
-              ? `Reenviar codigo em ${resendCooldown}s`
-              : resending
-                ? strings.auth.verify.resending
-                : strings.auth.verify.resend}
-          </button>
-        </div>
+        <p className="text-center text-sm text-slate-400 mt-6">
+          <Link href="/auth/login" className="text-purple-400 hover:text-purple-300">
+            Voltar para o login
+          </Link>
+        </p>
       </div>
     </div>
   );
 }
 
-export default function VerifyPage() {
+export default function ResetPasswordPage() {
   return (
     <Suspense>
-      <VerifyForm />
+      <ResetPasswordForm />
     </Suspense>
   );
 }

@@ -3,7 +3,9 @@
 import { useState, useCallback, useEffect } from 'react'
 import { useEditor } from '@/contexts/EditorContext'
 import { useAuth } from '@/contexts/AuthContext'
+import { downloadAuthenticatedFile } from '@/lib/download'
 import { getToken } from '@/lib/auth'
+import { notifySessionExpired, readApiError } from '@/lib/http'
 import ExportCostBanner from '@/components/dashboard/ExportCostBanner'
 
 type RenderStatus = 'ready' | 'rendering' | 'updated' | 'error'
@@ -64,13 +66,15 @@ export function ExportPanel({ onClose }: { onClose: () => void }) {
       if (token) headers['Authorization'] = `Bearer ${token}`
 
       const res = await fetch(`/api/v1/jobs/${jobId}/render`, { method: 'POST', headers })
-      if (!res.ok) throw new Error(`Erro ${res.status}`)
+      if (res.status === 401) notifySessionExpired()
+      if (!res.ok) throw new Error(await readApiError(res, `Erro ${res.status}`))
 
       // Poll in background
       const poll = async () => {
         try {
           const statusRes = await fetch(`/api/v1/jobs/${jobId}/status`, { headers })
-          if (!statusRes.ok) throw new Error('Erro ao verificar status')
+          if (statusRes.status === 401) notifySessionExpired()
+          if (!statusRes.ok) throw new Error(await readApiError(statusRes, 'Erro ao verificar status'))
           const data = await statusRes.json()
 
           if (data.status === 'completed') {
@@ -130,7 +134,7 @@ export function ExportPanel({ onClose }: { onClose: () => void }) {
           X
         </button>
 
-        <h2 style={{ color: '#E8E8E8', margin: '0 0 20px', fontSize: 20 }}>Exportar Video</h2>
+        <h2 style={{ color: '#E8E8E8', margin: '0 0 20px', fontSize: 20 }}>Exportar Vídeo</h2>
 
         {/* Cost banner */}
         {(composition?.pendingCredits ?? 0) > 0 && (
@@ -143,9 +147,9 @@ export function ExportPanel({ onClose }: { onClose: () => void }) {
         )}
 
         {/* Download — always available */}
-        <a
-          href={downloadUrl}
-          download
+        <button
+          type="button"
+          onClick={() => downloadAuthenticatedFile(downloadUrl, `clipia-${jobId.slice(0, 8)}.mp4`)}
           style={{
             display: 'block', width: '100%', padding: '14px 0',
             borderRadius: 10, border: 'none',
@@ -153,10 +157,11 @@ export function ExportPanel({ onClose }: { onClose: () => void }) {
             fontSize: 16, fontWeight: 600,
             textAlign: 'center', textDecoration: 'none',
             marginBottom: 12,
+            cursor: 'pointer',
           }}
         >
           Baixar Video
-        </a>
+        </button>
 
         {/* Render status badge */}
         <div style={{
@@ -167,14 +172,14 @@ export function ExportPanel({ onClose }: { onClose: () => void }) {
         }}>
           {rendering && (
             <>
-              <span style={{
+              <div style={{
                 width: 8, height: 8, borderRadius: '50%',
                 background: '#6C5CE7',
                 animation: 'pulse 1.5s ease-in-out infinite',
               }} />
-              <span style={{ color: '#a78bfa' }}>Atualizando com suas edicoes... (~15s)</span>
+              <span style={{ color: '#a78bfa' }}>Atualizando com suas edições... (~15s)</span>
               <style>{`@keyframes pulse { 0%,100% { opacity: 0.4 } 50% { opacity: 1 } }`}</style>
-            </>
+              </>
           )}
           {renderStatus === 'updated' && !rendering && (
             <>
@@ -198,7 +203,7 @@ export function ExportPanel({ onClose }: { onClose: () => void }) {
             </>
           )}
           {renderStatus === 'ready' && !rendering && (
-            <span style={{ color: 'rgba(255,255,255,0.4)' }}>Versao anterior disponivel para download</span>
+            <span style={{ color: 'rgba(255,255,255,0.4)' }}>Versão anterior disponível para download</span>
           )}
         </div>
 

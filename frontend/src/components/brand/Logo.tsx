@@ -1,3 +1,4 @@
+import { strings } from '@/lib/strings';
 'use client'
 
 interface LogoProps {
@@ -21,7 +22,7 @@ export default function Logo({ size = 'md', showText = true, className = '' }: L
       {showText && (
         <span className={`${s.text} font-bold tracking-tight`} style={{ fontFamily: 'var(--font-display), system-ui, sans-serif' }}>
           <span style={{ color: 'var(--logo-text)' }}>Clip</span>
-          <span className="bg-gradient-to-r from-violet-400 via-purple-400 to-blue-400 bg-clip-text text-transparent">IA</span>
+          <span className="bg-gradient-to-r from-violet-400 via-purple-400 to-blue-400 bg-clip-text text-transparent">{strings.editor.ai}</span>
         </span>
       )}
     </span>

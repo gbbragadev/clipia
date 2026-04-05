@@ -14,11 +14,14 @@ export function useTheme() {
 
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme)
-    localStorage.setItem('clipia_theme', theme)
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('clipia_theme', theme)
+    }
   }, [theme])
 
   // Apply on mount (SSR hydration)
   useEffect(() => {
+    if (typeof window === 'undefined') return
     const saved = (localStorage.getItem('clipia_theme') as Theme) || 'dark'
     document.documentElement.setAttribute('data-theme', saved)
     setTheme(saved)

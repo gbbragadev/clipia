@@ -89,7 +89,7 @@ export function EditorTimeline() {
 
       {/* Transport controls */}
       <div className="editor-timeline__transport">
-        <button className="editor-timeline__transport-btn" onClick={togglePlayback} title="Space">
+        <button className="editor-timeline__transport-btn" onClick={togglePlayback} title="Space" aria-label={isPlaying ? "Pausar" : "Reproduzir"}>
           {isPlaying ? '⏸' : '▶'}
         </button>
 

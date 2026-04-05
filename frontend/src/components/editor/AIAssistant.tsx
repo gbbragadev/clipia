@@ -3,6 +3,8 @@
 import { useRef, useState, useEffect } from 'react'
 import { useEditor } from '@/contexts/EditorContext'
 import { getToken } from '@/lib/auth'
+import { notifySessionExpired, readApiError } from '@/lib/http'
+import { useToast } from '@/components/ui/feedback'
 
 const QUICK_PROMPTS = [
   { label: 'Melhorar gancho', prompt: 'Reescreva a cena 1 com um gancho mais forte e provocativo que prenda nos primeiros 3 segundos' },
@@ -26,6 +28,7 @@ interface ChatMessage {
 
 export function AIAssistant() {
   const { jobId, composition, updateScene, updateAudio, selectScene, setActivePanel } = useEditor()
+  const { error: toastError, info } = useToast()
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
@@ -60,6 +63,8 @@ export function AIAssistant() {
           },
         }),
       })
+      if (res.status === 401) notifySessionExpired()
+      if (!res.ok) throw new Error(await readApiError(res, 'Erro ao consultar IA'))
       const data = await res.json()
       setMessages(prev => [...prev, {
         role: 'assistant',
@@ -67,6 +72,7 @@ export function AIAssistant() {
         suggestions: data.suggestions || [],
       }])
     } catch {
+      toastError('Não foi possível consultar a IA', 'Tente novamente em alguns segundos.')
       setMessages(prev => [...prev, {
         role: 'assistant',
         content: 'Erro ao consultar IA. Tente novamente.',
@@ -106,7 +112,8 @@ export function AIAssistant() {
           pitch: composition.voiceConfig?.pitch ?? 5,
         }),
       })
-      if (!res.ok) throw new Error('Falha ao regerar narracao')
+      if (res.status === 401) notifySessionExpired()
+      if (!res.ok) throw new Error(await readApiError(res, 'Falha ao regerar narração'))
       const data = await res.json()
       const audioUrl = `${data.audio_url}?t=${Date.now()}`
       updateAudio(data.words, audioUrl)
@@ -115,6 +122,7 @@ export function AIAssistant() {
       console.error('AI apply regeneration failed:', err)
       // Text is already updated, just mark as applied with warning
       setAppliedSuggestions(prev => new Set(prev).add(key))
+      info('Rerender parcial falhou', 'O texto foi salvo, mas a narração não foi atualizada.')
     } finally {
       setApplyingKey(null)
     }
@@ -191,6 +199,12 @@ export function AIAssistant() {
           }}>
             <span style={{ fontSize: 28 }}>&#10022;</span>
             <span>Pergunte a IA como melhorar seu roteiro</span>
+          </div>
+        )}
+
+        {messages.length > 0 && loading && (
+          <div className="card p-3 text-sm" style={{ color: 'var(--text-secondary)' }}>
+            Processando resposta da IA...
           </div>
         )}
 
@@ -291,7 +305,7 @@ export function AIAssistant() {
                 })}
               {appliedSuggestions.size > 0 && !applyingKey && (
                 <div style={{ fontSize: 11, color: 'rgba(16,185,129,0.7)', fontStyle: 'italic', marginTop: 4 }}>
-                  Texto e narracao atualizados com sucesso.
+                  Texto e narração atualizados com sucesso.
                 </div>
               )}
               </div>
@@ -379,3 +393,4 @@ export function AIAssistant() {
     </div>
   )
 }
+

@@ -1,4 +1,6 @@
 import { getToken } from "./auth";
+import { fetchAuthenticatedBlobUrl } from "./download";
+import { fetchJson, readApiError } from "./http";
 
 const API_BASE = "";
 
@@ -26,24 +28,25 @@ export interface JobStatus {
 }
 
 export async function generateVideo(req: GenerateRequest): Promise<{ job_id: string }> {
-  const res = await fetch(`${API_BASE}/api/v1/generate`, {
+  return fetchJson(`${API_BASE}/api/v1/generate`, {
     method: "POST",
     headers: authHeaders(),
     body: JSON.stringify(req),
-  });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({ detail: "Erro ao gerar vídeo" }));
-    throw new Error(err.detail || `HTTP ${res.status}`);
-  }
-  return res.json();
+  }, "Erro ao gerar video");
 }
 
 export async function getJobStatus(jobId: string): Promise<JobStatus> {
-  const res = await fetch(`${API_BASE}/api/v1/jobs/${jobId}`);
-  if (!res.ok) throw new Error(`Status failed: ${res.status}`);
+  const res = await fetch(`${API_BASE}/api/v1/jobs/${jobId}`, {
+    headers: authHeaders(),
+  });
+  if (!res.ok) throw new Error(await readApiError(res, `Status failed: ${res.status}`));
   return res.json();
 }
 
 export function getDownloadUrl(jobId: string): string {
   return `${API_BASE}/api/v1/jobs/${jobId}/download`;
+}
+
+export async function getDownloadBlobUrl(jobId: string): Promise<string> {
+  return fetchAuthenticatedBlobUrl(getDownloadUrl(jobId));
 }

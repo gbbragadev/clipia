@@ -66,6 +66,13 @@ export default function UserDropdown({ name, plan, onLogout }: UserDropdownProps
           >
             Meus Créditos
           </a>
+          <a
+            href="/dashboard/settings"
+            className="block px-4 py-2 text-sm transition hover:opacity-80"
+            style={{ color: 'var(--text-secondary)' }}
+          >
+            Configurações
+          </a>
           <div className="flex items-center justify-between px-4 py-2" style={{ borderTop: '1px solid var(--border-subtle)' }}>
             <span className="text-xs" style={{ color: 'var(--text-tertiary)' }}>Tema</span>
             <ThemeToggle />

@@ -1,6 +1,7 @@
 "use client";
 
 import { createContext, useContext, useEffect, useState, useCallback, type ReactNode } from "react";
+import { usePathname, useRouter } from "next/navigation";
 import {
   type User,
   getMe,
@@ -10,6 +11,7 @@ import {
   clearToken,
   getToken,
 } from "@/lib/auth";
+import { useToast } from "@/components/ui/feedback";
 
 interface AuthContextType {
   user: User | null;
@@ -23,8 +25,11 @@ interface AuthContextType {
 const AuthContext = createContext<AuthContextType | null>(null);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
+  const router = useRouter();
+  const pathname = usePathname();
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
+  const { info } = useToast();
 
   useEffect(() => {
     const token = getToken();
@@ -36,6 +41,35 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       .then(setUser)
       .catch(() => clearToken())
       .finally(() => setLoading(false));
+  }, []);
+
+  useEffect(() => {
+    function handleSessionExpired() {
+      setUser(null);
+      info("Sessão expirada", "Faça login novamente para continuar.");
+      if (!pathname.startsWith("/auth")) {
+        router.replace("/auth/login");
+      }
+    }
+
+    window.addEventListener("clipia:session-expired", handleSessionExpired);
+    return () => window.removeEventListener("clipia:session-expired", handleSessionExpired);
+  }, [info, pathname, router]);
+
+  useEffect(() => {
+    const token = getToken();
+    if (!token) return;
+
+    const interval = window.setInterval(() => {
+      getMe()
+        .then(setUser)
+        .catch(() => {
+          clearToken();
+          setUser(null);
+        });
+    }, 5 * 60 * 1000);
+
+    return () => window.clearInterval(interval);
   }, []);
 
   const login = useCallback(async (email: string, password: string) => {

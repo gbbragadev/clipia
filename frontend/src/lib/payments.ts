@@ -1,4 +1,5 @@
 import { getToken } from "@/lib/auth";
+import { fetchJson } from "@/lib/http";
 
 const API_BASE = "";
 
@@ -27,32 +28,23 @@ function authHeaders(): HeadersInit {
 }
 
 export async function fetchPackages(): Promise<CreditPackage[]> {
-  const res = await fetch(`${API_BASE}/api/v1/credits/packages`, {
+  return fetchJson(`${API_BASE}/api/v1/credits/packages`, {
     headers: authHeaders(),
-  });
-  if (!res.ok) throw new Error("Erro ao carregar pacotes");
-  return res.json();
+  }, "Erro ao carregar pacotes");
 }
 
 export async function createCheckout(packageId: string): Promise<string> {
-  const res = await fetch(`${API_BASE}/api/v1/credits/checkout`, {
+  const data = await fetchJson<{ checkout_url: string }>(`${API_BASE}/api/v1/credits/checkout`, {
     method: "POST",
     headers: authHeaders(),
     body: JSON.stringify({ package: packageId }),
-  });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({ detail: "Erro ao criar checkout" }));
-    throw new Error(err.detail || "Erro ao criar checkout");
-  }
-  const data = await res.json();
+  }, "Erro ao criar checkout");
   return data.checkout_url;
 }
 
 export async function fetchHistory(): Promise<PurchaseHistoryItem[]> {
-  const res = await fetch(`${API_BASE}/api/v1/credits/history`, {
+  const data = await fetchJson<{ purchases: PurchaseHistoryItem[] }>(`${API_BASE}/api/v1/credits/history`, {
     headers: authHeaders(),
-  });
-  if (!res.ok) throw new Error("Erro ao carregar histórico");
-  const data = await res.json();
+  }, "Erro ao carregar historico");
   return data.purchases;
 }

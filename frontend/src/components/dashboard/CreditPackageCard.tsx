@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import type { CreditPackage } from '@/lib/payments'
 import { createCheckout } from '@/lib/payments'
+import { useToast } from '@/components/ui/feedback'
 
 interface CreditPackageCardProps {
   pkg: CreditPackage
@@ -12,6 +13,7 @@ interface CreditPackageCardProps {
 
 export default function CreditPackageCard({ pkg, highlight, badge }: CreditPackageCardProps) {
   const [loading, setLoading] = useState(false)
+  const { error: toastError } = useToast()
 
   const pricePerCredit = (pkg.price_brl / 100 / pkg.credits).toFixed(2).replace('.', ',')
 
@@ -21,7 +23,10 @@ export default function CreditPackageCard({ pkg, highlight, badge }: CreditPacka
       const url = await createCheckout(pkg.id)
       window.location.href = url
     } catch (err) {
-      console.error('Checkout error:', err)
+      toastError(
+        'Falha ao iniciar checkout',
+        err instanceof Error ? err.message : 'Tente novamente em instantes.',
+      )
       setLoading(false)
     }
   }

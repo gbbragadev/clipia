@@ -1,22 +1,13 @@
 import type { CompositionData } from '@/remotion/types'
 import { DEFAULT_SUBTITLE_STYLE, DEFAULT_VOICE_CONFIG } from '@/remotion/types'
 import { getToken } from '@/lib/auth'
+import { fetchAuthenticatedBlobUrl } from '@/lib/download'
+import { fetchJson } from '@/lib/http'
 
 const API_BASE = '/api/v1'
 
 async function fetchJSON<T>(url: string, options?: RequestInit): Promise<T> {
-  const res = await fetch(url, {
-    ...options,
-    headers: {
-      'Content-Type': 'application/json',
-      ...options?.headers,
-    },
-  })
-  if (!res.ok) {
-    const error = await res.text()
-    throw new Error(`API error ${res.status}: ${error}`)
-  }
-  return res.json()
+  return fetchJson<T>(url, options, 'Erro na requisicao')
 }
 
 function getAuthHeaders(): Record<string, string> {
@@ -39,7 +30,9 @@ export async function fetchComposition(jobId: string): Promise<CompositionData> 
     width: number
     height: number
     pending_credits: number
-  }>(`${API_BASE}/jobs/${jobId}/composition`)
+  }>(`${API_BASE}/jobs/${jobId}/composition`, {
+    headers: getAuthHeaders(),
+  })
 
   // Restore from saved editor_state if available
   const saved = data.editor_state?.composition as Partial<CompositionData> | undefined
@@ -157,4 +150,8 @@ export async function fetchJobStatus(jobId: string): Promise<JobStatusResponse> 
   return fetchJSON(`${API_BASE}/jobs/${jobId}`, {
     headers: getAuthHeaders(),
   })
+}
+
+export async function fetchJobDownloadBlobUrl(jobId: string): Promise<string> {
+  return fetchAuthenticatedBlobUrl(`${API_BASE}/jobs/${jobId}/download`)
 }

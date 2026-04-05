@@ -1,5 +1,6 @@
 'use client'
 
+import { strings } from '@/lib/strings';
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useAuth } from '@/contexts/AuthContext'
 import {
@@ -15,6 +16,7 @@ import OpticalBalancePreview from './OpticalBalancePreview'
 import ScriptDensityHeatmap from './ScriptDensityHeatmap'
 import NarrationTimelineRuler from './NarrationTimelineRuler'
 import KineticPreviewPanel from './KineticPreviewPanel'
+import { useToast } from '@/components/ui/feedback'
 
 const STEP_LABELS: Record<string, string> = {
   scripting: 'Escrevendo roteiro...',
@@ -31,11 +33,12 @@ interface GenerateFormProps {
 
 export default function GenerateForm({ onJobComplete }: GenerateFormProps) {
   const { user, refreshUser } = useAuth()
+  const { success, error: toastError, info } = useToast()
 
   const [topic, setTopic] = useState('')
   const [style, setStyle] = useState<StyleValue>('educational')
   const [templateId, setTemplateId] = useState('stock_narration')
-  const [duration, setDuration] = useState(30)
+  const [duration, setDuration] = useState(45)
   const [generating, setGenerating] = useState(false)
   const [genError, setGenError] = useState<string | null>(null)
   const [activeJob, setActiveJob] = useState<JobStatusResponse | null>(null)
@@ -45,6 +48,7 @@ export default function GenerateForm({ onJobComplete }: GenerateFormProps) {
   const [showAdvancedScript, setShowAdvancedScript] = useState(false)
 
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const lastRequestRef = useRef<GenerateParams | null>(null)
 
   // Poll active job
   const startPolling = useCallback((jobId: string) => {
@@ -66,7 +70,7 @@ export default function GenerateForm({ onJobComplete }: GenerateFormProps) {
         }
       } catch { /* silent */ }
     }, 2000)
-  }, [onJobComplete])
+  }, [onJobComplete, refreshUser])
 
   useEffect(() => {
     return () => { if (pollRef.current) clearInterval(pollRef.current) }
@@ -77,6 +81,7 @@ export default function GenerateForm({ onJobComplete }: GenerateFormProps) {
 
     if (user && user.credits <= 0) {
       setShowCreditsModal(true)
+      info('Sem créditos suficientes', 'Adicione créditos para iniciar uma nova geração.')
       return
     }
 
@@ -90,8 +95,10 @@ export default function GenerateForm({ onJobComplete }: GenerateFormProps) {
         duration_target: duration,
         template_id: templateId,
       }
+      lastRequestRef.current = params
       const result = await generateVideo(params)
       startPolling(result.job_id)
+      success('Video enfileirado', 'A geracao foi iniciada com sucesso.')
       setActiveJob({
         job_id: result.job_id,
         status: 'queued',
@@ -103,7 +110,9 @@ export default function GenerateForm({ onJobComplete }: GenerateFormProps) {
       })
     } catch (err) {
       setGenerating(false)
-      setGenError(err instanceof Error ? err.message : 'Erro ao iniciar geração')
+      const message = err instanceof Error ? err.message : 'Erro ao iniciar geração'
+      setGenError(message)
+      toastError('Não foi possível iniciar a geração', message)
     }
   }
 
@@ -146,16 +155,16 @@ export default function GenerateForm({ onJobComplete }: GenerateFormProps) {
         </label>
         <input
           type="range"
-          min={20}
-          max={60}
+          min={15}
+          max={180}
           value={duration}
           onChange={(e) => setDuration(Number(e.target.value))}
           disabled={generating}
           className="w-full accent-purple-600"
         />
         <div className="flex justify-between text-[10px] text-[var(--text-tertiary)] mt-0.5">
-          <span>20s</span>
-          <span>60s</span>
+          <span>15s</span>
+          <span>180s</span>
         </div>
       </div>
 
@@ -228,22 +237,37 @@ export default function GenerateForm({ onJobComplete }: GenerateFormProps) {
 
       {/* Error */}
       {genError && (
-        <div className="p-3 rounded-xl bg-red-500/10 border border-red-500/20 text-red-400 text-xs mb-4">
-          {genError}
+        <div className="p-3 rounded-xl bg-red-500/10 border border-red-500/20 text-red-400 text-xs mb-4 flex items-center justify-between gap-3">
+          <span>{genError}</span>
+          <button
+            type="button"
+            onClick={() => {
+              if (lastRequestRef.current) {
+                setTopic(lastRequestRef.current.topic)
+                setStyle(lastRequestRef.current.style as StyleValue)
+                setDuration(lastRequestRef.current.duration_target)
+                setTemplateId(lastRequestRef.current.template_id)
+              }
+              handleGenerate()
+            }}
+            className="shrink-0 rounded-lg bg-purple-600 px-3 py-1.5 text-[11px] font-semibold text-white"
+          >
+            Tentar novamente
+          </button>
         </div>
       )}
 
       {/* Generate button */}
       <button
         onClick={handleGenerate}
-        disabled={generating || !topic.trim()}
+        disabled={generating || topic.trim().length < 10}
         className={`w-full py-3.5 rounded-xl border-none text-base font-semibold transition cursor-pointer ${
-          generating || !topic.trim()
+          generating || topic.trim().length < 10
             ? 'bg-[var(--bg-surface-hover)] text-[var(--text-tertiary)] cursor-not-allowed'
             : 'bg-gradient-to-r from-purple-600 to-blue-600 text-white hover:opacity-90'
         }`}
       >
-        {generating ? 'Gerando...' : 'Gerar Vídeo'}
+        {generating ? strings.dashboard.generate.loading : 'Gerar Vídeo'}
       </button>
 
       {/* Credits info */}
@@ -271,7 +295,7 @@ export default function GenerateForm({ onJobComplete }: GenerateFormProps) {
               onClick={() => setShowCreditsModal(false)}
               className="text-sm text-gray-400 hover:text-white transition cursor-pointer"
             >
-              Voltar
+              {strings.common.back}
             </button>
           </div>
         </div>

@@ -3,15 +3,17 @@
 import { useState } from 'react'
 import { useEditor } from '@/contexts/EditorContext'
 import { getToken } from '@/lib/auth'
+import { notifySessionExpired, readApiError } from '@/lib/http'
+import { useToast } from '@/components/ui/feedback'
 
 const VOICES = [
   { id: 'pt-BR-AntonioNeural', name: 'Antonio', gender: 'M', desc: 'Masculina natural, amigavel', tag: 'Popular' },
   { id: 'pt-BR-FranciscaNeural', name: 'Francisca', gender: 'F', desc: 'Feminina clara, versatil', tag: 'Versatil' },
-  { id: 'pt-BR-ThalitaMultilingualNeural', name: 'Thalita', gender: 'F', desc: 'Feminina multilingual, moderna', tag: 'Multi' },
 ]
 
 export function VoiceSelector() {
   const { composition, updateVoiceConfig, updateAudio, jobId } = useEditor()
+  const { error: toastError } = useToast()
   const [regenerating, setRegenerating] = useState(false)
   const [regenError, setRegenError] = useState<string | null>(null)
 
@@ -38,14 +40,17 @@ export function VoiceSelector() {
           pitch: voiceConfig.pitch,
         }),
       })
-      if (!res.ok) throw new Error('Falha ao regerar narracao')
+      if (res.status === 401) notifySessionExpired()
+      if (!res.ok) throw new Error(await readApiError(res, 'Falha ao regerar narração'))
       const data = await res.json()
       // Append timestamp to bust browser audio cache
       const audioUrl = `${data.audio_url}?t=${Date.now()}`
       updateAudio(data.words, audioUrl)
     } catch (err) {
       console.error('Regeneration failed:', err)
-      setRegenError(err instanceof Error ? err.message : 'Erro desconhecido')
+      const message = err instanceof Error ? err.message : 'Erro desconhecido'
+      setRegenError(message)
+      toastError('Não foi possível regerar a narração', message)
     } finally {
       setRegenerating(false)
     }
@@ -53,7 +58,7 @@ export function VoiceSelector() {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-      <div className="editor-section-header">Voz da narracao</div>
+      <div className="editor-section-header">Voz da narração</div>
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
         {VOICES.map((v) => {
@@ -113,10 +118,28 @@ export function VoiceSelector() {
           opacity: regenerating ? 0.7 : 1,
         }}
       >
-        {regenerating ? 'Regerando...' : 'Regerar narracao'}
+        {regenerating ? 'Regerando...' : 'Regerar narração'}
       </button>
       {regenError && (
-        <div style={{ fontSize: 10, color: '#f87171', marginTop: -8 }}>{regenError}</div>
+        <div style={{ fontSize: 10, color: '#f87171', marginTop: -8, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+          <span>{regenError}</span>
+          <button
+            type="button"
+            onClick={handleRegenerate}
+            disabled={regenerating}
+            style={{
+              border: '1px solid rgba(255,255,255,0.08)',
+              borderRadius: 999,
+              padding: '4px 8px',
+              background: 'rgba(255,255,255,0.04)',
+              color: '#fff',
+              fontSize: 10,
+              cursor: regenerating ? 'not-allowed' : 'pointer',
+            }}
+          >
+            Tentar novamente
+          </button>
+        </div>
       )}
     </div>
   )

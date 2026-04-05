@@ -1,19 +1,21 @@
 'use client'
 
+import { strings } from '@/lib/strings';
 import type { JobSummary } from '@/lib/editor-api'
+import { downloadAuthenticatedFile } from '@/lib/download'
 
 const STYLE_GRADIENTS: Record<string, string> = {
   educational: 'from-purple-900/40 to-blue-900/40',
-  curiosity: 'from-amber-900/40 to-orange-900/40',
   storytelling: 'from-indigo-900/40 to-violet-900/40',
   news: 'from-slate-800/40 to-gray-900/40',
+  comedy: 'from-rose-900/40 to-amber-900/40',
 }
 
 const STYLE_ICONS: Record<string, string> = {
   educational: '📚',
-  curiosity: '🤯',
   storytelling: '📖',
   news: '📰',
+  comedy: '😂',
 }
 
 function statusBadge(status: string) {
@@ -25,7 +27,7 @@ function statusBadge(status: string) {
     case 'error':
       return { label: 'Erro', classes: 'bg-red-500/20 text-red-400' }
     case 'processing':
-      return { label: 'Gerando...', classes: 'bg-purple-500/20 text-purple-400 animate-pulse' }
+      return { label: strings.dashboard.generate.loading, classes: 'bg-purple-500/20 text-purple-400 animate-pulse' }
     case 'queued':
       return { label: 'Na fila', classes: 'bg-gray-500/20 text-gray-400' }
     default:
@@ -84,17 +86,17 @@ export default function VideoCard({ job, onEdit }: VideoCardProps) {
               onClick={() => onEdit(job.job_id)}
               className="flex-1 py-2 rounded-lg bg-purple-600 text-white text-xs font-semibold hover:bg-purple-500 transition cursor-pointer"
             >
-              Editar
+              {strings.dashboard.videos.edit}
             </button>
           )}
           {job.download_url && (
-            <a
-              href={job.download_url}
-              download
+            <button
+              type="button"
+              onClick={() => downloadAuthenticatedFile(job.download_url!, `clipia-${job.job_id.slice(0, 8)}.mp4`)}
               className="flex-1 py-2 rounded-lg border border-[var(--border-default)] text-gray-400 text-xs font-medium text-center hover:border-gray-500 hover:text-gray-300 transition"
             >
-              Baixar
-            </a>
+              {strings.dashboard.videos.download}
+            </button>
           )}
         </div>
       )}

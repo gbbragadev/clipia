@@ -1,96 +1,108 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useSearchParams } from 'next/navigation'
 import { useAuth } from '@/contexts/AuthContext'
 import { fetchPackages, type CreditPackage } from '@/lib/payments'
 import CreditPackageCard from '@/components/dashboard/CreditPackageCard'
 import PurchaseHistory from '@/components/dashboard/PurchaseHistory'
-
-const TOAST_MESSAGES: Record<string, { text: string; type: 'success' | 'error' | 'info' }> = {
-  success: { text: 'Pagamento aprovado! Seus créditos foram adicionados.', type: 'success' },
-  failure: { text: 'Pagamento não aprovado. Tente novamente.', type: 'error' },
-  pending: { text: 'Pagamento pendente. Seus créditos serão adicionados assim que confirmado.', type: 'info' },
-}
-
-const TOAST_COLORS = {
-  success: { bg: 'rgba(34, 197, 94, 0.15)', border: '#22c55e', text: '#22c55e' },
-  error: { bg: 'rgba(239, 68, 68, 0.15)', border: '#ef4444', text: '#ef4444' },
-  info: { bg: 'rgba(234, 179, 8, 0.15)', border: '#eab308', text: '#eab308' },
-}
+import { InlineError } from '@/components/ui/feedback'
+import { useToast } from '@/components/ui/feedback'
 
 export default function CreditsPage() {
   const { user, refreshUser } = useAuth()
+  const { success, error, info } = useToast()
   const searchParams = useSearchParams()
   const [packages, setPackages] = useState<CreditPackage[]>([])
-  const [toast, setToast] = useState<{ text: string; type: 'success' | 'error' | 'info' } | null>(null)
+  const [loadingPackages, setLoadingPackages] = useState(true)
+  const [packagesError, setPackagesError] = useState<string | null>(null)
+  const mountedRef = useRef(true)
+
+  const loadPackages = useCallback(async () => {
+    setLoadingPackages(true)
+    setPackagesError(null)
+    try {
+      const data = await fetchPackages()
+      if (mountedRef.current) setPackages(data)
+    } catch (err) {
+      if (mountedRef.current) setPackagesError(err instanceof Error ? err.message : 'Erro ao carregar pacotes')
+    } finally {
+      if (mountedRef.current) setLoadingPackages(false)
+    }
+  }, [])
 
   useEffect(() => {
-    fetchPackages().then(setPackages).catch(console.error)
-  }, [])
+    mountedRef.current = true
+    loadPackages()
+    return () => { mountedRef.current = false }
+  }, [loadPackages])
 
   // Handle return from MercadoPago
   useEffect(() => {
     const status = searchParams.get('status')
-    if (status && TOAST_MESSAGES[status]) {
-      setToast(TOAST_MESSAGES[status])
+    if (status === 'success') {
+      success('Pagamento aprovado', 'Seus créditos foram adicionados.')
       refreshUser()
-      // Clear params after showing
-      const timeout = setTimeout(() => setToast(null), 6000)
-      return () => clearTimeout(timeout)
+    } else if (status === 'failure') {
+      error('Pagamento não aprovado', 'Tente novamente.')
+    } else if (status === 'pending') {
+      info('Pagamento pendente', 'Seus créditos serão adicionados assim que confirmado.')
+      refreshUser()
     }
-  }, [searchParams, refreshUser])
-
-  const toastColors = toast ? TOAST_COLORS[toast.type] : null
+  }, [error, info, refreshUser, searchParams, success])
 
   return (
     <div className="max-w-4xl mx-auto px-4 py-8">
-      {/* Toast */}
-      {toast && toastColors && (
-        <div
-          className="mb-6 px-4 py-3 rounded-xl text-sm font-medium"
-          style={{
-            background: toastColors.bg,
-            border: `1px solid ${toastColors.border}`,
-            color: toastColors.text,
-          }}
-        >
-          {toast.text}
-        </div>
+      {packagesError ? (
+        <InlineError
+          title="Não foi possível carregar os pacotes"
+          description={packagesError}
+          onRetry={() => loadPackages()}
+        />
+      ) : (
+        <>
+          {/* Header */}
+          <div className="text-center mb-8">
+            <h1 className="text-2xl font-bold" style={{ color: 'var(--text-primary)' }}>
+              Meus Créditos
+            </h1>
+            <div className="mt-3 inline-flex items-center gap-2 px-4 py-2 rounded-full" style={{ background: 'var(--bg-surface)' }}>
+              <span className="text-3xl font-bold" style={{ color: 'var(--accent-primary, #a855f7)' }}>
+                {user?.credits ?? 0}
+              </span>
+              <span style={{ color: 'var(--text-secondary)' }}>créditos disponíveis</span>
+            </div>
+          </div>
+
+          {/* Packages */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-12">
+            {loadingPackages ? (
+              <div className="md:col-span-3 grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div className="card h-64 animate-pulse" />
+                <div className="card h-64 animate-pulse" />
+                <div className="card h-64 animate-pulse" />
+              </div>
+            ) : (
+              packages.map((pkg) => (
+                <CreditPackageCard
+                  key={pkg.id}
+                  pkg={pkg}
+                  highlight={pkg.id === 'popular'}
+                  badge={pkg.id === 'popular' ? 'Mais vendido' : pkg.id === 'pro' ? 'Melhor custo' : undefined}
+                />
+              ))
+            )}
+          </div>
+
+          {/* History */}
+          <div>
+            <h2 className="text-lg font-semibold mb-4" style={{ color: 'var(--text-primary)' }}>
+              Histórico de compras
+            </h2>
+            <PurchaseHistory />
+          </div>
+        </>
       )}
-
-      {/* Header */}
-      <div className="text-center mb-8">
-        <h1 className="text-2xl font-bold" style={{ color: 'var(--text-primary)' }}>
-          Meus Créditos
-        </h1>
-        <div className="mt-3 inline-flex items-center gap-2 px-4 py-2 rounded-full" style={{ background: 'var(--bg-surface)' }}>
-          <span className="text-3xl font-bold" style={{ color: 'var(--accent-primary, #a855f7)' }}>
-            {user?.credits ?? 0}
-          </span>
-          <span style={{ color: 'var(--text-secondary)' }}>créditos disponíveis</span>
-        </div>
-      </div>
-
-      {/* Packages */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-12">
-        {packages.map((pkg) => (
-          <CreditPackageCard
-            key={pkg.id}
-            pkg={pkg}
-            highlight={pkg.id === 'popular'}
-            badge={pkg.id === 'popular' ? 'Mais vendido' : pkg.id === 'pro' ? 'Melhor custo' : undefined}
-          />
-        ))}
-      </div>
-
-      {/* History */}
-      <div>
-        <h2 className="text-lg font-semibold mb-4" style={{ color: 'var(--text-primary)' }}>
-          Histórico de compras
-        </h2>
-        <PurchaseHistory />
-      </div>
     </div>
   )
 }

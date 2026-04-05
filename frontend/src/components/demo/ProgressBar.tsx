@@ -1,9 +1,10 @@
+import { strings } from '@/lib/strings';
 'use client'
 
 const STEPS = [
   { key: 'scripting', label: 'Roteiro' },
   { key: 'tts', label: 'Narracao' },
-  { key: 'transcribing', label: 'Legendas' },
+  { key: 'transcribing', label: strings.editor.subtitles },
   { key: 'media', label: 'Midia' },
   { key: 'compositing', label: 'Montagem' },
   { key: 'finalizing', label: 'Final' },

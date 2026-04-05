@@ -1,29 +1,28 @@
 "use client";
 
 import { strings } from '@/lib/strings';
-import { useState } from "react";
-import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { useAuth } from "@/contexts/AuthContext";
+import { useRouter } from "next/navigation";
+import { useState } from "react";
 import Logo from "@/components/brand/Logo";
+import { forgotPassword } from "@/lib/auth";
 
-export default function LoginPage() {
+export default function ForgotPasswordPage() {
   const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
-  const { login } = useAuth();
   const router = useRouter();
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
+    const normalizedEmail = email.trim().toLowerCase();
     setError("");
     setLoading(true);
     try {
-      await login(email, password);
-      router.push("/");
+      await forgotPassword(normalizedEmail);
+      router.push(`/auth/reset-password?email=${encodeURIComponent(normalizedEmail)}`);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Erro ao entrar");
+      setError(err instanceof Error ? err.message : "Erro ao enviar codigo");
     } finally {
       setLoading(false);
     }
@@ -36,10 +35,10 @@ export default function LoginPage() {
           <Logo size="lg" />
         </div>
         <h1 className="text-xl font-semibold text-center mb-2 text-gray-200">
-          Entre na sua conta
+          {strings.auth.login.forgotPassword}
         </h1>
         <p className="text-slate-400 text-center text-sm mb-8">
-          Crie vídeos curtos com IA
+          Enviaremos um codigo de 6 digitos para redefinir sua senha
         </p>
 
         <form onSubmit={handleSubmit} className="space-y-4">
@@ -64,39 +63,18 @@ export default function LoginPage() {
             />
           </div>
 
-          <div>
-            <label htmlFor="password" className="block text-sm text-slate-300 mb-1">
-              {strings.auth.login.password}
-            </label>
-            <input
-              id="password"
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              required
-              className="w-full px-4 py-2.5 rounded-lg bg-white/5 border border-white/10 text-white placeholder-slate-500 focus:outline-none focus:border-purple-500/50"
-              placeholder="••••••••"
-            />
-          </div>
-
           <button
             type="submit"
             disabled={loading}
             className="btn-primary w-full py-2.5 rounded-lg font-semibold disabled:opacity-50"
           >
-            {loading ? strings.auth.login.loading : strings.auth.login.submit}
+            {loading ? "Enviando..." : "Enviar codigo"}
           </button>
         </form>
 
         <p className="text-center text-sm text-slate-400 mt-6">
-          {strings.auth.login.noAccount}{" "}
-          <Link href="/auth/register" className="text-purple-400 hover:text-purple-300">
-            {strings.auth.login.register}
-          </Link>
-        </p>
-        <p className="text-center text-sm text-slate-400 mt-3">
-          <Link href="/auth/forgot-password" className="text-purple-400 hover:text-purple-300">
-            {strings.auth.login.forgotPassword}
+          <Link href="/auth/login" className="text-purple-400 hover:text-purple-300">
+            Voltar para o login
           </Link>
         </p>
       </div>

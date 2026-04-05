@@ -1,5 +1,6 @@
 'use client'
 
+import { strings } from '@/lib/strings';
 import ScrollProgress from './ScrollProgress'
 import Logo from './brand/Logo'
 import ThemeToggle from './ThemeToggle'
@@ -39,7 +40,7 @@ export default function Navbar() {
               </div>
             ) : (
               <a href="/auth/login" className="px-4 py-2 rounded-lg bg-gradient-to-r from-purple-600 to-blue-600 text-white hover:opacity-90 transition">
-                Entrar
+                {strings.auth.login.submit}
               </a>
             )}
           </div>
