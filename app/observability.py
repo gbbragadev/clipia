@@ -4,6 +4,7 @@ import logging
 import os
 import shutil
 import time
+import uuid
 from collections import Counter
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
@@ -43,6 +44,7 @@ def record_credit_metric(kind: str, amount: float) -> None:
 
 
 async def access_log_middleware(request: Request, call_next):
+    request_id = request.headers.get("X-Request-ID") or str(uuid.uuid4())[:8]
     start = time.perf_counter()
     response = await call_next(request)
 
@@ -64,9 +66,11 @@ async def access_log_middleware(request: Request, call_next):
             "duration_ms": duration_ms,
             "client_ip": request.client.host if request.client else None,
             "user_id": user_id,
+            "request_id": request_id,
         }
         logger.info(json.dumps(payload, ensure_ascii=False, separators=(",", ":")))
 
+    response.headers["X-Request-ID"] = request_id
     return response
 
 
