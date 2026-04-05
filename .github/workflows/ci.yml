@@ -1,0 +1,51 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main]
+
+jobs:
+  backend-tests:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: clipia
+          POSTGRES_PASSWORD: clipia_dev
+          POSTGRES_DB: clipia
+        ports: ["5435:5432"]
+        options: >-
+          --health-cmd pg_isready --health-interval 10s --health-timeout 5s --health-retries 5
+      redis:
+        image: redis:7-alpine
+        ports: ["6382:6379"]
+        options: >-
+          --health-cmd "redis-cli ping" --health-interval 10s --health-timeout 5s --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - run: pip install pytest pytest-asyncio httpx
+      - run: python -m pytest tests/ -v --timeout=60
+        env:
+          DATABASE_URL: "postgresql+asyncpg://clipia:clipia_dev@localhost:5435/clipia"
+          REDIS_URL: "redis://localhost:6382/0"
+          JWT_SECRET: "ci-test-secret-that-is-at-least-32-characters-long-for-validation"
+          ANTHROPIC_API_KEY: "test-key"
+          PEXELS_API_KEY: "test-key"
+
+  frontend-typecheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: cd frontend && npm ci
+      - run: cd frontend && npx tsc --noEmit
