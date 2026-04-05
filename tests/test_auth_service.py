@@ -1,4 +1,11 @@
+import base64
+import json
+from datetime import datetime, timedelta, timezone
+
+from jose import jwt
+
 from app.auth.service import hash_password, verify_password, create_access_token, decode_access_token
+from app.config import settings
 
 
 def test_password_hash_and_verify():
@@ -17,3 +24,28 @@ def test_jwt_create_and_decode():
 
 def test_jwt_invalid_token():
     assert decode_access_token("invalid.token.here") is None
+
+
+def test_jwt_wrong_secret_returns_none():
+    token = jwt.encode(
+        {"sub": "550e8400-e29b-41d4-a716-446655440000", "exp": datetime.now(timezone.utc) + timedelta(minutes=5)},
+        "wrong-secret",
+        algorithm=settings.JWT_ALGORITHM,
+    )
+    assert decode_access_token(token) is None
+
+
+def test_jwt_without_subject_returns_none():
+    token = jwt.encode(
+        {"exp": datetime.now(timezone.utc) + timedelta(minutes=5)},
+        settings.JWT_SECRET,
+        algorithm=settings.JWT_ALGORITHM,
+    )
+    assert decode_access_token(token) is None
+
+
+def test_jwt_alg_none_is_rejected():
+    header = base64.urlsafe_b64encode(json.dumps({"alg": "none", "typ": "JWT"}).encode()).rstrip(b"=").decode()
+    payload = base64.urlsafe_b64encode(json.dumps({"sub": "abc"}).encode()).rstrip(b"=").decode()
+    token = f"{header}.{payload}."
+    assert decode_access_token(token) is None

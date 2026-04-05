@@ -2,6 +2,7 @@ import hashlib
 import hmac
 import json
 import logging
+from json import JSONDecodeError
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy import select
@@ -63,7 +64,11 @@ async def mercadopago_webhook(
     db: AsyncSession = Depends(get_db),
 ):
     body = await request.body()
-    parsed = json.loads(body)
+    try:
+        parsed = json.loads(body)
+    except JSONDecodeError:
+        logger.warning("Webhook received invalid JSON body")
+        return {"status": "invalid_payload"}
 
     # Validate signature if webhook secret is configured
     if settings.MP_WEBHOOK_SECRET:

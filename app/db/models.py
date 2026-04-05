@@ -2,17 +2,17 @@ import uuid
 from datetime import datetime
 
 from sqlalchemy import String, Integer, Float, Text, DateTime, ForeignKey, func
-from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
+from app.db.types import GUID, JsonType
 
 
 class CreditPurchase(Base):
     __tablename__ = "credit_purchases"
 
-    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    id: Mapped[uuid.UUID] = mapped_column(GUID(), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(GUID(), ForeignKey("users.id"), nullable=False)
     package_name: Mapped[str] = mapped_column(String(50), nullable=False)
     credits_amount: Mapped[int] = mapped_column(Integer, nullable=False)
     price_brl: Mapped[int] = mapped_column(Integer, nullable=False)  # centavos
@@ -28,7 +28,7 @@ class CreditPurchase(Base):
 class User(Base):
     __tablename__ = "users"
 
-    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    id: Mapped[uuid.UUID] = mapped_column(GUID(), primary_key=True, default=uuid.uuid4)
     email: Mapped[str] = mapped_column(String(255), unique=True, nullable=False, index=True)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
@@ -46,8 +46,8 @@ class User(Base):
 class Job(Base):
     __tablename__ = "jobs"
 
-    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    id: Mapped[uuid.UUID] = mapped_column(GUID(), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(GUID(), ForeignKey("users.id"), nullable=False)
     topic: Mapped[str] = mapped_column(String(500), nullable=False)
     style: Mapped[str] = mapped_column(String(50), nullable=False)
     duration_target: Mapped[int] = mapped_column(Integer, nullable=False)
@@ -57,8 +57,8 @@ class Job(Base):
     current_step: Mapped[str | None] = mapped_column(String(50), nullable=True)
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
     video_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
-    script: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
-    editor_state: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    script: Mapped[dict | None] = mapped_column(JsonType, nullable=True)
+    editor_state: Mapped[dict | None] = mapped_column(JsonType, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     exported_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

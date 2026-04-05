@@ -1,5 +1,6 @@
 import json
 import logging
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -29,6 +30,7 @@ from app.models import (
     RegenerateMediaRequest,
     RegenerateTTSRequest,
 )
+from app.utils.locks import get_lock
 from app.worker.tasks import dispatch_pipeline
 
 router = APIRouter()
@@ -43,23 +45,35 @@ async def generate(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    if not user.email_verified:
-        raise HTTPException(status_code=403, detail="Verifique seu email antes de gerar videos")
-    if user.credits < 1:
-        raise HTTPException(status_code=402, detail="Créditos insuficientes")
+    async with get_lock(f"generate:{user.id}"):
+        debit = await db.execute(
+            update(User)
+            .where(User.id == user.id, User.email_verified.is_(True), User.credits >= 1)
+            .values(credits=User.credits - 1)
+        )
+        if debit.rowcount == 0:
+            fresh_user = await db.get(User, user.id)
+            if fresh_user is None:
+                raise HTTPException(status_code=401, detail="Usuário não encontrado")
+            if not fresh_user.email_verified:
+                raise HTTPException(status_code=403, detail="Verifique seu email antes de gerar videos")
+            raise HTTPException(status_code=402, detail="Créditos insuficientes")
 
-    job = Job(
-        user_id=user.id,
-        topic=req.topic,
-        style=req.style,
-        duration_target=req.duration_target,
-        template_id=req.template_id,
-        status="queued",
-    )
-    db.add(job)
-    user.credits -= 1
-    await db.commit()
-    await db.refresh(job)
+        fresh_user = await db.get(User, user.id)
+        if fresh_user is None:
+            raise HTTPException(status_code=401, detail="Usuário não encontrado")
+
+        job = Job(
+            user_id=fresh_user.id,
+            topic=req.topic,
+            style=req.style,
+            duration_target=req.duration_target,
+            template_id=req.template_id,
+            status="queued",
+        )
+        db.add(job)
+        await db.commit()
+        await db.refresh(job)
 
     job_id = str(job.id)
 
@@ -139,6 +153,11 @@ async def list_templates():
 @router.get("/jobs/{job_id}/composition")
 async def get_composition(job_id: str, db: AsyncSession = Depends(get_db)):
     """Return full composition data for the Remotion editor."""
+    try:
+        uuid.UUID(job_id)
+    except ValueError:
+        raise HTTPException(status_code=422, detail="Invalid job id")
+
     job_dir = Path(settings.STORAGE_DIR) / "jobs" / job_id
 
     # Load script from filesystem or DB
@@ -305,14 +324,10 @@ async def ai_suggest(
     db: AsyncSession = Depends(get_db),
 ):
     """Get AI suggestions for script improvement. Acumula 0.5 credito por chamada."""
-    # Acumular custo no job
     result_job = await db.execute(select(Job).where(Job.id == job_id, Job.user_id == user.id))
     job = result_job.scalar_one_or_none()
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
-
-    job.pending_credits = (job.pending_credits or 0) + 0.5
-    await db.commit()
 
     import anthropic
 
@@ -364,7 +379,13 @@ Regras:
     except json.JSONDecodeError:
         result = {"suggestions": [], "general_feedback": raw}
 
-    result["pending_credits"] = job.pending_credits
+    async with get_lock(f"job:{job.id}:pending_credits"):
+        refreshed_job = await db.get(Job, job.id)
+        refreshed_job.pending_credits = (refreshed_job.pending_credits or 0.0) + 0.5
+        await db.commit()
+        pending_credits = refreshed_job.pending_credits
+
+    result["pending_credits"] = pending_credits
     return result
 
 
@@ -375,25 +396,24 @@ async def render_video(
     db: AsyncSession = Depends(get_db),
 ):
     """Re-render video with current editor state via FFmpeg+NVENC."""
-    result = await db.execute(select(Job).where(Job.id == job_id, Job.user_id == user.id))
-    job = result.scalar_one_or_none()
-    if not job:
-        raise HTTPException(status_code=404, detail="Job not found")
+    async with get_lock(f"render:{job_id}"):
+        result = await db.execute(select(Job).where(Job.id == job_id, Job.user_id == user.id))
+        job = result.scalar_one_or_none()
+        if not job:
+            raise HTTPException(status_code=404, detail="Job not found")
 
-    # Debitar pending_credits (custo acumulado de sugestoes IA)
-    pending = job.pending_credits or 0.0
-    if pending > 0:
-        # Refresh user credits
-        user_result = await db.execute(select(User).where(User.id == user.id))
-        fresh_user = user_result.scalar_one()
-        if fresh_user.credits < pending:
-            raise HTTPException(
-                status_code=402,
-                detail=f"Créditos insuficientes para exportar. Custo acumulado: {pending}. Seus créditos: {fresh_user.credits}",
-            )
-        fresh_user.credits = int(fresh_user.credits - pending)
-        job.pending_credits = 0.0
-        await db.commit()
+        pending = job.pending_credits or 0.0
+        if pending > 0:
+            user_result = await db.execute(select(User).where(User.id == user.id))
+            fresh_user = user_result.scalar_one()
+            if fresh_user.credits < pending:
+                raise HTTPException(
+                    status_code=402,
+                    detail=f"Créditos insuficientes para exportar. Custo acumulado: {pending}. Seus créditos: {fresh_user.credits}",
+                )
+            fresh_user.credits = int(fresh_user.credits - pending)
+            job.pending_credits = 0.0
+            await db.commit()
 
     job_dir = Path(settings.STORAGE_DIR) / "jobs" / job_id
     if not job_dir.exists():
@@ -415,20 +435,22 @@ async def reset_job(
     db: AsyncSession = Depends(get_db),
 ):
     """Reset job to original state. Costs 1 credit, clears pending_credits."""
-    result = await db.execute(select(Job).where(Job.id == job_id, Job.user_id == user.id))
-    job = result.scalar_one_or_none()
-    if not job:
-        raise HTTPException(status_code=404, detail="Job not found")
+    async with get_lock(f"reset:{job_id}"):
+        result = await db.execute(select(Job).where(Job.id == job_id, Job.user_id == user.id))
+        job = result.scalar_one_or_none()
+        if not job:
+            raise HTTPException(status_code=404, detail="Job not found")
 
-    if user.credits < 1:
-        raise HTTPException(status_code=402, detail="Créditos insuficientes para resetar")
+        fresh_user = await db.get(User, user.id)
+        if fresh_user.credits < 1:
+            raise HTTPException(status_code=402, detail="Créditos insuficientes para resetar")
 
-    user.credits -= 1
-    job.pending_credits = 0.0
-    job.editor_state = None
-    await db.commit()
+        fresh_user.credits -= 1
+        job.pending_credits = 0.0
+        job.editor_state = None
+        await db.commit()
 
-    return {"status": "reset", "credits_remaining": user.credits}
+        return {"status": "reset", "credits_remaining": fresh_user.credits}
 
 
 @router.get("/jobs/{job_id}/status")

@@ -50,7 +50,7 @@ class Settings(BaseSettings):
     RATE_LIMIT_DEFAULT: str = "60/minute"
 
     # CORS
-    CORS_ORIGINS: str = "*"  # comma-separated, "*" for dev
+    CORS_ORIGINS: str = "http://localhost:3003"  # comma-separated, "*" for dev
 
     # SMTP (email verification)
     SMTP_HOST: str = ""

@@ -1,0 +1,119 @@
+import pytest
+
+from app.db.models import Job, User
+
+
+@pytest.mark.asyncio
+async def test_generate_debits_exactly_one_credit(client, db_session, verified_user, auth_headers, app):
+    before = (await db_session.get(User, verified_user.id)).credits
+
+    response = await client.post(
+        "/api/v1/generate",
+        headers=auth_headers(verified_user),
+        json={"topic": "Tema valido para gerar video", "style": "educational", "duration_target": 45},
+    )
+
+    assert response.status_code == 200, "Generate should succeed for verified users with credits."
+    after = (await db_session.get(User, verified_user.id)).credits
+    assert before - after == 1, "Generate should debit exactly one credit."
+    app.state.dispatch_pipeline.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_generate_with_zero_credits_returns_402(client, db_session, verified_user, auth_headers):
+    db_user = await db_session.get(User, verified_user.id)
+    db_user.credits = 0
+    await db_session.commit()
+
+    response = await client.post(
+        "/api/v1/generate",
+        headers=auth_headers(verified_user),
+        json={"topic": "Tema valido para gerar video", "style": "educational", "duration_target": 45},
+    )
+
+    assert response.status_code == 402, "Generate should return 402 when credits are insufficient."
+    fresh_user = await db_session.get(User, verified_user.id)
+    assert fresh_user.credits == 0, "Rejected generate calls must not partially debit credits."
+
+
+@pytest.mark.asyncio
+async def test_ai_suggest_only_charges_after_success(client, db_session, job_factory, verified_user, auth_headers, monkeypatch):
+    job = await job_factory()
+
+    class _Message:
+        content = [type("Text", (), {"text": '{"suggestions":[],"general_feedback":"ok"}'})()]
+
+    class _Client:
+        class messages:
+            @staticmethod
+            def create(**_kwargs):
+                return _Message()
+
+    monkeypatch.setattr("app.api.routes.anthropic", None, raising=False)
+    monkeypatch.setattr("anthropic.Anthropic", lambda api_key: _Client())
+
+    response = await client.post(
+        f"/api/v1/jobs/{job.id}/ai-suggest",
+        headers=auth_headers(verified_user),
+        json={"message": "melhore o roteiro", "context": {"scenes": []}},
+    )
+    assert response.status_code == 200, "Successful AI suggestions should return 200."
+
+    refreshed_job = await db_session.get(Job, job.id)
+    assert refreshed_job.pending_credits == 0.5, "Successful AI suggestions should add exactly 0.5 pending credits."
+
+
+@pytest.mark.asyncio
+async def test_ai_suggest_external_failure_does_not_charge(client, db_session, job_factory, verified_user, auth_headers, monkeypatch):
+    job = await job_factory()
+
+    class _Client:
+        class messages:
+            @staticmethod
+            def create(**_kwargs):
+                raise RuntimeError("Anthropic unavailable")
+
+    monkeypatch.setattr("app.api.routes.anthropic", None, raising=False)
+    monkeypatch.setattr("anthropic.Anthropic", lambda api_key: _Client())
+
+    response = await client.post(
+        f"/api/v1/jobs/{job.id}/ai-suggest",
+        headers=auth_headers(verified_user),
+        json={"message": "melhore o roteiro", "context": {"scenes": []}},
+    )
+    assert response.status_code == 500, "Anthropic failures should surface as server errors with current route behavior."
+
+    refreshed_job = await db_session.get(Job, job.id)
+    assert refreshed_job.pending_credits == 0.0, "Failed AI suggestions must not add pending credits."
+
+
+@pytest.mark.asyncio
+async def test_render_debits_pending_credits_once_and_resets_job(client, db_session, job_factory, verified_user, auth_headers, storage_dir, app):
+    job = await job_factory(pending_credits=2.0)
+    job_dir = storage_dir / "jobs" / str(job.id)
+    job_dir.mkdir(parents=True)
+
+    before = (await db_session.get(User, verified_user.id)).credits
+    response = await client.post(f"/api/v1/jobs/{job.id}/render", headers=auth_headers(verified_user))
+
+    assert response.status_code == 200, "Render should succeed when the user can pay pending credits."
+    refreshed_job = await db_session.get(Job, job.id)
+    refreshed_user = await db_session.get(User, verified_user.id)
+    assert before - refreshed_user.credits == 2, "Render should debit the full pending-credit amount."
+    assert refreshed_job.pending_credits == 0.0, "Render should clear pending credits after charging."
+    app.state.rerender_task.delay.assert_called_once_with(str(job.id))
+
+
+@pytest.mark.asyncio
+async def test_reset_debits_one_credit_and_clears_editor_state(client, db_session, job_factory, verified_user, auth_headers):
+    job = await job_factory(pending_credits=1.5, editor_state={"composition": {"scenes": []}})
+    before = (await db_session.get(User, verified_user.id)).credits
+
+    response = await client.post(f"/api/v1/jobs/{job.id}/reset", headers=auth_headers(verified_user))
+
+    assert response.status_code == 200, "Reset should succeed for users with one credit remaining."
+    refreshed_job = await db_session.get(Job, job.id)
+    refreshed_user = await db_session.get(User, verified_user.id)
+    assert before - refreshed_user.credits == 1, "Reset should debit exactly one credit."
+    assert refreshed_job.pending_credits == 0.0, "Reset should clear pending credits."
+    assert refreshed_job.editor_state is None, "Reset should clear editor state."

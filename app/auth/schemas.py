@@ -1,15 +1,36 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, field_validator
 
 
 class RegisterRequest(BaseModel):
     email: str
-    name: str
-    password: str
+    name: str = Field(..., min_length=1, max_length=255)
+    password: str = Field(..., min_length=6, max_length=255)
+
+    @field_validator("email", mode="before")
+    @classmethod
+    def normalize_email(cls, value) -> str:
+        email = str(value).strip().lower()
+        if "@" not in email or email.startswith("@") or email.endswith("@") or " " in email:
+            raise ValueError("invalid email")
+        return email
+
+    @field_validator("name", mode="before")
+    @classmethod
+    def normalize_name(cls, value: str) -> str:
+        return value.strip()
 
 
 class LoginRequest(BaseModel):
     email: str
     password: str
+
+    @field_validator("email", mode="before")
+    @classmethod
+    def normalize_email(cls, value) -> str:
+        email = str(value).strip().lower()
+        if "@" not in email or email.startswith("@") or email.endswith("@") or " " in email:
+            raise ValueError("invalid email")
+        return email
 
 
 class TokenResponse(BaseModel):
@@ -28,8 +49,24 @@ class UserResponse(BaseModel):
 
 class VerifyEmailRequest(BaseModel):
     email: str
-    code: str
+    code: str = Field(..., min_length=6, max_length=6)
+
+    @field_validator("email", mode="before")
+    @classmethod
+    def normalize_email(cls, value) -> str:
+        email = str(value).strip().lower()
+        if "@" not in email or email.startswith("@") or email.endswith("@") or " " in email:
+            raise ValueError("invalid email")
+        return email
 
 
 class ResendCodeRequest(BaseModel):
     email: str
+
+    @field_validator("email", mode="before")
+    @classmethod
+    def normalize_email(cls, value) -> str:
+        email = str(value).strip().lower()
+        if "@" not in email or email.startswith("@") or email.endswith("@") or " " in email:
+            raise ValueError("invalid email")
+        return email
