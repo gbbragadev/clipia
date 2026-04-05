@@ -14,6 +14,8 @@ celery_app.conf.update(
     worker_concurrency=1,
     worker_prefetch_multiplier=1,
     task_acks_late=True,
+    task_reject_on_worker_lost=True,
+    worker_max_tasks_per_child=50,
     beat_schedule={
         "cleanup-old-jobs": {
             "task": "cleanup_old_jobs",
