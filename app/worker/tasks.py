@@ -7,7 +7,6 @@ from datetime import datetime, timedelta, timezone
 from email.mime.text import MIMEText
 from pathlib import Path
 
-import redis
 from celery.exceptions import SoftTimeLimitExceeded
 
 from app.config import settings
@@ -17,11 +16,12 @@ from app.services.scriptwriter import generate_script
 from app.services.transcriber import transcribe_with_timestamps
 from app.services.tts import synthesize_narration
 from app.utils.files import bytes_to_gb, cleanup_job_dir, get_job_dir, get_output_dir, remove_path
+from app.redis_pool import get_redis
 from app.worker.celery_app import celery_app
 
 logger = logging.getLogger(__name__)
 
-_redis = redis.Redis.from_url(settings.REDIS_URL, decode_responses=True)
+_redis = get_redis()
 
 
 def _update_job(
@@ -111,11 +111,12 @@ def _refund_job_credit(job_id: str, status_value: str, error: str, cleanup_files
                         return
                     job.status = status_value
                     job.error = error
+                    refund_amount = job.credit_cost or 1
                     await session.execute(
-                        update(User).where(User.id == job.user_id).values(credits=User.credits + 1)
+                        update(User).where(User.id == job.user_id).values(credits=User.credits + refund_amount)
                     )
                     await session.commit()
-                    logger.info("Refunded 1 credit for %s job %s", status_value, job_id)
+                    logger.info("Refunded %d credit(s) for %s job %s", refund_amount, status_value, job_id)
 
         asyncio.run(_refund())
     except Exception as e:
@@ -162,7 +163,15 @@ def _handle_soft_timeout(job_id: str, task_name: str):
     _enqueue_dead_letter(job_id, f"{task_name} soft timeout")
 
 
-def dispatch_pipeline(job_id: str, topic: str, style: str, duration_target: int, template_id: str = "stock_narration"):
+def dispatch_pipeline(
+    job_id: str,
+    topic: str,
+    style: str,
+    duration_target: int,
+    template_id: str = "stock_narration",
+    voice_provider: str = "edge",
+    voice_config: dict | None = None,
+):
     from celery import chain
 
     _redis.hset(f"job:{job_id}", mapping={
@@ -173,7 +182,12 @@ def dispatch_pipeline(job_id: str, topic: str, style: str, duration_target: int,
         "detail": "",
         "created_at": datetime.now(timezone.utc).isoformat(),
         "template_id": template_id,
+        "voice_provider": voice_provider,
     })
+    # Store voice config in Redis for the worker to pick up
+    if voice_config:
+        _redis.hset(f"job:{job_id}", mapping={"voice_config": json.dumps(voice_config)})
+
     pipeline = chain(
         task_generate_script.s(job_id, topic, style, duration_target, template_id),
         task_synthesize_audio.s(job_id, template_id),
@@ -313,24 +327,55 @@ def task_synthesize_audio(self, script: dict, job_id: str, template_id: str = "s
             return ""
         if _check_cancelled(job_id):
             return ""
-        from app.templates import get_template
-        template = get_template(template_id)
 
         _update_job(job_id, "processing", "tts", 0.25, detail="Sintetizando narracao...")
         job_dir = get_job_dir(job_id)
         output_path = str(job_dir / "narration.wav")
         duration_target = script.get("_duration_target", 0)
-        synthesize_narration(
-            text=script["narration"],
-            output_path=output_path,
-            duration_target=duration_target,
-            voice_id=template.voice.voice_id,
-            rate=template.voice.rate,
-            pitch=template.voice.pitch,
-        )
+
+        # Check if job has custom voice config (v2) or use template default
+        voice_provider_name = _redis_hget(f"job:{job_id}", "voice_provider") or "edge"
+        voice_config_raw = _redis_hget(f"job:{job_id}", "voice_config")
+        voice_config = json.loads(voice_config_raw) if voice_config_raw else None
+
+        if voice_provider_name == "custom":
+            # Custom audio — just copy the uploaded file (already validated)
+            uploaded_path = voice_config.get("source_path", "") if voice_config else ""
+            if uploaded_path and Path(uploaded_path).exists():
+                from app.services.custom_audio_provider import normalize_audio
+                normalize_audio(uploaded_path, output_path)
+            else:
+                raise RuntimeError("Custom audio source not found")
+        elif voice_provider_name == "elevenlabs":
+            # ElevenLabs premium TTS
+            from app.services.elevenlabs_provider import ElevenLabsProvider
+            provider = ElevenLabsProvider()
+            voice_id = voice_config.get("voice_id", "") if voice_config else ""
+            if not voice_id:
+                raise RuntimeError("No ElevenLabs voice_id specified")
+            asyncio.run(provider.synthesize(
+                text=script["narration"],
+                output_path=output_path,
+                voice_id=voice_id,
+                duration_target=duration_target,
+            ))
+        else:
+            # Edge TTS (default, free)
+            from app.templates import get_template
+            template = get_template(template_id)
+            voice_id = (voice_config or {}).get("voice_id", template.voice.voice_id)
+            rate = (voice_config or {}).get("rate", template.voice.rate)
+            pitch = (voice_config or {}).get("pitch", template.voice.pitch)
+            synthesize_narration(
+                text=script["narration"],
+                output_path=output_path,
+                duration_target=duration_target,
+                voice_id=voice_id,
+                rate=rate,
+                pitch=pitch,
+            )
 
         # Validate audio exists and has reasonable duration
-        from pathlib import Path
         if not Path(output_path).exists():
             raise RuntimeError("TTS produced no output file")
         size = Path(output_path).stat().st_size
@@ -339,7 +384,7 @@ def task_synthesize_audio(self, script: dict, job_id: str, template_id: str = "s
 
         _update_job(job_id, "processing", "tts", 0.35, detail="Validando audio...")
         _update_job(job_id, "processing", "tts", 0.4, detail="Narracao pronta.")
-        logger.info(f"TTS output: {size / 1024:.0f}KB")
+        logger.info(f"TTS output: {size / 1024:.0f}KB (provider={voice_provider_name})")
         return output_path
     except SoftTimeLimitExceeded:
         _handle_soft_timeout(job_id, "synthesize_audio")

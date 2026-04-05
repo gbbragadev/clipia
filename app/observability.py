@@ -10,13 +10,13 @@ from datetime import datetime, timezone
 from threading import Lock
 from typing import Any
 
-import redis
 from fastapi import Request
 from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.auth.service import decode_access_token
 from app.config import settings
+from app.redis_pool import get_redis
 from app.db.engine import build_engine
 from app.db.models import CreditPurchase, Job
 from app.worker.celery_app import celery_app
@@ -135,7 +135,7 @@ async def _check_database() -> dict[str, Any]:
 
 
 def _redis_ping() -> bool:
-    client = redis.Redis.from_url(settings.REDIS_URL, decode_responses=True)
+    client = get_redis()
     return bool(client.ping())
 
 

@@ -8,7 +8,6 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-import redis
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import FileResponse
 from slowapi import Limiter
@@ -38,10 +37,11 @@ from app.models import (
 from app.observability import record_credit_metric
 from app.utils.files import bytes_to_gb, path_size_bytes
 from app.utils.locks import get_lock
+from app.redis_pool import get_redis
 from app.worker.tasks import dispatch_pipeline
 
 router = APIRouter(tags=["jobs"])
-_redis = redis.Redis.from_url(settings.REDIS_URL, decode_responses=True)
+_redis = get_redis()
 
 _ADMIN_DASHBOARD_RANGES = {"7d": 7, "30d": 30, "90d": 90}
 
