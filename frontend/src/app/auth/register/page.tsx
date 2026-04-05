@@ -7,6 +7,7 @@ import Link from "next/link";
 import { useAuth } from "@/contexts/AuthContext";
 import Logo from "@/components/brand/Logo";
 import { FilmstripBackground } from "@/components/ui/FilmstripBackground";
+import { trackEvent, trackGA } from "@/components/TrackingScripts";
 
 export default function RegisterPage() {
   const [name, setName] = useState("");
@@ -20,13 +21,23 @@ export default function RegisterPage() {
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError("");
-    if (password.length < 6) {
-      setError("Senha deve ter pelo menos 6 caracteres");
+    if (password.length < 8) {
+      setError("Senha deve ter no minimo 8 caracteres");
+      return;
+    }
+    if (!/[A-Z]/.test(password)) {
+      setError("Senha deve conter pelo menos 1 letra maiuscula");
+      return;
+    }
+    if (!/\d/.test(password)) {
+      setError("Senha deve conter pelo menos 1 numero");
       return;
     }
     setLoading(true);
     try {
       await register(email, name, password);
+      trackEvent("CompleteRegistration");
+      trackGA("sign_up", { method: "email" });
       router.push(`/auth/verify?email=${encodeURIComponent(email)}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Erro ao criar conta");
@@ -98,10 +109,13 @@ export default function RegisterPage() {
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               required
-              minLength={6}
+              minLength={8}
               className="w-full px-4 py-3 rounded-xl bg-white/5 border border-white/10 text-white placeholder-slate-500 focus:outline-none focus:border-purple-500/50 focus:bg-white/10 transition-colors"
-              placeholder="Mínimo 6 caracteres"
+              placeholder="Minimo 8 caracteres"
             />
+            <p className="text-xs text-slate-400 mt-1">
+              Minimo 8 caracteres, 1 maiuscula e 1 numero
+            </p>
           </div>
 
           <button

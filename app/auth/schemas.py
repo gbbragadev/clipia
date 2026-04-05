@@ -1,3 +1,5 @@
+import re
+
 from pydantic import BaseModel, Field, field_validator
 
 
@@ -12,6 +14,10 @@ class RegisterRequest(BaseModel):
     email: str = Field(..., description="User's email address")
     name: str = Field(..., min_length=1, max_length=255, description="Full name")
     password: str = Field(..., min_length=6, max_length=255, description="Password (min 6 chars)")
+    referral_code: str | None = Field(default=None, max_length=12, description="Referral code from inviter")
+    utm_source: str | None = Field(default=None, max_length=100)
+    utm_medium: str | None = Field(default=None, max_length=100)
+    utm_campaign: str | None = Field(default=None, max_length=100)
 
     @field_validator("email", mode="before")
     @classmethod
@@ -22,6 +28,17 @@ class RegisterRequest(BaseModel):
     @classmethod
     def normalize_name(cls, value: str) -> str:
         return value.strip()
+
+    @field_validator("password")
+    @classmethod
+    def validate_password_strength(cls, v: str) -> str:
+        if len(v) < 8:
+            raise ValueError("Senha deve ter no minimo 8 caracteres")
+        if not re.search(r"[A-Z]", v):
+            raise ValueError("Senha deve conter pelo menos 1 letra maiuscula")
+        if not re.search(r"\d", v):
+            raise ValueError("Senha deve conter pelo menos 1 numero")
+        return v
 
 
 class LoginRequest(BaseModel):
@@ -46,6 +63,7 @@ class UserResponse(BaseModel):
     credits: int = Field(..., description="Available credits")
     plan: str = Field(..., description="Current plan")
     email_verified: bool = Field(..., description="Email verification status")
+    referral_code: str = Field(..., description="User's unique referral code")
 
 
 class VerifyEmailRequest(BaseModel):
@@ -88,7 +106,18 @@ class VerifyResetCodeRequest(BaseModel):
 
 class ResetPasswordRequest(BaseModel):
     reset_token: str = Field(..., min_length=1)
-    new_password: str = Field(..., min_length=6, max_length=255)
+    new_password: str = Field(..., min_length=8, max_length=255)
+
+    @field_validator("new_password")
+    @classmethod
+    def validate_password_strength(cls, v: str) -> str:
+        if len(v) < 8:
+            raise ValueError("Senha deve ter no minimo 8 caracteres")
+        if not re.search(r"[A-Z]", v):
+            raise ValueError("Senha deve conter pelo menos 1 letra maiuscula")
+        if not re.search(r"\d", v):
+            raise ValueError("Senha deve conter pelo menos 1 numero")
+        return v
 
 
 class UpdateProfileRequest(BaseModel):
