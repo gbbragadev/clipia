@@ -120,21 +120,21 @@ async def test_reset_password_with_valid_token_changes_password_and_clears_otp(c
 
     response = await client.post(
         "/api/v1/auth/reset-password",
-        json={"reset_token": reset_token, "new_password": "newsecret"},
+        json={"reset_token": reset_token, "new_password": "Newsecret1"},
     )
 
     assert response.status_code == 200, "Reset-password should succeed with a valid reset token."
     assert response.json()["status"] == "password_reset", "Successful resets should report password_reset."
 
     refreshed = await db_session.get(User, user.id)
-    assert verify_password("newsecret", refreshed.password_hash), "New password should be persisted as a hash."
+    assert verify_password("Newsecret1", refreshed.password_hash), "New password should be persisted as a hash."
     assert not verify_password("oldsecret", refreshed.password_hash), "Old password should no longer work."
     assert refreshed.verification_code is None, "Reset password should clear the OTP."
     assert refreshed.verification_expires is None, "Reset password should clear the OTP expiry."
 
     login_new = await client.post(
         "/api/v1/auth/login",
-        json={"email": user.email, "password": "newsecret"},
+        json={"email": user.email, "password": "Newsecret1"},
     )
     login_old = await client.post(
         "/api/v1/auth/login",
@@ -168,11 +168,11 @@ async def test_reset_password_rejects_expired_and_wrong_purpose_tokens(client, u
 
     expired = await client.post(
         "/api/v1/auth/reset-password",
-        json={"reset_token": expired_token, "new_password": "newsecret"},
+        json={"reset_token": expired_token, "new_password": "Newsecret1"},
     )
     wrong_purpose = await client.post(
         "/api/v1/auth/reset-password",
-        json={"reset_token": wrong_purpose_token, "new_password": "newsecret"},
+        json={"reset_token": wrong_purpose_token, "new_password": "Newsecret1"},
     )
 
     assert expired.status_code == 400, "Expired reset tokens should be rejected."

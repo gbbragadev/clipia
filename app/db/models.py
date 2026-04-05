@@ -44,6 +44,7 @@ class User(Base):
     otp_attempts: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     referral_code: Mapped[str] = mapped_column(String(12), unique=True, nullable=False, default=lambda: uuid.uuid4().hex[:8])
     referred_by: Mapped[uuid.UUID | None] = mapped_column(GUID(), ForeignKey("users.id"), nullable=True)
+    password_reset_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     jobs: Mapped[list["Job"]] = relationship(back_populates="user")
     purchases: Mapped[list["CreditPurchase"]] = relationship(back_populates="user")

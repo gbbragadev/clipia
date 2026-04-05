@@ -163,14 +163,26 @@ async def verify_email(request: Request, body: VerifyEmailRequest, db: AsyncSess
         await db.commit()
         record_credit_metric("credit", 2)
 
-        # Credit referrer with 2 bonus credits
+        # Credit referrer with 2 bonus credits (max 10 referrals per user)
+        MAX_REFERRAL_BONUS_COUNT = 10
+
         if user.referred_by:
-            from sqlalchemy import update as sql_update
-            await db.execute(
-                sql_update(User).where(User.id == user.referred_by).values(credits=User.credits + 2)
-            )
-            await db.commit()
-            record_credit_metric("referral_bonus", 2)
+            from sqlalchemy import update as sql_update, func as sqla_func
+            # Count how many verified referrals already credited
+            referral_count = (await db.execute(
+                select(sqla_func.count(User.id)).where(
+                    User.referred_by == user.referred_by,
+                    User.email_verified == True
+                )
+            )).scalar() or 0
+
+            if referral_count <= MAX_REFERRAL_BONUS_COUNT:
+                await db.execute(
+                    sql_update(User).where(User.id == user.referred_by)
+                    .values(credits=User.credits + 2)
+                )
+                await db.commit()
+                record_credit_metric("referral_bonus", 2)
 
         return {"status": "verified", "credits": 2}
 
@@ -290,9 +302,17 @@ async def reset_password(request: Request, body: ResetPasswordRequest, db: Async
     if not user:
         raise HTTPException(status_code=400, detail="Token de redefinicao invalido ou expirado")
 
+    # Invalidate token if already used
+    token_iat = payload.get("iat")
+    if token_iat and user.password_reset_at:
+        token_time = datetime.fromtimestamp(token_iat, tz=timezone.utc)
+        if token_time < user.password_reset_at:
+            raise HTTPException(status_code=400, detail="Token de redefinicao invalido ou expirado")
+
     user.password_hash = hash_password(body.new_password)
     user.verification_code = None
     user.verification_expires = None
+    user.password_reset_at = datetime.now(timezone.utc)
     await db.commit()
 
     return {"status": "password_reset"}
