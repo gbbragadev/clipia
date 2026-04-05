@@ -10,6 +10,7 @@ export interface User {
   credits: number;
   plan: string;
   email_verified: boolean;
+  referral_code: string;
 }
 
 export interface AuthResponse {
@@ -38,11 +39,21 @@ export function clearToken(): void {
   localStorage.removeItem("clipia_token");
 }
 
-export async function register(email: string, name: string, password: string): Promise<AuthResponse> {
+export interface RegisterPayload {
+  email: string;
+  name: string;
+  password: string;
+  referral_code?: string;
+  utm_source?: string;
+  utm_medium?: string;
+  utm_campaign?: string;
+}
+
+export async function register(email: string, name: string, password: string, extra?: Omit<RegisterPayload, "email" | "name" | "password">): Promise<AuthResponse> {
   const res = await fetch(`${API_BASE}/api/v1/auth/register`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ email, name, password }),
+    body: JSON.stringify({ email, name, password, ...extra }),
   });
   if (!res.ok) throw new Error(await readError(res, "Erro ao registrar"));
   return res.json();

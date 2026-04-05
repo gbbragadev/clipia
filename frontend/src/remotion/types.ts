@@ -39,12 +39,14 @@ export interface VideoOverlay {
 
 export interface VoiceConfig {
   voiceId: string
+  voiceProvider: 'edge' | 'elevenlabs' | 'custom'
   rate: number
   pitch: number
 }
 
 export const DEFAULT_VOICE_CONFIG: VoiceConfig = {
   voiceId: 'pt-BR-AntonioNeural',
+  voiceProvider: 'edge',
   rate: -10,
   pitch: 5,
 }

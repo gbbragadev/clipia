@@ -61,8 +61,8 @@ export default function VideoCard({ job, onEdit }: VideoCardProps) {
   return (
     <GlowCard intensity={0.2} className="h-full">
       <div className="flex flex-col h-full bg-[#110d1a] hover:bg-[#161122] transition-colors rounded-xl overflow-hidden relative">
-        {/* Thumbnail - Changed to 9:16 aspect ratio */}
-        <div className={`w-full aspect-[9/16] bg-gradient-to-br ${gradient} flex flex-col items-center justify-center relative overflow-hidden group`}>
+        {/* Thumbnail - shorter on mobile, taller on desktop */}
+        <div className={`w-full aspect-[3/4] sm:aspect-[9/16] bg-gradient-to-br ${gradient} flex flex-col items-center justify-center relative overflow-hidden group`}>
           <div className="absolute inset-0 bg-[url(/noise.svg)] opacity-20 mix-blend-overlay"></div>
           
           {job.download_url && (
@@ -100,45 +100,45 @@ export default function VideoCard({ job, onEdit }: VideoCardProps) {
         </div>
 
         {/* Content Footer */}
-        <div className="p-5 flex-1 flex flex-col border-t border-white/5">
-          <h3 className="text-base font-bold text-white line-clamp-2 leading-snug mb-3 flex-1" title={job.topic}>
+        <div className="p-4 flex-1 flex flex-col border-t border-white/5">
+          <h3 className="text-sm font-bold text-white line-clamp-2 leading-snug mb-3 flex-1" title={job.topic}>
             {job.topic}
           </h3>
-          
-          <div className="flex items-center justify-between mt-auto pt-4 border-t border-white/5">
-            <div className="flex items-center gap-3 text-xs text-slate-400 font-medium">
-              <span className="flex items-center gap-1">
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
-                {job.duration_target}s
-              </span>
-              <span>&bull;</span>
-              <span>{timeAgo(job.created_at)}</span>
-            </div>
-          </div>
-        </div>
 
-        {/* Floating Actions */}
-        {(canEdit || job.download_url) && (
-          <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 transition-all duration-300 flex flex-col gap-2 w-[80%] z-20">
-            {canEdit && (
-              <button
-                onClick={() => onEdit(job.job_id)}
-                className="w-full py-2.5 rounded-xl bg-purple-600/90 backdrop-blur-md text-white text-sm font-bold hover:bg-purple-500 transition shadow-xl border border-purple-400/30"
-              >
-                {strings.dashboard.videos.edit}
-              </button>
-            )}
-            {job.download_url && (
-              <button
-                type="button"
-                onClick={() => downloadAuthenticatedFile(job.download_url!, `clipia-${job.job_id.slice(0, 8)}.mp4`)}
-                className="w-full py-2.5 rounded-xl bg-black/60 backdrop-blur-md border border-white/20 text-white text-sm font-semibold text-center hover:bg-white/10 transition shadow-xl"
-              >
-                {strings.dashboard.videos.download}
-              </button>
-            )}
+          <div className="flex items-center gap-3 text-xs text-slate-400 font-medium mb-3">
+            <span className="flex items-center gap-1">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
+              {job.duration_target}s
+            </span>
+            <span>&bull;</span>
+            <span>{timeAgo(job.created_at)}</span>
           </div>
-        )}
+
+          {/* Always-visible action buttons */}
+          {(canEdit || job.download_url) && (
+            <div className="flex gap-2 mt-auto">
+              {canEdit && (
+                <button
+                  onClick={() => onEdit(job.job_id)}
+                  className="flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-lg bg-purple-600 text-white text-sm font-bold hover:bg-purple-500 active:scale-[0.97] transition"
+                >
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+                  {strings.dashboard.videos.edit}
+                </button>
+              )}
+              {job.download_url && (
+                <button
+                  type="button"
+                  onClick={() => downloadAuthenticatedFile(job.download_url!, `clipia-${job.job_id.slice(0, 8)}.mp4`)}
+                  className="flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-lg bg-white/10 border border-white/10 text-white text-sm font-semibold hover:bg-white/15 active:scale-[0.97] transition"
+                >
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                  {strings.dashboard.videos.download}
+                </button>
+              )}
+            </div>
+          )}
+        </div>
       </div>
     </GlowCard>
   )

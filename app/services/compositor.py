@@ -26,7 +26,8 @@ def _get_duration(path: str) -> float:
     """Get media duration in seconds using ffprobe."""
     result = subprocess.run(
         ["ffprobe", "-v", "quiet", "-print_format", "json", "-show_format", path],
-        capture_output=True, text=True,
+        capture_output=True,
+        text=True,
     )
     data = json.loads(result.stdout)
     return float(data["format"]["duration"])
@@ -36,7 +37,8 @@ def _has_nvenc() -> bool:
     """Check if NVENC encoder is available."""
     result = subprocess.run(
         ["ffmpeg", "-hide_banner", "-encoders"],
-        capture_output=True, text=True,
+        capture_output=True,
+        text=True,
     )
     return "h264_nvenc" in result.stdout
 
@@ -44,23 +46,40 @@ def _has_nvenc() -> bool:
 def _prepare_scene(media_path: str, duration: float, output_path: str) -> str:
     """Prepare a single scene clip: resize to 1080x1920, loop if needed, set exact duration."""
     cmd = [
-        "ffmpeg", "-y",
-        "-stream_loop", "-1",  # loop input if shorter than duration
-        "-i", media_path,
-        "-vf", (
-            f"scale=1080:1920:force_original_aspect_ratio=increase,"
-            f"crop=1080:1920,"
-            f"setsar=1"
-        ),
-        "-t", str(duration),
+        "ffmpeg",
+        "-y",
+        "-stream_loop",
+        "-1",  # loop input if shorter than duration
+        "-i",
+        media_path,
+        "-vf",
+        ("scale=1080:1920:force_original_aspect_ratio=increase," "crop=1080:1920," "setsar=1"),
+        "-t",
+        str(duration),
         "-an",  # no audio
-        "-c:v", "libx264", "-preset", "ultrafast", "-crf", "23",
-        "-r", str(settings.VIDEO_FPS),
-        "-pix_fmt", "yuv420p",
+        "-c:v",
+        "libx264",
+        "-preset",
+        "ultrafast",
+        "-crf",
+        "23",
+        "-r",
+        str(settings.VIDEO_FPS),
+        "-pix_fmt",
+        "yuv420p",
         output_path,
     ]
-    _run(cmd, f"prepare scene")
+    _run(cmd, "prepare scene")
     return output_path
+
+
+def _watermark_filter() -> str:
+    """Return a drawtext filter for the ClipIA watermark, or empty string if disabled."""
+    if not settings.WATERMARK_ENABLED:
+        return ""
+    text = settings.WATERMARK_TEXT.replace("'", "'\\''")
+    font = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
+    return f"drawtext=text='{text}':fontfile={font}" f":fontsize=22:fontcolor=white@0.5:x=w-text_w-30:y=h-50"
 
 
 def _build_overlay_filters(overlays: list[dict], fps: int = 30) -> str:
@@ -77,9 +96,7 @@ def _build_overlay_filters(overlays: list[dict], fps: int = 30) -> str:
             username = config.get("username", "@clipia").replace("'", "'\\''")
             text = config.get("text", "Gostou? Siga para mais!").replace("'", "'\\''")
             # Dark overlay background
-            filters.append(
-                f"drawbox=x=0:y=0:w=iw:h=ih:color=black@0.85:t=fill:enable='{enable}'"
-            )
+            filters.append(f"drawbox=x=0:y=0:w=iw:h=ih:color=black@0.85:t=fill:enable='{enable}'")
             # Username
             filters.append(
                 f"drawtext=text='{username}':fontfile=/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
@@ -93,9 +110,7 @@ def _build_overlay_filters(overlays: list[dict], fps: int = 30) -> str:
                 f":enable='{enable}'"
             )
             # SEGUIR button (red box + text)
-            filters.append(
-                f"drawbox=x=(iw-240)/2:y=ih/2+80:w=240:h=50:color=0xFE2C55@1:t=fill:enable='{enable}'"
-            )
+            filters.append(f"drawbox=x=(iw-240)/2:y=ih/2+80:w=240:h=50:color=0xFE2C55@1:t=fill:enable='{enable}'")
             filters.append(
                 f"drawtext=text='SEGUIR':fontfile=/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
                 f":fontsize=22:fontcolor=white:x=(w-text_w)/2:y=h/2+90"
@@ -105,9 +120,7 @@ def _build_overlay_filters(overlays: list[dict], fps: int = 30) -> str:
         elif ov_type == "followCTA":
             text = config.get("text", "SIGA PARA MAIS").replace("'", "'\\''")
             # Red pill button at bottom
-            filters.append(
-                f"drawbox=x=(iw-300)/2:y=ih*0.78:w=300:h=52:color=0xFE2C55@1:t=fill:enable='{enable}'"
-            )
+            filters.append(f"drawbox=x=(iw-300)/2:y=ih*0.78:w=300:h=52:color=0xFE2C55@1:t=fill:enable='{enable}'")
             filters.append(
                 f"drawtext=text='{text}':fontfile=/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
                 f":fontsize=24:fontcolor=white:x=(w-text_w)/2:y=h*0.78+12"
@@ -118,9 +131,7 @@ def _build_overlay_filters(overlays: list[dict], fps: int = 30) -> str:
             label = config.get("label", "VOCE SABIA?").replace("'", "'\\''")
             text = config.get("text", "").replace("'", "'\\''")
             # Dark box background at top
-            filters.append(
-                f"drawbox=x=iw*0.06:y=ih*0.18:w=iw*0.88:h=140:color=black@0.75:t=fill:enable='{enable}'"
-            )
+            filters.append(f"drawbox=x=iw*0.06:y=ih*0.18:w=iw*0.88:h=140:color=black@0.75:t=fill:enable='{enable}'")
             # Label (yellow)
             filters.append(
                 f"drawtext=text='{label}':fontfile=/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
@@ -152,15 +163,27 @@ def _get_encoder_config() -> tuple[str, list[str]]:
 def _prepare_looped_background(media_path: str, duration: float, width: int, height: int, output_path: str) -> str:
     """Prepare a single clip looped to exact duration, resized to target dimensions."""
     cmd = [
-        "ffmpeg", "-y",
-        "-stream_loop", "-1",
-        "-i", media_path,
-        "-vf", f"scale={width}:{height}:force_original_aspect_ratio=increase,crop={width}:{height},setsar=1",
-        "-t", str(duration),
+        "ffmpeg",
+        "-y",
+        "-stream_loop",
+        "-1",
+        "-i",
+        media_path,
+        "-vf",
+        f"scale={width}:{height}:force_original_aspect_ratio=increase,crop={width}:{height},setsar=1",
+        "-t",
+        str(duration),
         "-an",
-        "-c:v", "libx264", "-preset", "ultrafast", "-crf", "23",
-        "-r", str(settings.VIDEO_FPS),
-        "-pix_fmt", "yuv420p",
+        "-c:v",
+        "libx264",
+        "-preset",
+        "ultrafast",
+        "-crf",
+        "23",
+        "-r",
+        str(settings.VIDEO_FPS),
+        "-pix_fmt",
+        "yuv420p",
         output_path,
     ]
     _run(cmd, "prepare looped background")
@@ -168,9 +191,13 @@ def _prepare_looped_background(media_path: str, duration: float, width: int, hei
 
 
 def _compose_split_screen(
-    bg_path: str, audio_path: str, ass_path: str,
-    split_ratio: float, output_path: str,
-    music_path: str | None = None, music_volume: float = 0.15,
+    bg_path: str,
+    audio_path: str,
+    ass_path: str,
+    split_ratio: float,
+    output_path: str,
+    music_path: str | None = None,
+    music_volume: float = 0.15,
 ) -> str:
     """Compose split-screen: dark top region with subtitles + gameplay bottom."""
     top_h = int(settings.VIDEO_HEIGHT * split_ratio)
@@ -180,11 +207,13 @@ def _compose_split_screen(
     encoder, encoder_opts = _get_encoder_config()
 
     # Filter: crop gameplay to bottom region, add dark top, overlay ASS on top
+    wm = _watermark_filter()
+    wm_part = f",{wm}" if wm else ""
     filter_complex = (
         f"[0:v]scale={w}:{bot_h}:force_original_aspect_ratio=increase,crop={w}:{bot_h},setsar=1[bg];"
         f"color=c=#0D0D0D:s={w}x{top_h}:d=9999:r={settings.VIDEO_FPS}[top];"
         f"[top][bg]vstack=inputs=2[stacked];"
-        f"[stacked]ass={ass_path}[vout]"
+        f"[stacked]ass={ass_path}{wm_part}[vout]"
     )
 
     inputs = ["-i", bg_path, "-i", audio_path]
@@ -192,22 +221,34 @@ def _compose_split_screen(
 
     if music_path and Path(music_path).exists():
         inputs += ["-stream_loop", "-1", "-i", music_path]
-        filter_complex += f";[1:a]volume=1.0[narr];[2:a]volume={music_volume}[mus];[narr][mus]amix=inputs=2:duration=first[aout]"
+        filter_complex += (
+            f";[1:a]volume=1.0[narr];[2:a]volume={music_volume}[mus];[narr][mus]amix=inputs=2:duration=first[aout]"
+        )
         maps_and_audio += ["-map", "[aout]"]
     else:
         maps_and_audio += ["-map", "1:a"]
 
     cmd = [
-        "ffmpeg", "-y",
+        "ffmpeg",
+        "-y",
         *inputs,
-        "-filter_complex", filter_complex,
+        "-filter_complex",
+        filter_complex,
         *maps_and_audio,
-        "-c:v", encoder, *encoder_opts,
-        "-c:a", "aac", "-b:a", "128k",
+        "-c:v",
+        encoder,
+        *encoder_opts,
+        "-c:a",
+        "aac",
+        "-b:a",
+        "128k",
         "-shortest",
-        "-r", str(settings.VIDEO_FPS),
-        "-pix_fmt", "yuv420p",
-        "-movflags", "+faststart",
+        "-r",
+        str(settings.VIDEO_FPS),
+        "-pix_fmt",
+        "yuv420p",
+        "-movflags",
+        "+faststart",
         output_path,
     ]
     _run(cmd, "split-screen compose")
@@ -215,9 +256,13 @@ def _compose_split_screen(
 
 
 def _compose_character_overlay(
-    bg_path: str, character_path: str, audio_path: str, ass_path: str,
+    bg_path: str,
+    character_path: str,
+    audio_path: str,
+    ass_path: str,
     output_path: str,
-    music_path: str | None = None, music_volume: float = 0.15,
+    music_path: str | None = None,
+    music_volume: float = 0.15,
 ) -> str:
     """Compose video with character image overlaid on background + subtitles."""
     w = settings.VIDEO_WIDTH
@@ -228,11 +273,13 @@ def _compose_character_overlay(
 
     encoder, encoder_opts = _get_encoder_config()
 
+    wm = _watermark_filter()
+    wm_part = f",{wm}" if wm else ""
     filter_complex = (
         f"[0:v]scale={w}:{h}:force_original_aspect_ratio=increase,crop={w}:{h},setsar=1[bg];"
         f"[1:v]scale={char_w}:-1[char];"
         f"[bg][char]overlay={char_x}:{char_y}[with_char];"
-        f"[with_char]ass={ass_path}[vout]"
+        f"[with_char]ass={ass_path}{wm_part}[vout]"
     )
 
     inputs = ["-stream_loop", "-1", "-i", bg_path, "-i", character_path, "-i", audio_path]
@@ -240,22 +287,34 @@ def _compose_character_overlay(
 
     if music_path and Path(music_path).exists():
         inputs += ["-stream_loop", "-1", "-i", music_path]
-        filter_complex += f";[2:a]volume=1.0[narr];[3:a]volume={music_volume}[mus];[narr][mus]amix=inputs=2:duration=first[aout]"
+        filter_complex += (
+            f";[2:a]volume=1.0[narr];[3:a]volume={music_volume}[mus];[narr][mus]amix=inputs=2:duration=first[aout]"
+        )
         maps_and_audio += ["-map", "[aout]"]
     else:
         maps_and_audio += ["-map", "2:a"]
 
     cmd = [
-        "ffmpeg", "-y",
+        "ffmpeg",
+        "-y",
         *inputs,
-        "-filter_complex", filter_complex,
+        "-filter_complex",
+        filter_complex,
         *maps_and_audio,
-        "-c:v", encoder, *encoder_opts,
-        "-c:a", "aac", "-b:a", "128k",
+        "-c:v",
+        encoder,
+        *encoder_opts,
+        "-c:a",
+        "aac",
+        "-b:a",
+        "128k",
         "-shortest",
-        "-r", str(settings.VIDEO_FPS),
-        "-pix_fmt", "yuv420p",
-        "-movflags", "+faststart",
+        "-r",
+        str(settings.VIDEO_FPS),
+        "-pix_fmt",
+        "yuv420p",
+        "-movflags",
+        "+faststart",
         output_path,
     ]
     _run(cmd, "character overlay compose")
@@ -294,7 +353,9 @@ def compose_short(
 
         ass_path = str(job_dir / "subtitles.ass")
         generate_ass_file(
-            words, ass_path, total_duration=audio_duration,
+            words,
+            ass_path,
+            total_duration=audio_duration,
             font_name=ss.get("fontFamily", "Montserrat").split(",")[0].strip(),
             font_size=ss.get("fontSize", 52),
             primary_color=ss.get("color", "#FFFFFF"),
@@ -311,16 +372,25 @@ def compose_short(
 
         if layout.type == "split_horizontal":
             result = _compose_split_screen(
-                bg_path, audio_path, ass_path,
-                layout.split_ratio, output_path,
-                music_path, music_volume,
+                bg_path,
+                audio_path,
+                ass_path,
+                layout.split_ratio,
+                output_path,
+                music_path,
+                music_volume,
             )
         elif layout.type == "character_overlay" and layout.character_image:
             char_path = str(settings.STORAGE_DIR / "library" / "characters" / layout.character_image)
             if Path(char_path).exists():
                 result = _compose_character_overlay(
-                    bg_path, char_path, audio_path, ass_path,
-                    output_path, music_path, music_volume,
+                    bg_path,
+                    char_path,
+                    audio_path,
+                    ass_path,
+                    output_path,
+                    music_path,
+                    music_volume,
                 )
             else:
                 logger.warning(f"Character image not found: {char_path}, falling back to fullscreen")
@@ -367,20 +437,31 @@ def compose_short(
 
     # 4. Concatenate clips
     concat_output = str(job_dir / "concat.mp4")
-    _run([
-        "ffmpeg", "-y",
-        "-f", "concat", "-safe", "0",
-        "-i", concat_file,
-        "-c:v", "copy",
-        "-an",
-        concat_output,
-    ], "concat")
+    _run(
+        [
+            "ffmpeg",
+            "-y",
+            "-f",
+            "concat",
+            "-safe",
+            "0",
+            "-i",
+            concat_file,
+            "-c:v",
+            "copy",
+            "-an",
+            concat_output,
+        ],
+        "concat",
+    )
 
     # 5. Generate ASS subtitles (with editor style if available)
     ass_path = str(job_dir / "subtitles.ass")
     ss = subtitle_style or {}
     generate_ass_file(
-        words, ass_path, total_duration=audio_duration,
+        words,
+        ass_path,
+        total_duration=audio_duration,
         font_name=ss.get("fontFamily", "Montserrat").split(",")[0].strip(),
         font_size=ss.get("fontSize", 52),
         primary_color=ss.get("color", "#FFFFFF"),
@@ -392,11 +473,14 @@ def compose_short(
         accent_color=ss.get("accentColor", "#FFFC00"),
     )
 
-    # 6. Build video filter chain: subtitles + overlays
+    # 6. Build video filter chain: subtitles + overlays + watermark
     vf_parts = [f"ass={ass_path}"]
     overlay_filters = _build_overlay_filters(overlays or [], fps)
     if overlay_filters:
         vf_parts.append(overlay_filters)
+    wm = _watermark_filter()
+    if wm:
+        vf_parts.append(wm)
     vf_chain = ",".join(vf_parts)
 
     # 7. Final compose: video + subtitles + overlays + audio with NVENC
@@ -413,39 +497,73 @@ def compose_short(
     if music_path and Path(music_path).exists():
         # Mix narration + background music
         logger.info(f"Mixing music at volume {music_volume}")
-        _run([
-            "ffmpeg", "-y",
-            "-i", concat_output,
-            "-i", audio_path,
-            "-stream_loop", "-1",
-            "-i", music_path,
-            "-filter_complex",
-            f"[1:a]volume=1.0[narr];[2:a]volume={music_volume}[mus];[narr][mus]amix=inputs=2:duration=first[aout]",
-            "-map", "0:v",
-            "-map", "[aout]",
-            "-vf", vf_chain,
-            "-c:v", encoder, *encoder_opts,
-            "-c:a", "aac", "-b:a", "128k",
-            "-shortest",
-            "-r", str(settings.VIDEO_FPS),
-            "-pix_fmt", "yuv420p",
-            "-movflags", "+faststart",
-            output_path,
-        ], "final encode with music")
+        _run(
+            [
+                "ffmpeg",
+                "-y",
+                "-i",
+                concat_output,
+                "-i",
+                audio_path,
+                "-stream_loop",
+                "-1",
+                "-i",
+                music_path,
+                "-filter_complex",
+                f"[1:a]volume=1.0[narr];[2:a]volume={music_volume}[mus];[narr][mus]amix=inputs=2:duration=first[aout]",
+                "-map",
+                "0:v",
+                "-map",
+                "[aout]",
+                "-vf",
+                vf_chain,
+                "-c:v",
+                encoder,
+                *encoder_opts,
+                "-c:a",
+                "aac",
+                "-b:a",
+                "128k",
+                "-shortest",
+                "-r",
+                str(settings.VIDEO_FPS),
+                "-pix_fmt",
+                "yuv420p",
+                "-movflags",
+                "+faststart",
+                output_path,
+            ],
+            "final encode with music",
+        )
     else:
-        _run([
-            "ffmpeg", "-y",
-            "-i", concat_output,
-            "-i", audio_path,
-            "-vf", vf_chain,
-            "-c:v", encoder, *encoder_opts,
-            "-c:a", "aac", "-b:a", "128k",
-            "-shortest",
-            "-r", str(settings.VIDEO_FPS),
-            "-pix_fmt", "yuv420p",
-            "-movflags", "+faststart",
-            output_path,
-        ], "final encode")
+        _run(
+            [
+                "ffmpeg",
+                "-y",
+                "-i",
+                concat_output,
+                "-i",
+                audio_path,
+                "-vf",
+                vf_chain,
+                "-c:v",
+                encoder,
+                *encoder_opts,
+                "-c:a",
+                "aac",
+                "-b:a",
+                "128k",
+                "-shortest",
+                "-r",
+                str(settings.VIDEO_FPS),
+                "-pix_fmt",
+                "yuv420p",
+                "-movflags",
+                "+faststart",
+                output_path,
+            ],
+            "final encode",
+        )
 
     # Cleanup temp files
     for p in prepared:

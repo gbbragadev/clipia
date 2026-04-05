@@ -13,9 +13,9 @@ export default function HeroSection() {
       <div className="w-full grid lg:grid-cols-[1fr_auto] gap-12 items-center">
         {/* Left: Typography as star */}
         <div className="flex flex-col space-y-8 z-10 relative">
-          <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full border border-purple-500/30 bg-purple-500/10 text-purple-300 text-sm w-max">
-            <span className="w-2 h-2 rounded-full bg-purple-400 animate-pulse" />
-            Beta privado
+          <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full border border-green-500/30 bg-green-500/10 text-green-300 text-sm w-max">
+            <span className="w-2 h-2 rounded-full bg-green-400 animate-pulse" />
+            2 vídeos grátis ao criar conta
           </div>
 
           <div className="w-full">

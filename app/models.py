@@ -4,15 +4,18 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 
 from app.auth.schemas import _normalize_email
 from app.errors import ErrorMessages, json_size_bytes
-from app.services.tts import SUPPORTED_VOICE_IDS
 from app.templates import TEMPLATES
 
 
 class GenerateRequest(BaseModel):
     topic: str = Field(..., min_length=10, max_length=500, description="The main topic of the video")
-    style: Literal["educational", "storytelling", "news", "comedy"] = Field(default="educational", description="The style/tone of the video")
+    style: Literal["educational", "storytelling", "news", "comedy"] = Field(
+        default="educational", description="The style/tone of the video"
+    )
     duration_target: int = Field(default=45, ge=15, le=180, description="Target duration in seconds")
     template_id: str = Field(default="stock_narration", description="Template to use for the video")
+    voice_provider: Literal["edge", "elevenlabs", "custom"] = Field(default="edge", description="Voice provider to use")
+    voice_config: dict | None = Field(default=None, description="Voice configuration (voice_id, rate, pitch, etc)")
 
     @field_validator("template_id")
     @classmethod
@@ -20,6 +23,11 @@ class GenerateRequest(BaseModel):
         if value not in TEMPLATES:
             raise ValueError(ErrorMessages.INVALID_INPUT)
         return value
+
+
+class VoiceCloneRequest(BaseModel):
+    name: str = Field(..., min_length=1, max_length=100, description="Name for the cloned voice")
+    description: str = Field(default="", max_length=500)
 
 
 class JobStatus(BaseModel):
@@ -54,19 +62,13 @@ class EditRequest(BaseModel):
 
 
 class RegenerateTTSRequest(BaseModel):
-    text: str | None = Field(default=None, max_length=5000, description="New text for narration")  # if None, keep current narration
-    voice_id: str | None = Field(default=None, description="Voice ID to use")
+    text: str | None = Field(
+        default=None, max_length=5000, description="New text for narration"
+    )  # if None, keep current narration
+    voice_id: str | None = Field(default=None, description="Voice ID to use (Edge or ElevenLabs)")
+    voice_provider: Literal["edge", "elevenlabs"] = Field(default="edge", description="Provider for regeneration")
     rate: int | None = Field(default=None, ge=-50, le=50)
     pitch: int | None = Field(default=None, ge=-50, le=50)
-
-    @field_validator("voice_id")
-    @classmethod
-    def validate_voice_id(cls, value: str | None) -> str | None:
-        if value is None:
-            return value
-        if value not in SUPPORTED_VOICE_IDS:
-            raise ValueError(ErrorMessages.INVALID_INPUT)
-        return value
 
 
 class RegenerateMediaRequest(BaseModel):

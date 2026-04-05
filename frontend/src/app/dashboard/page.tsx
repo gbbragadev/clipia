@@ -7,6 +7,7 @@ import { fetchJobs, type JobSummary } from '@/lib/editor-api'
 import { useAuth } from '@/contexts/AuthContext'
 import GenerateForm from '@/components/dashboard/GenerateForm'
 import VideoGrid from '@/components/dashboard/VideoGrid'
+import ReferralCard from '@/components/dashboard/ReferralCard'
 import { InlineError } from '@/components/ui/feedback'
 import { PretextHeading } from '@/components/ui/PretextHeading'
 
@@ -66,6 +67,10 @@ export default function DashboardPage() {
         <div className="relative z-10">
           <GenerateForm onJobComplete={loadJobs} />
         </div>
+      </div>
+
+      <div className="mb-10">
+        <ReferralCard />
       </div>
 
       <section className="mt-8">

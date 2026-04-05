@@ -9,6 +9,8 @@
 
 /* ── Theme Variables ── */
 :root, [data-theme="dark"] {
+  --font-inter: "Segoe UI", "Helvetica Neue", Helvetica, Arial, sans-serif;
+  --font-display: "Trebuchet MS", "Avenir Next", "Segoe UI", sans-serif;
   --bg-base: #0a0a12;
   --bg-raised: #111118;
   --bg-surface: #1A1A22;
@@ -34,6 +36,8 @@
 }
 
 [data-theme="light"] {
+  --font-inter: "Segoe UI", "Helvetica Neue", Helvetica, Arial, sans-serif;
+  --font-display: "Trebuchet MS", "Avenir Next", "Segoe UI", sans-serif;
   --bg-base: #f5f5f7;
   --bg-raised: #ffffff;
   --bg-surface: #ffffff;

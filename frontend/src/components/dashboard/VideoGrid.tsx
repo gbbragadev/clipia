@@ -55,7 +55,7 @@ export default function VideoGrid({ jobs, loading, onEdit }: VideoGridProps) {
 
   if (loading) {
     return (
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+      <div className="grid grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
         <SkeletonCard />
         <SkeletonCard />
         <SkeletonCard />
@@ -96,7 +96,7 @@ export default function VideoGrid({ jobs, loading, onEdit }: VideoGridProps) {
           },
         ]}
       />
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+      <div className="grid grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
         {filteredJobs.map((job) => (
           <VideoCard key={job.job_id} job={job} onEdit={onEdit} />
         ))}

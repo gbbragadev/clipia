@@ -4,6 +4,7 @@ import { createContext, useContext, useEffect, useState, useCallback, type React
 import { usePathname, useRouter } from "next/navigation";
 import {
   type User,
+  type RegisterPayload,
   getMe,
   login as authLogin,
   register as authRegister,
@@ -11,6 +12,7 @@ import {
   clearToken,
   getToken,
 } from "@/lib/auth";
+import { getStoredUTM, clearStoredUTM } from "@/hooks/useUTM";
 import { useToast } from "@/components/ui/feedback";
 
 interface AuthContextType {
@@ -80,7 +82,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const register = useCallback(async (email: string, name: string, password: string) => {
-    const res = await authRegister(email, name, password);
+    const utm = getStoredUTM();
+    const res = await authRegister(email, name, password, utm);
+    clearStoredUTM();
     setToken(res.access_token);
     const me = await getMe();
     setUser(me);

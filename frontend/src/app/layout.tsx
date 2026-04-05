@@ -1,19 +1,8 @@
 import type { Metadata } from "next";
-import { Inter, Space_Grotesk } from "next/font/google";
 import "./globals.css";
 import FilmGrain from "@/components/FilmGrain";
 import AppProviders from "@/components/providers/AppProviders";
-
-const inter = Inter({
-  variable: "--font-inter",
-  subsets: ["latin"],
-});
-
-const spaceGrotesk = Space_Grotesk({
-  variable: "--font-display",
-  subsets: ["latin"],
-  weight: ["500", "700"],
-});
+import TrackingScripts from "@/components/TrackingScripts";
 
 export const metadata: Metadata = {
   title: "ClipIA - Crie vídeos curtos com IA",
@@ -60,7 +49,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="pt-BR" className={`${inter.variable} ${spaceGrotesk.variable} h-full antialiased`}>
+    <html lang="pt-BR" className="h-full antialiased">
       <head>
         <script
           type="application/ld+json"
@@ -83,6 +72,7 @@ export default function RootLayout({
         />
       </head>
       <body className="min-h-full flex flex-col">
+        <TrackingScripts />
         <FilmGrain />
         <AppProviders>
           {children}

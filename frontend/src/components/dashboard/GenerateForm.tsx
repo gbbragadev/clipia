@@ -46,6 +46,9 @@ export default function GenerateForm({ onJobComplete }: GenerateFormProps) {
   const [script, setScript] = useState('')
   const [wpm, setWpm] = useState(150)
   const [showAdvancedScript, setShowAdvancedScript] = useState(false)
+  const [voiceProvider, setVoiceProvider] = useState<'edge' | 'elevenlabs'>('edge')
+
+  const creditCost = voiceProvider === 'elevenlabs' ? 2 : 1
 
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const lastRequestRef = useRef<GenerateParams | null>(null)
@@ -79,7 +82,7 @@ export default function GenerateForm({ onJobComplete }: GenerateFormProps) {
   const handleGenerate = async () => {
     if (!topic.trim() || generating) return
 
-    if (user && user.credits <= 0) {
+    if (user && user.credits < creditCost) {
       setShowCreditsModal(true)
       info('Sem créditos suficientes', 'Adicione créditos para iniciar uma nova geração.')
       return
@@ -94,6 +97,7 @@ export default function GenerateForm({ onJobComplete }: GenerateFormProps) {
         style,
         duration_target: duration,
         template_id: templateId,
+        voice_provider: voiceProvider,
       }
       lastRequestRef.current = params
       const result = await generateVideo(params)
@@ -165,6 +169,39 @@ export default function GenerateForm({ onJobComplete }: GenerateFormProps) {
         <div className="flex justify-between text-[10px] text-[var(--text-tertiary)] mt-0.5">
           <span>15s</span>
           <span>180s</span>
+        </div>
+      </div>
+
+      {/* Voice Provider */}
+      <div className="mb-5">
+        <label className="block text-xs text-[var(--text-tertiary)] mb-1.5">Voz</label>
+        <div className="flex gap-2">
+          <button
+            type="button"
+            onClick={() => setVoiceProvider('edge')}
+            disabled={generating}
+            className={`flex-1 py-2.5 px-3 rounded-xl border text-xs font-medium transition ${
+              voiceProvider === 'edge'
+                ? 'border-purple-500/50 bg-purple-500/10 text-purple-300'
+                : 'border-[var(--border-default)] bg-[var(--bg-surface)] text-[var(--text-tertiary)] hover:border-purple-500/30'
+            } disabled:opacity-50 cursor-pointer`}
+          >
+            <div className="font-semibold">Edge TTS</div>
+            <div className="text-[10px] opacity-60 mt-0.5">Grátis · 1 crédito</div>
+          </button>
+          <button
+            type="button"
+            onClick={() => setVoiceProvider('elevenlabs')}
+            disabled={generating}
+            className={`flex-1 py-2.5 px-3 rounded-xl border text-xs font-medium transition ${
+              voiceProvider === 'elevenlabs'
+                ? 'border-blue-500/50 bg-blue-500/10 text-blue-300'
+                : 'border-[var(--border-default)] bg-[var(--bg-surface)] text-[var(--text-tertiary)] hover:border-blue-500/30'
+            } disabled:opacity-50 cursor-pointer`}
+          >
+            <div className="font-semibold">ElevenLabs</div>
+            <div className="text-[10px] opacity-60 mt-0.5">Premium · 2 créditos</div>
+          </button>
         </div>
       </div>
 
@@ -273,7 +310,7 @@ export default function GenerateForm({ onJobComplete }: GenerateFormProps) {
       {/* Credits info */}
       {user && !generating && (
         <p className="text-center text-[11px] text-gray-600 mt-2">
-          1 crédito será usado · {user.credits} disponíveis
+          {creditCost} crédito{creditCost > 1 ? 's' : ''} será{creditCost > 1 ? 'ão' : ''} usado{creditCost > 1 ? 's' : ''} · {user.credits} disponíve{user.credits === 1 ? 'l' : 'is'}
         </p>
       )}
 

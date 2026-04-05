@@ -91,6 +91,46 @@ export interface GenerateParams {
   style: string
   duration_target: number
   template_id: string
+  voice_provider?: 'edge' | 'elevenlabs' | 'custom'
+  voice_config?: Record<string, unknown>
+}
+
+export interface VoiceInfo {
+  id: string
+  name: string
+  provider: 'edge' | 'elevenlabs' | 'custom'
+  language: string
+  gender?: string | null
+  preview_url?: string | null
+  is_clone?: boolean
+  clone_id?: string
+}
+
+export async function fetchVoices(): Promise<VoiceInfo[]> {
+  const res = await fetch(`${API_BASE}/voices`, {
+    headers: getAuthHeaders(),
+  })
+  if (!res.ok) return []
+  return res.json()
+}
+
+export async function uploadJobAudio(
+  jobId: string,
+  file: File,
+): Promise<{ audio_url: string; words: Array<Record<string, unknown>>; duration: number }> {
+  const form = new FormData()
+  form.append('file', file)
+  const token = getToken()
+  const res = await fetch(`${API_BASE}/jobs/${jobId}/upload-audio`, {
+    method: 'POST',
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+    body: form,
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(err.detail || 'Erro ao enviar áudio')
+  }
+  return res.json()
 }
 
 export interface VideoTemplateInfo {
