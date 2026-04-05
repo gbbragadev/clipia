@@ -12,7 +12,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import FileResponse
 from slowapi import Limiter
 from slowapi.util import get_remote_address
-from sqlalchemy import select, update
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.security import get_owned_job
@@ -956,23 +956,58 @@ async def admin_dashboard(
     days = _ADMIN_DASHBOARD_RANGES[range]
     window_start = now.replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=days - 1)
 
-    users_result = await db.execute(select(User))
-    purchases_result = await db.execute(select(CreditPurchase))
-    jobs_result = await db.execute(select(Job))
+    # SQL-filtered queries — only load rows within the time window
+    users_result = await db.execute(
+        select(User).where(User.created_at >= window_start)
+    )
+    users_in_range = list(users_result.scalars().all())
 
-    users = list(users_result.scalars().all())
-    purchases = list(purchases_result.scalars().all())
-    jobs = list(jobs_result.scalars().all())
+    purchases_result = await db.execute(
+        select(CreditPurchase).where(CreditPurchase.created_at >= window_start)
+    )
+    purchases_in_range = list(purchases_result.scalars().all())
 
-    users_in_range = [user for user in users if (_coerce_utc(user.created_at) or now) >= window_start]
-    purchases_in_range = [
-        purchase for purchase in purchases if (_coerce_utc(purchase.created_at) or now) >= window_start
-    ]
-    jobs_in_range = [job for job in jobs if (_coerce_utc(job.created_at) or now) >= window_start]
+    jobs_result = await db.execute(
+        select(Job).where(Job.created_at >= window_start)
+    )
+    jobs_in_range = list(jobs_result.scalars().all())
 
+    # Aggregate totals via SQL — no need to load all rows
     approved_purchases = [purchase for purchase in purchases_in_range if purchase.status == "approved"]
     pending_purchases = [purchase for purchase in purchases_in_range if purchase.status != "approved"]
-    approved_user_ids = {str(purchase.user_id) for purchase in purchases if purchase.status == "approved"}
+
+    approved_user_ids_result = await db.execute(
+        select(CreditPurchase.user_id).where(CreditPurchase.status == "approved").distinct()
+    )
+    approved_user_ids = {str(uid) for uid in approved_user_ids_result.scalars().all()}
+
+    # Job status counts via SQL GROUP BY
+    job_status_rows = await db.execute(
+        select(Job.status, func.count(Job.id)).group_by(Job.status)
+    )
+    current_job_statuses: dict[str, int] = defaultdict(int, {row[0]: row[1] for row in job_status_rows.all()})
+
+    # Pending credits via SQL aggregation — only jobs that have pending_credits > 0
+    pending_credits_result = await db.execute(
+        select(Job.pending_credits).where(Job.pending_credits > 0)
+    )
+    pending_credits_jobs = [float(v) for v in pending_credits_result.scalars().all()]
+
+    # Recent activity via SQL ORDER BY + LIMIT (avoids loading full tables)
+    recent_users_result = await db.execute(
+        select(User).order_by(User.created_at.desc()).limit(5)
+    )
+    recent_users = list(recent_users_result.scalars().all())
+
+    recent_purchases_result = await db.execute(
+        select(CreditPurchase).order_by(CreditPurchase.created_at.desc()).limit(5)
+    )
+    recent_purchases = list(recent_purchases_result.scalars().all())
+
+    recent_failed_jobs_result = await db.execute(
+        select(Job).where(Job.status == "failed").order_by(Job.created_at.desc()).limit(5)
+    )
+    recent_failed_jobs = list(recent_failed_jobs_result.scalars().all())
 
     revenue_by_day = _empty_daily_series(days, now)
     users_by_day = _empty_daily_series(days, now)
@@ -980,15 +1015,6 @@ async def admin_dashboard(
     approved_orders_by_day = _empty_daily_series(days, now)
 
     package_mix: dict[str, dict[str, int | float | str]] = {}
-    recent_users = sorted(users, key=lambda user: _coerce_utc(user.created_at) or now, reverse=True)[:5]
-    recent_purchases = sorted(
-        purchases, key=lambda purchase: _coerce_utc(purchase.created_at) or now, reverse=True
-    )[:5]
-    recent_failed_jobs = sorted(
-        [job for job in jobs if job.status == "failed"],
-        key=lambda job: _coerce_utc(job.created_at) or now,
-        reverse=True,
-    )[:5]
 
     for user in users_in_range:
         bucket = _bucket_key(user.created_at)
@@ -1021,10 +1047,6 @@ async def admin_dashboard(
         if bucket:
             jobs_by_day[bucket] += 1
 
-    current_job_statuses = defaultdict(int)
-    for job in jobs:
-        current_job_statuses[job.status] += 1
-
     settled_jobs = [job for job in jobs_in_range if job.status in {"completed", "failed"}]
     success_rate = 0.0
     if settled_jobs:
@@ -1032,7 +1054,6 @@ async def admin_dashboard(
             (sum(1 for job in settled_jobs if job.status == "completed") / len(settled_jobs)) * 100
         )
 
-    pending_credits_jobs = [float(job.pending_credits or 0.0) for job in jobs if (job.pending_credits or 0.0) > 0]
     avg_pending_credits = _round2(sum(pending_credits_jobs) / len(pending_credits_jobs)) if pending_credits_jobs else 0.0
 
     storage_stats = await _build_storage_stats(db)
