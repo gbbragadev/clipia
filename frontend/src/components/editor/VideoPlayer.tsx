@@ -1,8 +1,21 @@
 'use client'
 
+import dynamic from 'next/dynamic'
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Player } from '@remotion/player'
 import { ShortVideoComposition } from '@/remotion/compositions/ShortVideoComposition'
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const Player = dynamic(
+  () => import('@remotion/player').then((mod) => mod.Player as any),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="w-full aspect-[9/16] bg-black/50 rounded-xl animate-pulse flex items-center justify-center">
+        <span className="text-white/40 text-sm">Carregando player...</span>
+      </div>
+    ),
+  }
+) as any
 import { useEditor } from '@/contexts/EditorContext'
 import { PretextSubtitlePreview } from './PretextSubtitlePreview'
 
