@@ -19,6 +19,7 @@
     "@remotion/renderer": "^4.0.444",
     "@remotion/shapes": "^4.0.444",
     "@remotion/transitions": "^4.0.444",
+    "isomorphic-dompurify": "^3.7.1",
     "next": "16.2.2",
     "react": "19.2.4",
     "react-dom": "19.2.4",
