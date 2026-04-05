@@ -41,6 +41,8 @@ limiter = Limiter(key_func=get_remote_address, default_limits=[settings.RATE_LIM
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    from app.config import validate_production_settings
+    validate_production_settings(settings)
     yield
     await engine.dispose()
 

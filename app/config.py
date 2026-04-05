@@ -1,3 +1,4 @@
+import logging
 from pathlib import Path
 from pydantic_settings import BaseSettings
 
@@ -29,6 +30,8 @@ class Settings(BaseSettings):
     VIDEO_WIDTH: int = 1080
     VIDEO_HEIGHT: int = 1920
     VIDEO_FPS: int = 30
+    WATERMARK_ENABLED: bool = True
+    WATERMARK_TEXT: str = "clipia.com.br"
 
     # GPU
     DEVICE: str = "cuda"
@@ -37,6 +40,19 @@ class Settings(BaseSettings):
 
     # Claude
     CLAUDE_MODEL: str = "claude-sonnet-4-6"
+
+    # Voice Providers
+    ELEVENLABS_API_KEY: str = ""
+
+    # Kling AI (Phase 3)
+    KLING_ACCESS_KEY: str = ""
+    KLING_SECRET_KEY: str = ""
+
+    # Credit costs
+    CREDIT_COST_EDGE: int = 1
+    CREDIT_COST_ELEVENLABS: int = 2
+    CREDIT_COST_CUSTOM_AUDIO: int = 1
+    CREDIT_COST_AI_VIDEO: int = 5
 
     # MercadoPago
     MP_ACCESS_TOKEN: str = ""
@@ -63,3 +79,18 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
+
+_logger = logging.getLogger(__name__)
+
+_WEAK_SECRETS = {"dev-secret-change-in-production", "changeme", "secret", ""}
+
+
+def validate_production_settings(s: Settings) -> None:
+    """Validate critical settings. Call on startup."""
+    if s.JWT_SECRET in _WEAK_SECRETS or len(s.JWT_SECRET) < 32:
+        raise ValueError(
+            "JWT_SECRET inseguro! Gere um com: openssl rand -hex 32"
+        )
+    for key in ("ANTHROPIC_API_KEY", "PEXELS_API_KEY"):
+        if not getattr(s, key):
+            _logger.warning("Config: %s nao configurado — funcionalidade limitada", key)
