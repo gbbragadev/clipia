@@ -98,3 +98,47 @@ def test_transcribe_raises_after_max_retries(tmp_path, monkeypatch):
     with patch("app.services.transcriber._get_groq_client", return_value=mock_client):
         with pytest.raises(ConnectionError):
             transcribe_with_timestamps(str(audio))
+
+
+def test_openai_fallback_activates_when_groq_fails_and_flag_enabled(tmp_path, monkeypatch):
+    audio = tmp_path / "audio.wav"
+    audio.write_bytes(b"fake wav")
+
+    groq_client = MagicMock()
+    groq_client.audio.transcriptions.create.side_effect = ConnectionError("groq down")
+
+    openai_client = MagicMock()
+    openai_client.audio.transcriptions.create.return_value = _groq_response_with_words()
+
+    monkeypatch.setattr("app.services.transcriber._BACKOFF_SECONDS", (0, 0, 0))
+    monkeypatch.setattr("app.config.settings.ASR_FALLBACK_ENABLED", True)
+
+    with (
+        patch("app.services.transcriber._get_groq_client", return_value=groq_client),
+        patch("app.services.transcriber._get_openai_client", return_value=openai_client),
+    ):
+        words = transcribe_with_timestamps(str(audio))
+
+    assert len(words) == 3
+    assert openai_client.audio.transcriptions.create.called
+
+
+def test_openai_fallback_skipped_when_flag_disabled(tmp_path, monkeypatch):
+    audio = tmp_path / "audio.wav"
+    audio.write_bytes(b"fake wav")
+
+    groq_client = MagicMock()
+    groq_client.audio.transcriptions.create.side_effect = ConnectionError("groq down")
+    openai_client = MagicMock()
+
+    monkeypatch.setattr("app.services.transcriber._BACKOFF_SECONDS", (0, 0, 0))
+    monkeypatch.setattr("app.config.settings.ASR_FALLBACK_ENABLED", False)
+
+    with (
+        patch("app.services.transcriber._get_groq_client", return_value=groq_client),
+        patch("app.services.transcriber._get_openai_client", return_value=openai_client),
+    ):
+        with pytest.raises(ConnectionError):
+            transcribe_with_timestamps(str(audio))
+
+    assert not openai_client.audio.transcriptions.create.called
