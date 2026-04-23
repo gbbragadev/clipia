@@ -62,17 +62,30 @@ def _transcribe_openai(audio_path: str) -> list[dict]:
 
 
 def _parse_response_words(response) -> list[dict]:
-    """Normalize Groq/OpenAI verbose_json word-level response to our schema."""
+    """Normalize Groq/OpenAI verbose_json word-level response to our schema.
+
+    Both SDKs use `response_format="verbose_json"` which returns `.words` as a
+    list — Groq returns dicts (`{"word": "...", "start": 0.0, "end": 0.3}`),
+    OpenAI returns objects with attributes. Accept both.
+    """
     raw_words = getattr(response, "words", None) or []
     words = []
     for w in raw_words:
-        text_clean = w.word.strip()
+        if isinstance(w, dict):
+            word_text = w["word"]
+            start = w["start"]
+            end = w["end"]
+        else:
+            word_text = w.word
+            start = w.start
+            end = w.end
+        text_clean = word_text.strip()
         if text_clean:
             words.append(
                 {
                     "word": text_clean,
-                    "start": round(float(w.start), 3),
-                    "end": round(float(w.end), 3),
+                    "start": round(float(start), 3),
+                    "end": round(float(end), 3),
                 }
             )
     if not words:

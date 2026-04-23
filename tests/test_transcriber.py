@@ -34,6 +34,28 @@ def test_transcribe_returns_word_timestamps(tmp_path):
     assert words[2] == {"word": "disso", "start": 0.7, "end": 1.1}
 
 
+def test_transcribe_handles_dict_word_entries_from_groq(tmp_path):
+    """Groq SDK returns words as dicts (not attribute objects) — regression."""
+    audio = tmp_path / "audio.wav"
+    audio.write_bytes(b"fake wav")
+
+    resp = MagicMock()
+    resp.words = [
+        {"word": "oi", "start": 0.0, "end": 0.2},
+        {"word": "mundo", "start": 0.2, "end": 0.7},
+    ]
+    mock_client = MagicMock()
+    mock_client.audio.transcriptions.create.return_value = resp
+
+    with patch("app.services.transcriber._get_groq_client", return_value=mock_client):
+        words = transcribe_with_timestamps(str(audio))
+
+    assert words == [
+        {"word": "oi", "start": 0.0, "end": 0.2},
+        {"word": "mundo", "start": 0.2, "end": 0.7},
+    ]
+
+
 def test_transcribe_strips_whitespace_from_words(tmp_path):
     audio = tmp_path / "audio.wav"
     audio.write_bytes(b"fake wav")
