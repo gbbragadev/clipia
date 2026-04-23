@@ -133,6 +133,14 @@ Era um bug em base zerada. Resolvido em commit `48b41f7` (Phase A).
 Se aparecer em outro schema, aplicar `ALTER TABLE jobs ADD COLUMN template_id
 VARCHAR(50) DEFAULT 'stock_narration'` antes de rodar `alembic upgrade`.
 
+**`tsc --noEmit` reclama de `PageProps` nao encontrado:**
+Next.js 16 gera tipos de rota dinamicamente. Rodar uma vez:
+```powershell
+cd frontend
+npx next typegen
+```
+(Tambem e gerado automaticamente pelo `next dev`/`next build`.)
+
 ## 7. Ciclo de vida: Fase A -> B -> C
 
 - **A (atual):** ressurreicao Windows, stack rodando, Gui e unico usuario admin.
