@@ -1,6 +1,4 @@
 import os
-import sys
-import types
 from contextlib import asynccontextmanager
 from pathlib import Path
 from types import SimpleNamespace
@@ -14,12 +12,6 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 
 os.environ.setdefault("ANTHROPIC_API_KEY", "test-key")
 os.environ.setdefault("PEXELS_API_KEY", "test-key")
-
-# Phase A: edge_tts removed from venv — stub it so tests can still import app modules
-if "edge_tts" not in sys.modules:
-    _edge_tts_stub = types.ModuleType("edge_tts")
-    _edge_tts_stub.Communicate = MagicMock()
-    sys.modules["edge_tts"] = _edge_tts_stub
 
 from app.api import routes as api_routes
 from app.auth import routes as auth_routes
