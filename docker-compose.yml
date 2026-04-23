@@ -1,3 +1,6 @@
+# ClipIA local stack
+# Dev: "docker compose up postgres redis -d" (sobe so dados)
+# Prod futura: "docker compose --profile prod up -d" (sobe tudo)
 services:
   postgres:
     image: postgres:16-alpine
@@ -31,6 +34,7 @@ services:
       retries: 3
 
   backend:
+    profiles: ["prod"]
     build: .
     ports:
       - "8005:8005"
@@ -46,6 +50,7 @@ services:
       - ./fonts:/app/fonts
 
   worker:
+    profiles: ["prod"]
     build: .
     command: celery -A app.worker.celery_app worker -l info --concurrency=1
     env_file: .env
