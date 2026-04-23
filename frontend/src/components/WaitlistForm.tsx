@@ -20,12 +20,14 @@ export default function WaitlistForm() {
               2 vídeos grátis para você experimentar. Sem necessidade de cartão de crédito.
             </p>
 
-            <Link
-              href="/auth/register"
-              className="inline-block px-8 py-4 rounded-xl bg-gradient-to-r from-purple-600 to-blue-600 text-white font-semibold hover:opacity-90 transition text-lg shadow-lg shadow-purple-500/20"
-            >
-              Criar minha conta grátis
-            </Link>
+            {process.env.NEXT_PUBLIC_PUBLIC_SIGNUP === "true" && (
+              <Link
+                href="/auth/register"
+                className="inline-block px-8 py-4 rounded-xl bg-gradient-to-r from-purple-600 to-blue-600 text-white font-semibold hover:opacity-90 transition text-lg shadow-lg shadow-purple-500/20"
+              >
+                Criar minha conta grátis
+              </Link>
+            )}
           </div>
 
           <div className="filmstrip-border w-full opacity-40" />

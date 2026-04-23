@@ -22,7 +22,9 @@ export default function Footer() {
             <ul className="space-y-3">
               <li><Link href="#showcase" className="hover:text-purple-400 transition">Showcase</Link></li>
               <li><Link href="#demo" className="hover:text-purple-400 transition">Como Funciona</Link></li>
-              <li><Link href="/auth/register" className="hover:text-purple-400 transition">Criar Conta</Link></li>
+              {process.env.NEXT_PUBLIC_PUBLIC_SIGNUP === "true" && (
+                <li><Link href="/auth/register" className="hover:text-purple-400 transition">Criar Conta</Link></li>
+              )}
             </ul>
           </div>
 

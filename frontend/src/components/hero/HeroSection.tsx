@@ -36,9 +36,11 @@ export default function HeroSection() {
           </div>
 
           <div className="flex flex-col sm:flex-row gap-4 pt-4">
-            <Link href="/auth/register" className="px-8 py-4 bg-purple-600 hover:bg-purple-500 text-white font-bold rounded-xl transition-all shadow-[0_0_30px_rgba(124,58,237,0.3)] hover:shadow-[0_0_50px_rgba(124,58,237,0.5)] text-center">
-              Criar meu primeiro vídeo
-            </Link>
+            {process.env.NEXT_PUBLIC_PUBLIC_SIGNUP === "true" && (
+              <Link href="/auth/register" className="px-8 py-4 bg-purple-600 hover:bg-purple-500 text-white font-bold rounded-xl transition-all shadow-[0_0_30px_rgba(124,58,237,0.3)] hover:shadow-[0_0_50px_rgba(124,58,237,0.5)] text-center">
+                Criar meu primeiro vídeo
+              </Link>
+            )}
             <Link href="#demo" className="px-8 py-4 bg-white/5 hover:bg-white/10 text-white font-semibold rounded-xl border border-white/10 transition-all text-center">
               Ver como funciona
             </Link>

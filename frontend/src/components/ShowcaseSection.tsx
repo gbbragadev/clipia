@@ -145,14 +145,16 @@ export default function ShowcaseSection() {
         ))}
       </div>
 
-      <div className="text-center mt-16">
-        <Link
-          href="/auth/register"
-          className="inline-block px-8 py-4 rounded-xl bg-purple-600/20 text-purple-300 font-semibold hover:bg-purple-600/30 border border-purple-500/30 transition-all"
-        >
-          Criar meu primeiro vídeo
-        </Link>
-      </div>
+      {process.env.NEXT_PUBLIC_PUBLIC_SIGNUP === "true" && (
+        <div className="text-center mt-16">
+          <Link
+            href="/auth/register"
+            className="inline-block px-8 py-4 rounded-xl bg-purple-600/20 text-purple-300 font-semibold hover:bg-purple-600/30 border border-purple-500/30 transition-all"
+          >
+            Criar meu primeiro vídeo
+          </Link>
+        </div>
+      )}
     </CinematicSection>
   )
 }
