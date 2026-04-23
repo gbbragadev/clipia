@@ -12,13 +12,59 @@ from app.templates import LayoutConfig
 logger = logging.getLogger(__name__)
 
 
+def _get_drawtext_font() -> str:
+    global _FONT_FOR_DRAWTEXT
+    if not _FONT_FOR_DRAWTEXT:
+        _FONT_FOR_DRAWTEXT = _init_drawtext_font()
+    return _FONT_FOR_DRAWTEXT
+
+
+_FONT_FOR_DRAWTEXT: str = ""  # lazy-populated at first use
+
+
+def _ff_escape_path(path: str) -> str:
+    """Escape a filesystem path for use inside an FFmpeg filtergraph.
+
+    FFmpeg filter graph does **two** parse passes: first splitting on `:` and
+    `,`, then parsing option args. A single `\\:` survives the first pass but
+    is re-interpreted in the second, so the drive letter `C:` still looks
+    like a `key:value` split. `\\\\:` survives both passes as a literal `:`.
+    Also converts `\\` to `/` because bare backslashes are escape chars inside
+    filter syntax.
+
+    Example: `C:\\foo.ass` becomes `C\\\\:/foo.ass` (in raw string terms,
+    `C\\:/foo.ass` on the command line).
+    """
+    return path.replace("\\", "/").replace(":", r"\\:")
+
+
+def _init_drawtext_font() -> str:
+    """Pick a usable font for ``drawtext`` filters.
+
+    Prefer the repo's bundled Montserrat-Bold (Phase A brings it from
+    ``settings.FONT_PATH``). ``drawtext`` needs the path inside a filter
+    graph, so it must go through :func:`_ff_escape_path` too.
+    """
+    return _ff_escape_path(str(settings.FONT_PATH))
+
+
+def _ass_filter(ass_path: str) -> str:
+    """Build an ``ass=`` filter string with fontsdir so libass finds fonts on
+    Windows without a Fontconfig default config (which FFmpeg Windows builds
+    lack). Uses ``settings.FONT_PATH.parent`` — the repo ``fonts/`` dir.
+    """
+    fonts_dir = str(settings.FONT_PATH.parent)
+    return f"ass={_ff_escape_path(ass_path)}:fontsdir={_ff_escape_path(fonts_dir)}"
+
+
 def _run(cmd: list[str], desc: str = "") -> subprocess.CompletedProcess:
     """Run FFmpeg command and log errors."""
     logger.info(f"FFmpeg [{desc}]: {' '.join(cmd[:6])}...")
     result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
     if result.returncode != 0:
-        logger.error(f"FFmpeg [{desc}] failed: {result.stderr[-500:]}")
-        raise RuntimeError(f"FFmpeg {desc} failed: {result.stderr[-200:]}")
+        logger.error(f"FFmpeg [{desc}] FULL CMD: {cmd}")
+        logger.error(f"FFmpeg [{desc}] FULL STDERR: {result.stderr[-2000:]}")
+        raise RuntimeError(f"FFmpeg {desc} failed: {result.stderr[-500:]}")
     return result
 
 
@@ -78,7 +124,7 @@ def _watermark_filter() -> str:
     if not settings.WATERMARK_ENABLED:
         return ""
     text = settings.WATERMARK_TEXT.replace("'", "'\\''")
-    font = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
+    font = _get_drawtext_font()
     return f"drawtext=text='{text}':fontfile={font}" f":fontsize=22:fontcolor=white@0.5:x=w-text_w-30:y=h-50"
 
 
@@ -99,20 +145,20 @@ def _build_overlay_filters(overlays: list[dict], fps: int = 30) -> str:
             filters.append(f"drawbox=x=0:y=0:w=iw:h=ih:color=black@0.85:t=fill:enable='{enable}'")
             # Username
             filters.append(
-                f"drawtext=text='{username}':fontfile=/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
+                f"drawtext=text='{username}':fontfile={_get_drawtext_font()}"
                 f":fontsize=28:fontcolor=white:x=(w-text_w)/2:y=(h-text_h)/2-40"
                 f":enable='{enable}'"
             )
             # CTA text
             filters.append(
-                f"drawtext=text='{text}':fontfile=/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
+                f"drawtext=text='{text}':fontfile={_get_drawtext_font()}"
                 f":fontsize=36:fontcolor=white:x=(w-text_w)/2:y=(h-text_h)/2+20"
                 f":enable='{enable}'"
             )
             # SEGUIR button (red box + text)
             filters.append(f"drawbox=x=(iw-240)/2:y=ih/2+80:w=240:h=50:color=0xFE2C55@1:t=fill:enable='{enable}'")
             filters.append(
-                f"drawtext=text='SEGUIR':fontfile=/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
+                f"drawtext=text='SEGUIR':fontfile={_get_drawtext_font()}"
                 f":fontsize=22:fontcolor=white:x=(w-text_w)/2:y=h/2+90"
                 f":enable='{enable}'"
             )
@@ -122,7 +168,7 @@ def _build_overlay_filters(overlays: list[dict], fps: int = 30) -> str:
             # Red pill button at bottom
             filters.append(f"drawbox=x=(iw-300)/2:y=ih*0.78:w=300:h=52:color=0xFE2C55@1:t=fill:enable='{enable}'")
             filters.append(
-                f"drawtext=text='{text}':fontfile=/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
+                f"drawtext=text='{text}':fontfile={_get_drawtext_font()}"
                 f":fontsize=24:fontcolor=white:x=(w-text_w)/2:y=h*0.78+12"
                 f":enable='{enable}'"
             )
@@ -134,13 +180,13 @@ def _build_overlay_filters(overlays: list[dict], fps: int = 30) -> str:
             filters.append(f"drawbox=x=iw*0.06:y=ih*0.18:w=iw*0.88:h=140:color=black@0.75:t=fill:enable='{enable}'")
             # Label (yellow)
             filters.append(
-                f"drawtext=text='{label}':fontfile=/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
+                f"drawtext=text='{label}':fontfile={_get_drawtext_font()}"
                 f":fontsize=24:fontcolor=0xFFCC00:x=iw*0.08:y=ih*0.19+10"
                 f":enable='{enable}'"
             )
             if text:
                 filters.append(
-                    f"drawtext=text='{text}':fontfile=/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
+                    f"drawtext=text='{text}':fontfile={_get_drawtext_font()}"
                     f":fontsize=32:fontcolor=white:x=iw*0.08:y=ih*0.19+50"
                     f":enable='{enable}'"
                 )
@@ -213,7 +259,7 @@ def _compose_split_screen(
         f"[0:v]scale={w}:{bot_h}:force_original_aspect_ratio=increase,crop={w}:{bot_h},setsar=1[bg];"
         f"color=c=#0D0D0D:s={w}x{top_h}:d=9999:r={settings.VIDEO_FPS}[top];"
         f"[top][bg]vstack=inputs=2[stacked];"
-        f"[stacked]ass={ass_path}{wm_part}[vout]"
+        f"[stacked]{_ass_filter(ass_path)}{wm_part}[vout]"
     )
 
     inputs = ["-i", bg_path, "-i", audio_path]
@@ -279,7 +325,7 @@ def _compose_character_overlay(
         f"[0:v]scale={w}:{h}:force_original_aspect_ratio=increase,crop={w}:{h},setsar=1[bg];"
         f"[1:v]scale={char_w}:-1[char];"
         f"[bg][char]overlay={char_x}:{char_y}[with_char];"
-        f"[with_char]ass={ass_path}{wm_part}[vout]"
+        f"[with_char]{_ass_filter(ass_path)}{wm_part}[vout]"
     )
 
     inputs = ["-stream_loop", "-1", "-i", bg_path, "-i", character_path, "-i", audio_path]
@@ -474,7 +520,7 @@ def compose_short(
     )
 
     # 6. Build video filter chain: subtitles + overlays + watermark
-    vf_parts = [f"ass={ass_path}"]
+    vf_parts = [f"{_ass_filter(ass_path)}"]  # escaped for FFmpeg filtergraph
     overlay_filters = _build_overlay_filters(overlays or [], fps)
     if overlay_filters:
         vf_parts.append(overlay_filters)
