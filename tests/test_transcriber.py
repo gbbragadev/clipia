@@ -142,3 +142,36 @@ def test_openai_fallback_skipped_when_flag_disabled(tmp_path, monkeypatch):
             transcribe_with_timestamps(str(audio))
 
     assert not openai_client.audio.transcriptions.create.called
+
+
+def test_transcribe_raises_clear_error_when_groq_key_missing(tmp_path, monkeypatch):
+    audio = tmp_path / "audio.wav"
+    audio.write_bytes(b"fake wav")
+    monkeypatch.setattr("app.config.settings.GROQ_API_KEY", "")
+
+    with pytest.raises(RuntimeError, match="GROQ_API_KEY not configured"):
+        transcribe_with_timestamps(str(audio))
+
+
+def test_transcribe_short_circuits_on_non_retryable_http_status(tmp_path, monkeypatch):
+    audio = tmp_path / "audio.wav"
+    audio.write_bytes(b"fake wav")
+
+    class _AuthError(Exception):
+        status_code = 401
+
+    mock_client = MagicMock()
+    call = {"n": 0}
+
+    def _side_effect(**_kwargs):
+        call["n"] += 1
+        raise _AuthError("invalid api key")
+
+    mock_client.audio.transcriptions.create.side_effect = _side_effect
+    monkeypatch.setattr("app.services.transcriber._BACKOFF_SECONDS", (0, 0, 0))
+
+    with patch("app.services.transcriber._get_groq_client", return_value=mock_client):
+        with pytest.raises(_AuthError):
+            transcribe_with_timestamps(str(audio))
+
+    assert call["n"] == 1, "should not retry on 401"

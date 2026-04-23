@@ -16,6 +16,7 @@ from app.config import settings
 logger = logging.getLogger(__name__)
 
 _BACKOFF_SECONDS = (2, 4, 8)  # 3 attempts total
+_NON_RETRYABLE_STATUS = frozenset({400, 401, 403, 404, 422})
 
 
 def _get_groq_client():
@@ -61,25 +62,17 @@ def _transcribe_openai(audio_path: str) -> list[dict]:
 
 
 def _parse_response_words(response) -> list[dict]:
-    """Normalize Groq/OpenAI verbose_json response to our schema."""
+    """Normalize Groq/OpenAI verbose_json word-level response to our schema."""
     raw_words = getattr(response, "words", None) or []
     words = []
     for w in raw_words:
-        if isinstance(w, dict):
-            word_text = w["word"]
-            start = w["start"]
-            end = w["end"]
-        else:
-            word_text = w.word
-            start = w.start
-            end = w.end
-        text_clean = word_text.strip()
+        text_clean = w.word.strip()
         if text_clean:
             words.append(
                 {
                     "word": text_clean,
-                    "start": round(float(start), 3),
-                    "end": round(float(end), 3),
+                    "start": round(float(w.start), 3),
+                    "end": round(float(w.end), 3),
                 }
             )
     if not words:
@@ -104,6 +97,10 @@ def transcribe_with_timestamps(audio_path: str) -> list[dict]:
             # empty transcription, missing key — do not retry
             raise
         except Exception as exc:
+            status = getattr(exc, "status_code", None)
+            if status in _NON_RETRYABLE_STATUS:
+                logger.warning("Groq returned non-retryable %s: %s", status, exc)
+                raise
             last_exc = exc
             logger.warning(
                 "Groq transcription attempt %d/%d failed: %s",
@@ -122,5 +119,6 @@ def transcribe_with_timestamps(audio_path: str) -> list[dict]:
             logger.error("OpenAI Whisper fallback also failed: %s", exc)
             raise
 
-    assert last_exc is not None
+    if last_exc is None:
+        raise RuntimeError("Groq retry loop exited without capturing an error")
     raise last_exc
