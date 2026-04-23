@@ -1,5 +1,6 @@
 import logging
 from pathlib import Path
+
 from pydantic_settings import BaseSettings
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -43,6 +44,13 @@ class Settings(BaseSettings):
 
     # Voice Providers
     ELEVENLABS_API_KEY: str = ""
+
+    # ASR Providers (Phase A: remote only — no local Whisper)
+    GROQ_API_KEY: str = ""
+    OPENAI_API_KEY: str = ""
+    ASR_FALLBACK_ENABLED: bool = False
+    GROQ_WHISPER_MODEL: str = "whisper-large-v3"
+    OPENAI_WHISPER_MODEL: str = "whisper-1"
 
     # Kling AI (Phase 3)
     KLING_ACCESS_KEY: str = ""
@@ -88,9 +96,8 @@ _WEAK_SECRETS = {"dev-secret-change-in-production", "changeme", "secret", ""}
 def validate_production_settings(s: Settings) -> None:
     """Validate critical settings. Call on startup."""
     if s.JWT_SECRET in _WEAK_SECRETS or len(s.JWT_SECRET) < 32:
-        raise ValueError(
-            "JWT_SECRET inseguro! Gere um com: openssl rand -hex 32"
-        )
-    for key in ("ANTHROPIC_API_KEY", "PEXELS_API_KEY"):
+        raise ValueError("JWT_SECRET inseguro! Gere um com: openssl rand -hex 32")
+    warn_keys = ("ANTHROPIC_API_KEY", "PEXELS_API_KEY", "GROQ_API_KEY", "ELEVENLABS_API_KEY")
+    for key in warn_keys:
         if not getattr(s, key):
             _logger.warning("Config: %s nao configurado — funcionalidade limitada", key)

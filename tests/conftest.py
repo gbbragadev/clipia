@@ -1,4 +1,6 @@
 import os
+import sys
+import types
 from contextlib import asynccontextmanager
 from pathlib import Path
 from types import SimpleNamespace
@@ -6,13 +8,18 @@ from unittest.mock import MagicMock
 
 import pytest
 import pytest_asyncio
-from tests.fixtures import TEST_USERS, SAMPLE_SCRIPTS
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import event
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 os.environ.setdefault("ANTHROPIC_API_KEY", "test-key")
 os.environ.setdefault("PEXELS_API_KEY", "test-key")
+
+# Phase A: edge_tts removed from venv — stub it so tests can still import app modules
+if "edge_tts" not in sys.modules:
+    _edge_tts_stub = types.ModuleType("edge_tts")
+    _edge_tts_stub.Communicate = MagicMock()
+    sys.modules["edge_tts"] = _edge_tts_stub
 
 from app.api import routes as api_routes
 from app.auth import routes as auth_routes
@@ -22,7 +29,6 @@ from app.db.base import Base
 from app.db.engine import get_db
 from app.db.models import CreditPurchase, Job, User
 from app.main import create_app
-from app.payments import routes as payments_routes
 from app.payments.schemas import CREDIT_PACKAGES
 from app.worker import tasks as worker_tasks
 
