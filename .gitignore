@@ -1,10 +1,13 @@
 __pycache__/
 *.pyc
 .env
+.env.local
+.admin-credentials.local
 storage/
 *.egg-info/
 dist/
 .venv/
+.venv312/
 .pytest_cache/
 reference_voices/*.wav
 .gstack/

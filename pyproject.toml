@@ -9,8 +9,8 @@ dependencies = [
     "celery[redis]>=5.4.0",
     "redis>=5.0.0",
     "anthropic>=0.42.0",
-    "TTS>=0.22.0",
-    "faster-whisper>=1.1.0",
+    "groq>=0.11.0",
+    "openai>=1.54.0",
     "moviepy>=2.1.0",
     "httpx>=0.28.0",
     "pydantic-settings>=2.7.0",
@@ -22,6 +22,7 @@ dependencies = [
     "passlib[bcrypt]>=1.7.4",
     "mercadopago>=2.2.0",
     "slowapi>=0.1.9",
+    "elevenlabs>=1.50.0",
 ]
 
 [project.optional-dependencies]
@@ -31,6 +32,9 @@ dev = [
     "aiosqlite>=0.22.0",
     "httpx",
 ]
+
+[tool.setuptools.packages.find]
+include = ["app*"]
 
 [tool.ruff]
 target-version = "py312"
