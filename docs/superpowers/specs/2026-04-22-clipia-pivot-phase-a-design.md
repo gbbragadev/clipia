@@ -90,7 +90,7 @@ Rodar o pipeline atual **end-to-end no Windows** com um único ponto de mudança
 ### D5. Base de dados zera
 
 - Volume Docker `pgdata` novo, sem dump de Linux.
-- Seed script cria user `admin@gui` com email `gbbraga.dev@gmail.com`, password aleatória impressa no stdout, `is_admin=True`, `credits=999999` (ou campo similar que zere check de crédito).
+- Seed script cria user `admin@gui` com email `gbbraga.dev@gmail.com`, password aleatória impressa no stdout, `plan="admin"` (mecanismo real de admin no código — `get_current_admin_user` checa `user.plan == "admin"`), `credits=999999`, `email_verified=True`.
 - Tabelas de Credit Purchases, Jobs ficam vazias; Alembic migrate até o head atual.
 
 ### D6. Cloudflare Tunnel mantém domínios existentes
