@@ -159,8 +159,12 @@ def _prepare_static_image(img_path: str, duration: float, output_clip: str, scen
 
 
 def _prepare_scene(media_path: str, duration: float, output_clip: str, scene_index: int = 0) -> None:
-    """Route to video or static-image preparation. Full router in Task 15."""
-    _prepare_video_scene(media_path, duration, output_clip)
+    """Route to video or static-image preparation based on file extension."""
+    ext = Path(media_path).suffix.lower()
+    if ext in (".png", ".jpg", ".jpeg", ".webp"):
+        _prepare_static_image(media_path, duration, output_clip, scene_index=scene_index)
+    else:
+        _prepare_video_scene(media_path, duration, output_clip)
 
 
 def _watermark_filter() -> str:
@@ -513,7 +517,7 @@ def compose_short(
         if i >= len(media_paths):
             break
         clip_path = str(job_dir / f"clip_{i}.mp4")
-        _prepare_scene(media_paths[i], dur, clip_path)
+        _prepare_scene(media_paths[i], dur, clip_path, scene_index=i)
         prepared.append(clip_path)
 
     if not prepared:
