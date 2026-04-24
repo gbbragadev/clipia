@@ -56,6 +56,28 @@ def test_generates_images_and_populates_image_paths(monkeypatch, tmp_path):
         assert expected_parent in Path(path_str).resolve().parents
 
 
+def test_fetch_media_reuses_image_paths_when_ai_image(monkeypatch, tmp_path):
+    from app.worker.tasks import task_fetch_media
+
+    monkeypatch.setattr("app.worker.tasks._check_cancelled", lambda jid: False)
+    monkeypatch.setattr("app.worker.tasks._update_job", lambda *a, **kw: None)
+
+    image_paths = [str(tmp_path / f"scene_{i}.png") for i in range(1, 7)]
+    from pathlib import Path
+
+    for p in image_paths:
+        Path(p).write_bytes(b"\x89PNG")
+
+    data_in = {
+        "script": {"scenes": [{"text": f"x{i}"} for i in range(6)]},
+        "image_paths": image_paths,
+    }
+
+    result = task_fetch_media.run(data_in, "job-am", "novelinha_historica")
+
+    assert result.get("media_paths") == image_paths
+
+
 def test_fails_job_on_moderation_block(monkeypatch, tmp_path):
     from app.services.image_provider import ModerationBlockedError
     from app.worker.tasks import task_generate_images

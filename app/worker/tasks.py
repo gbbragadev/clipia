@@ -269,6 +269,7 @@ def dispatch_pipeline(
 
     pipeline = chain(
         task_generate_script.s(job_id, topic, style, duration_target, template_id),
+        task_generate_images.s(job_id, template_id),
         task_synthesize_audio.s(job_id, template_id),
         task_transcribe_audio.s(job_id),
         task_fetch_media.s(job_id, template_id),
@@ -513,6 +514,10 @@ def task_fetch_media(self, data: dict, job_id: str, template_id: str = "stock_na
         from app.templates import get_template
 
         template = get_template(template_id)
+        if template.media.source == "ai_image":
+            data["media_paths"] = data.get("image_paths", [])
+            _update_job(job_id, "processing", "media", 0.65, detail="Imagens IA ja geradas, skip Pexels.")
+            return data
         _update_job(job_id, "processing", "media", 0.55, detail="Buscando videos...")
         script = data["script"]
         job_dir = get_job_dir(job_id)

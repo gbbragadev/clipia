@@ -45,7 +45,13 @@ def test_edge_tts_still_works(tmp_path):
 def test_templates_endpoint_unchanged():
     response = run(api_routes.list_templates())
     template_ids = {item["id"] for item in response}
-    assert template_ids == {"stock_narration", "gameplay_split", "character_narration", "story_time"}
+    assert template_ids == {
+        "stock_narration",
+        "gameplay_split",
+        "character_narration",
+        "story_time",
+        "novelinha_historica",
+    }
 
 
 def test_job_status_format_unchanged(tmp_path, monkeypatch):
