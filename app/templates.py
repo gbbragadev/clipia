@@ -13,16 +13,22 @@ class LayoutConfig:
 
 @dataclass(frozen=True)
 class MediaStrategy:
-    source: str  # "pexels" | "local"
+    source: str  # "pexels" | "local" | "ai_image"
     library_tag: str | None = None  # e.g. "minecraft_parkour"
     loop_single: bool = False  # True = one clip looped for entire video
+    # Campos para source == "ai_image":
+    image_quality: str = "medium"
+    image_size: str = "1024x1536"
+    style_suffix: str = ""
+    ken_burns: bool = False
 
 
 @dataclass(frozen=True)
 class ScriptConfig:
-    prompt_extra: str  # appended to base prompt
-    needs_keywords: bool = True  # False = skip keywords_en in script
-    word_rate: float = 2.05  # words per second
+    prompt_extra: str
+    needs_keywords: bool = True
+    needs_visual_hint: bool = False
+    word_rate: float = 2.05
 
 
 @dataclass(frozen=True)
