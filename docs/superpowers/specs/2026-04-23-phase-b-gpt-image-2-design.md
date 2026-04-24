@@ -481,6 +481,7 @@ GPT_IMAGE_QUALITY=medium
 - Upscaling de 1024 para 1080 com modelo dedicado (scale FFmpeg é suficiente).
 - YouTube/TikTok auto-upload (Fase C).
 - Editor Remotion ganhando suporte visual a imagens AI (só ativar quando houver demanda real).
+- **Hedra API (disponível, uso livre pro Gui)** — candidato prioritário para Fase B.2 se Ken Burns não entregar engajamento suficiente. Duas aplicações já mapeadas: (1) animar cada PNG do gpt-image-2 com movimento real em vez de zoom/pan fake; (2) redesenhar template como "narrador IA consistente" (rosto presente no vídeo). Decidir aplicação só depois do critério 2 de §10.2 rodar.
 
 ---
 
