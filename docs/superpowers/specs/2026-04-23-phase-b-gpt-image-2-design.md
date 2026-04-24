@@ -335,6 +335,8 @@ def _prepare_scene(media_path: str, duration: float, output_clip: str, scene_ind
         _prepare_video_scene(media_path, duration, output_clip)  # lógica atual, renomeada
 ```
 
+**Refactor implícito**: a função `_prepare_scene` atual (linhas 92-119 do `compositor.py`) é extraída para uma função privada nova `_prepare_video_scene` com corpo idêntico; `_prepare_scene` é reescrita como router acima. Todos os call sites em `compose_short` passam a receber `scene_index` (o `i` do `enumerate`).
+
 ### 7.2 `_prepare_static_image`
 
 ```python
