@@ -1,5 +1,9 @@
 from unittest.mock import MagicMock, patch
 
+import httpx
+import pytest
+from openai import APIStatusError, BadRequestError
+
 from app.services.image_provider import (
     ImageProviderError,
     ModerationBlockedError,
@@ -95,3 +99,58 @@ def test_cache_key_differs_by_size(tmp_path):
     p1 = OpenAIImageProvider(api_key="sk-test", size="1024x1536", cache_dir=tmp_path / "c")
     p2 = OpenAIImageProvider(api_key="sk-test", size="1024x1024", cache_dir=tmp_path / "c")
     assert p1._cache_key("mesma") != p2._cache_key("mesma")
+
+
+def _api_status_error(status_code: int, message: str = "transient") -> APIStatusError:
+    request = httpx.Request("POST", "https://api.openai.com/v1/images/generations")
+    response = httpx.Response(status_code, request=request, json={"error": {"message": message}})
+    return APIStatusError(message=message, response=response, body=None)
+
+
+def _bad_request_moderation() -> BadRequestError:
+    request = httpx.Request("POST", "https://api.openai.com/v1/images/generations")
+    response = httpx.Response(
+        400,
+        request=request,
+        json={"error": {"message": "moderation_blocked: content violates policy"}},
+    )
+    return BadRequestError(
+        message="moderation_blocked: content violates policy",
+        response=response,
+        body=None,
+    )
+
+
+def test_generate_retries_on_rate_limit_429(tmp_path, tiny_png_b64, monkeypatch):
+    monkeypatch.setattr("app.services.image_provider.time.sleep", lambda *_: None)
+    ok = MagicMock()
+    ok.data = [MagicMock(b64_json=tiny_png_b64)]
+
+    with patch("app.services.image_provider.OpenAI") as mock_openai:
+        gen_mock = mock_openai.return_value.images.generate
+        gen_mock.side_effect = [_api_status_error(429), _api_status_error(429), ok]
+        provider = OpenAIImageProvider(api_key="sk-test", cache_dir=tmp_path / "c")
+        provider.generate("prompt", tmp_path / "out.png")
+
+    assert gen_mock.call_count == 3
+
+
+def test_generate_raises_moderation_blocked(tmp_path):
+    with patch("app.services.image_provider.OpenAI") as mock_openai:
+        gen_mock = mock_openai.return_value.images.generate
+        gen_mock.side_effect = _bad_request_moderation()
+        provider = OpenAIImageProvider(api_key="sk-test", cache_dir=tmp_path / "c")
+        with pytest.raises(ModerationBlockedError):
+            provider.generate("violência explícita", tmp_path / "out.png")
+    assert gen_mock.call_count == 1  # no retry on moderation
+
+
+def test_generate_raises_provider_error_after_max_retries(tmp_path, monkeypatch):
+    monkeypatch.setattr("app.services.image_provider.time.sleep", lambda *_: None)
+    with patch("app.services.image_provider.OpenAI") as mock_openai:
+        gen_mock = mock_openai.return_value.images.generate
+        gen_mock.side_effect = _api_status_error(500)
+        provider = OpenAIImageProvider(api_key="sk-test", cache_dir=tmp_path / "c", max_retries=3)
+        with pytest.raises(ImageProviderError):
+            provider.generate("prompt", tmp_path / "out.png")
+    assert gen_mock.call_count == 3

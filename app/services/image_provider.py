@@ -6,9 +6,10 @@ import base64
 import hashlib
 import logging
 import shutil
+import time
 from pathlib import Path
 
-from openai import OpenAI
+from openai import APIStatusError, APITimeoutError, BadRequestError, OpenAI
 
 from app.config import settings
 
@@ -62,17 +63,38 @@ class OpenAIImageProvider:
             shutil.copy(cache_file, output_path)
             return output_path
 
-        resp = self._client().images.generate(
-            model=self.model,
-            prompt=prompt,
-            size=self.size,
-            quality=self.quality,
-            moderation=self.moderation,
-            n=1,
-        )
-        b64 = resp.data[0].b64_json
-        png_bytes = base64.b64decode(b64)
+        last_exc: Exception | None = None
+        for attempt in range(self.max_retries):
+            try:
+                resp = self._client().images.generate(
+                    model=self.model,
+                    prompt=prompt,
+                    size=self.size,
+                    quality=self.quality,
+                    moderation=self.moderation,
+                    n=1,
+                )
+                b64 = resp.data[0].b64_json
+                png_bytes = base64.b64decode(b64)
+                cache_file.write_bytes(png_bytes)
+                shutil.copy(cache_file, output_path)
+                return output_path
+            except BadRequestError as e:
+                msg = str(e).lower()
+                if "moderation" in msg or "content_policy" in msg or "safety" in msg:
+                    raise ModerationBlockedError(f"cena bloqueada pela moderação: {prompt[:80]}") from e
+                raise
+            except (APIStatusError, APITimeoutError) as e:
+                last_exc = e
+                if attempt < self.max_retries - 1:
+                    backoff = 2**attempt
+                    logger.warning(
+                        "Image API error (attempt %d/%d), sleeping %ds: %s",
+                        attempt + 1,
+                        self.max_retries,
+                        backoff,
+                        e,
+                    )
+                    time.sleep(backoff)
 
-        cache_file.write_bytes(png_bytes)
-        shutil.copy(cache_file, output_path)
-        return output_path
+        raise ImageProviderError(f"max_retries={self.max_retries} esgotado: {last_exc}") from last_exc
