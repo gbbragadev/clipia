@@ -101,3 +101,18 @@ LD_LIBRARY_PATH=/usr/local/lib/ollama/cuda_v12:$LD_LIBRARY_PATH \
 - **Remotion Player ref**: Carregado via dynamic import SSR:false. Polling 100ms sincroniza playerFrame.
 
 Sempre responder em portugues (pt-BR).
+
+## ACE Learned Strategies
+
+<!-- ACE:START - Do not edit manually -->
+```json
+{"skills": [
+  {"id": "1", "section": "RUNTIME", "content": "Se FFmpeg filter ass reclamar 'Error applying option original_size' em paths Windows, o colon do drive esta colidindo com o separador de opcao; use double-escape (C\\\\:/path) + fontsdir=<fonts_dir> explicito (FFmpeg Windows nao tem fontconfig default).", "helpful": 1, "harmful": 0, "neutral": 0},
+  {"id": "2", "section": "RUNTIME", "content": "Celery worker em Windows precisa --pool=solo; o default prefork exige fork() que Windows nao tem. Sintoma: worker sobe, fica ready, mas tasks enfileiram sem consumir.", "helpful": 1, "harmful": 0, "neutral": 0},
+  {"id": "3", "section": "WORKFLOW", "content": "Env vars User-scope criadas via [Environment]::SetEnvironmentVariable(...,'User') NAO propagam para processos filhos ja rodando; todo launcher deve ter um prelude que copia de User para Process antes de spawn (ver scripts/_run-backend.ps1).", "helpful": 1, "harmful": 0, "neutral": 0},
+  {"id": "4", "section": "API", "content": "Groq SDK audio.transcriptions.create retorna response.words como lista de DICTS ({word,start,end}), nao objetos; parsers devem aceitar ambos (isinstance(w,dict) branch). MagicMock em testes mascara essa diferenca — rodar smoke test real antes de remover branches 'defensivos'.", "helpful": 1, "harmful": 0, "neutral": 0},
+  {"id": "5", "section": "PREFERENCE", "content": "Chaves de API do usuario (Gui) vivem em env vars Windows User scope. Aliases conhecidos: OPENAI_API_KEY <- OPEN_API_CLIPIA_TOKEN, ELEVENLABS_API_KEY <- ELEVEN_LABS_CLIPIA_KEY. Docs: https://developers.openai.com/api/docs/guides/image-generation. Nunca duplicar chave em .env commitado.", "helpful": 1, "harmful": 0, "neutral": 0},
+  {"id": "6", "section": "WORKFLOW", "content": "Next.js 16 exige 'npx next typegen' antes de 'tsc --noEmit' funcionar (tipo PageProps e gerado em runtime). next dev e next build rodam typegen automaticamente.", "helpful": 1, "harmful": 0, "neutral": 0}
+]}
+```
+<!-- ACE:END -->
