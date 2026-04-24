@@ -12,6 +12,7 @@ from celery.exceptions import SoftTimeLimitExceeded
 from app.config import settings
 from app.redis_pool import get_redis
 from app.services.compositor import compose_short
+from app.services.image_provider import ModerationBlockedError, OpenAIImageProvider
 from app.services.media import download_media, search_media_for_scene
 from app.services.scriptwriter import generate_script
 from app.services.transcriber import transcribe_with_timestamps
@@ -176,13 +177,62 @@ def task_generate_images(self, data: dict, job_id: str, template_id: str) -> dic
             logger.info("Job %s: template %s nao usa ai_image, skip", job_id, template_id)
             return data
 
-        # Implementacao completa vem em Task 11
-        raise NotImplementedError("generate path implemented in Task 11")
+        script = data.get("script")
+        if not script:
+            script_path = get_job_dir(job_id) / "script.json"
+            script = json.loads(script_path.read_text(encoding="utf-8"))
+
+        scenes = script.get("scenes", [])
+        if not scenes:
+            raise ValueError("Script sem cenas")
+
+        _update_job(
+            job_id,
+            "processing",
+            "generating_images",
+            0.15,
+            detail=f"Gerando {len(scenes)} imagens...",
+        )
+
+        quality = settings.GPT_IMAGE_QUALITY or template.media.image_quality
+        provider = OpenAIImageProvider(
+            quality=quality,
+            size=template.media.image_size,
+        )
+
+        job_img_dir = get_job_dir(job_id) / "images"
+        job_img_dir.mkdir(exist_ok=True, parents=True)
+
+        image_paths: list[str] = []
+        for i, scene in enumerate(scenes):
+            if _check_cancelled(job_id):
+                return data
+            hint = scene.get("visual_hint", "").strip()
+            if not hint:
+                raise ValueError(f"cena {i+1} sem visual_hint")
+
+            full_prompt = f"{hint}, {template.media.style_suffix}"
+            out_path = job_img_dir / f"scene_{i+1}.png"
+            provider.generate(full_prompt, out_path)
+
+            image_paths.append(str(out_path))
+            progress = 0.15 + (0.15 * (i + 1) / len(scenes))
+            _update_job(
+                job_id,
+                "processing",
+                "generating_images",
+                progress,
+                detail=f"Imagem {i+1}/{len(scenes)} OK",
+            )
+
+        data["image_paths"] = image_paths
+        return data
 
     except SoftTimeLimitExceeded:
         _handle_soft_timeout(job_id, "generate_images")
         raise
-    except NotImplementedError:
+    except ModerationBlockedError as e:
+        _fail_job(job_id, f"Conteudo bloqueado pela moderacao: {e}")
         raise
     except Exception as e:
         _fail_job(job_id, f"Falha ao gerar imagens: {e}")

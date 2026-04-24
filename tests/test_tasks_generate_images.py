@@ -1,3 +1,8 @@
+from unittest.mock import MagicMock
+
+import pytest
+
+
 def test_skip_when_template_is_not_ai_image(monkeypatch, tmp_path):
     from app.worker.tasks import task_generate_images
 
@@ -9,3 +14,73 @@ def test_skip_when_template_is_not_ai_image(monkeypatch, tmp_path):
 
     assert result == data_in
     assert "image_paths" not in result
+
+
+def test_generates_images_and_populates_image_paths(monkeypatch, tmp_path):
+    from app.worker.tasks import task_generate_images
+
+    job_dir = tmp_path / "job-42"
+    job_dir.mkdir()
+    script = {"scenes": [{"text": f"cena {i}", "visual_hint": f"hint {i}", "duration_hint": 5} for i in range(1, 7)]}
+    (job_dir / "script.json").write_text(
+        '{"scenes": [{"text":"x","visual_hint":"h","duration_hint":5}]}',
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr("app.worker.tasks.get_job_dir", lambda jid: job_dir)
+
+    fake_provider = MagicMock()
+
+    def fake_generate(prompt: str, output_path):
+        output_path.write_bytes(b"\x89PNG\r\n\x1a\nfake")
+        return output_path
+
+    fake_provider.generate = MagicMock(side_effect=fake_generate)
+    monkeypatch.setattr(
+        "app.worker.tasks.OpenAIImageProvider",
+        lambda **kw: fake_provider,
+    )
+    monkeypatch.setattr("app.worker.tasks._check_cancelled", lambda jid: False)
+    monkeypatch.setattr("app.worker.tasks._update_job", lambda *a, **kw: None)
+
+    data_in = {"script": script}
+    result = task_generate_images.run(data_in, "job-42", "novelinha_historica")
+
+    assert "image_paths" in result
+    assert len(result["image_paths"]) == 6
+    assert fake_provider.generate.call_count == 6
+    from pathlib import Path
+
+    expected_parent = (job_dir / "images").resolve()
+    for path_str in result["image_paths"]:
+        assert expected_parent in Path(path_str).resolve().parents
+
+
+def test_fails_job_on_moderation_block(monkeypatch, tmp_path):
+    from app.services.image_provider import ModerationBlockedError
+    from app.worker.tasks import task_generate_images
+
+    job_dir = tmp_path / "job-mb"
+    job_dir.mkdir()
+    monkeypatch.setattr("app.worker.tasks.get_job_dir", lambda jid: job_dir)
+
+    fake_provider = MagicMock()
+    fake_provider.generate.side_effect = ModerationBlockedError("bloqueada")
+    monkeypatch.setattr("app.worker.tasks.OpenAIImageProvider", lambda **kw: fake_provider)
+    monkeypatch.setattr("app.worker.tasks._check_cancelled", lambda jid: False)
+    monkeypatch.setattr("app.worker.tasks._update_job", lambda *a, **kw: None)
+
+    failed = {"called": False}
+
+    def fake_fail(jid, err):
+        failed["called"] = True
+        failed["err"] = err
+
+    monkeypatch.setattr("app.worker.tasks._fail_job", fake_fail)
+
+    script = {"scenes": [{"text": "x", "visual_hint": "y", "duration_hint": 5}]}
+    with pytest.raises(ModerationBlockedError):
+        task_generate_images.run({"script": script}, "job-mb", "novelinha_historica")
+
+    assert failed["called"] is True
+    assert "moderação" in failed["err"].lower() or "moderacao" in failed["err"].lower()
