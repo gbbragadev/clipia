@@ -2,8 +2,12 @@
 
 from __future__ import annotations
 
+import base64
+import hashlib
 import logging
 from pathlib import Path
+
+from openai import OpenAI
 
 from app.config import settings
 
@@ -40,5 +44,26 @@ class OpenAIImageProvider:
         self.max_retries = max_retries
         self.timeout_s = timeout_s
 
+    def _client(self) -> OpenAI:
+        return OpenAI(api_key=self.api_key, timeout=self.timeout_s)
+
+    def _cache_key(self, prompt: str) -> str:
+        raw = f"{prompt}|{self.size}|{self.quality}".encode("utf-8")
+        return hashlib.sha256(raw).hexdigest()
+
     def generate(self, prompt: str, output_path: Path) -> Path:
-        raise NotImplementedError("implemented in Task 3")
+        output_path = Path(output_path)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+
+        resp = self._client().images.generate(
+            model=self.model,
+            prompt=prompt,
+            size=self.size,
+            quality=self.quality,
+            moderation=self.moderation,
+            n=1,
+        )
+        b64 = resp.data[0].b64_json
+        png_bytes = base64.b64decode(b64)
+        output_path.write_bytes(png_bytes)
+        return output_path

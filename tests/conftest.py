@@ -319,3 +319,20 @@ async def purchase_factory(test_db, verified_user):
 @pytest.fixture
 def storage_dir(test_db) -> Path:
     return test_db["storage_dir"]
+
+
+import base64  # noqa: E402 — appended after module-level imports
+
+
+@pytest.fixture
+def tiny_png_b64() -> str:
+    """Minimal valid PNG bytes, base64-encoded — for mocking image API responses."""
+    png_bytes = (
+        b"\x89PNG\r\n\x1a\n"
+        b"\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01"
+        b"\x08\x02\x00\x00\x00\x90wS\xde"
+        b"\x00\x00\x00\x0cIDATx\x9cc\xf8\xcf\xc0\x00\x00\x00\x03\x00\x01"
+        b"\xc4[\x8d\x9a"
+        b"\x00\x00\x00\x00IEND\xaeB`\x82"
+    )
+    return base64.b64encode(png_bytes).decode()
