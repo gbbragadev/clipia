@@ -52,6 +52,9 @@ class Settings(BaseSettings):
     GROQ_WHISPER_MODEL: str = "whisper-large-v3"
     OPENAI_WHISPER_MODEL: str = "whisper-1"
 
+    # GPT Image 2
+    GPT_IMAGE_QUALITY: str = "medium"  # "low" | "medium" | "high"
+
     # Kling AI (Phase 3)
     KLING_ACCESS_KEY: str = ""
     KLING_SECRET_KEY: str = ""
