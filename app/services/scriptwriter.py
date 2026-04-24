@@ -54,6 +54,17 @@ Retorne APENAS JSON valido:
   "hashtags": ["#shorts", "#relevante"]
 }}"""
 
+VISUAL_HINT_INSTRUCTION = """
+
+REGRAS DE VISUAL_HINT:
+- Cada cena tem campo "visual_hint": descricao em portugues de uma imagem unica
+- Deve ser CONCRETA: objetos, pessoas, ambiente, iluminacao, angulo
+- Evite texto, logos, rostos em close extremo
+- Cenas diferentes = imagens claramente diferentes (sem repeticao visual)
+- Exemplo bom: "salao vitoriano iluminado por velas, mesa comprida, mulher de vestido escuro olhando pela janela"
+- Exemplo ruim: "a mulher" (faltam cena, ambiente, composicao)
+"""
+
 
 def generate_script(topic: str, style: str, duration_target: int, template_id: str = "stock_narration") -> dict:
     template = get_template(template_id)
@@ -76,10 +87,17 @@ def generate_script(topic: str, style: str, duration_target: int, template_id: s
         prompt_text = prompt_text.replace(
             "REGRAS DE KEYWORDS:\n"
             "- Keywords em INGLES para busca de video stock no Pexels\n"
-            "- Sejam ESPECIFICAS e VISUAIS: \"orange tabby cat close up face\" NAO \"cat\"\n"
+            '- Sejam ESPECIFICAS e VISUAIS: "orange tabby cat close up face" NAO "cat"\n'
             "- 3-4 keywords descritivas por cena que resultem em video PORTRAIT relevante\n"
             "- Prefira: animais em close, paisagens dramaticas, macro shots, acoes humanas",
             "KEYWORDS: NAO inclua keywords_en neste formato.",
+        )
+
+    if template.script.needs_visual_hint:
+        prompt_text += VISUAL_HINT_INSTRUCTION
+        prompt_text = prompt_text.replace(
+            '"duration_hint": 7',
+            '"visual_hint": "descricao concreta da cena",\n      "duration_hint": 7',
         )
 
     prompt_text += template.script.prompt_extra
