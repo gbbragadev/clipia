@@ -78,6 +78,32 @@ def test_fetch_media_reuses_image_paths_when_ai_image(monkeypatch, tmp_path):
     assert result.get("media_paths") == image_paths
 
 
+def test_fetch_media_scans_images_dir_when_image_paths_missing(monkeypatch, tmp_path):
+    """Integration gap: task_transcribe_audio returns a fresh dict that drops
+    image_paths. fetch_media must recover by scanning the job's images dir."""
+    from app.worker.tasks import task_fetch_media
+
+    monkeypatch.setattr("app.worker.tasks._check_cancelled", lambda jid: False)
+    monkeypatch.setattr("app.worker.tasks._update_job", lambda *a, **kw: None)
+
+    job_dir = tmp_path / "job-scan"
+    job_dir.mkdir()
+    img_dir = job_dir / "images"
+    img_dir.mkdir()
+    for i in range(1, 7):
+        (img_dir / f"scene_{i}.png").write_bytes(b"\x89PNG")
+
+    monkeypatch.setattr("app.worker.tasks.get_job_dir", lambda jid: job_dir)
+
+    # image_paths NOT in data_in — simulating post-transcribe state
+    data_in = {"script": {"scenes": [{"text": f"x{i}"} for i in range(6)]}}
+
+    result = task_fetch_media.run(data_in, "job-scan", "novelinha_historica")
+
+    assert len(result.get("media_paths", [])) == 6
+    assert all("scene_" in p and p.endswith(".png") for p in result["media_paths"])
+
+
 def test_fails_job_on_moderation_block(monkeypatch, tmp_path):
     from app.services.image_provider import ModerationBlockedError
     from app.worker.tasks import task_generate_images

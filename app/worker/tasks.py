@@ -515,7 +515,11 @@ def task_fetch_media(self, data: dict, job_id: str, template_id: str = "stock_na
 
         template = get_template(template_id)
         if template.media.source == "ai_image":
-            data["media_paths"] = data.get("image_paths", [])
+            image_paths = data.get("image_paths")
+            if not image_paths:
+                img_dir = get_job_dir(job_id) / "images"
+                image_paths = sorted(str(p) for p in img_dir.glob("scene_*.png"))
+            data["media_paths"] = image_paths
             _update_job(job_id, "processing", "media", 0.65, detail="Imagens IA ja geradas, skip Pexels.")
             return data
         _update_job(job_id, "processing", "media", 0.55, detail="Buscando videos...")
