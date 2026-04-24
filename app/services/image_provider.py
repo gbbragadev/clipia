@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import logging
+import shutil
 from pathlib import Path
 
 from openai import OpenAI
@@ -55,6 +56,12 @@ class OpenAIImageProvider:
         output_path = Path(output_path)
         output_path.parent.mkdir(parents=True, exist_ok=True)
 
+        cache_file = self.cache_dir / f"{self._cache_key(prompt)}.png"
+        if cache_file.exists():
+            logger.info("Image cache HIT for prompt=%s", prompt[:60])
+            shutil.copy(cache_file, output_path)
+            return output_path
+
         resp = self._client().images.generate(
             model=self.model,
             prompt=prompt,
@@ -65,5 +72,7 @@ class OpenAIImageProvider:
         )
         b64 = resp.data[0].b64_json
         png_bytes = base64.b64decode(b64)
-        output_path.write_bytes(png_bytes)
+
+        cache_file.write_bytes(png_bytes)
+        shutil.copy(cache_file, output_path)
         return output_path

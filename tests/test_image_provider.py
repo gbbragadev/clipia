@@ -63,3 +63,35 @@ def test_generate_calls_api_with_correct_params(tmp_path, tiny_png_b64):
     assert kwargs["quality"] == "medium"
     assert kwargs["moderation"] == "low"
     assert kwargs["n"] == 1
+
+
+def test_generate_uses_cache_on_second_identical_call(tmp_path, tiny_png_b64):
+    output1 = tmp_path / "scene_1.png"
+    output2 = tmp_path / "scene_1_copy.png"
+    cache = tmp_path / "cache"
+    mock_response = MagicMock()
+    mock_response.data = [MagicMock(b64_json=tiny_png_b64)]
+
+    with patch("app.services.image_provider.OpenAI") as mock_openai:
+        gen_mock = mock_openai.return_value.images.generate
+        gen_mock.return_value = mock_response
+        provider = OpenAIImageProvider(api_key="sk-test", cache_dir=cache)
+        provider.generate("mesma prompt", output1)
+        provider.generate("mesma prompt", output2)
+
+    assert gen_mock.call_count == 1
+    assert output1.exists()
+    assert output2.exists()
+    assert output1.read_bytes() == output2.read_bytes()
+
+
+def test_cache_key_differs_by_quality(tmp_path):
+    provider_low = OpenAIImageProvider(api_key="sk-test", quality="low", cache_dir=tmp_path / "c")
+    provider_high = OpenAIImageProvider(api_key="sk-test", quality="high", cache_dir=tmp_path / "c")
+    assert provider_low._cache_key("mesma") != provider_high._cache_key("mesma")
+
+
+def test_cache_key_differs_by_size(tmp_path):
+    p1 = OpenAIImageProvider(api_key="sk-test", size="1024x1536", cache_dir=tmp_path / "c")
+    p2 = OpenAIImageProvider(api_key="sk-test", size="1024x1024", cache_dir=tmp_path / "c")
+    assert p1._cache_key("mesma") != p2._cache_key("mesma")
