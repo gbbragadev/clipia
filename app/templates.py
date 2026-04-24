@@ -126,6 +126,43 @@ TEMPLATES: dict[str, VideoTemplate] = {
         ),
         voice=VoicePreset(voice_id="pt-BR-FranciscaNeural", rate=-5, pitch=0),
     ),
+    "novelinha_historica": VideoTemplate(
+        id="novelinha_historica",
+        name="Drama Histórico",
+        description="Fatos reais narrados como trailer cinematográfico, com imagens IA",
+        icon="🎭",
+        layout=LayoutConfig(type="fullscreen"),
+        media=MediaStrategy(
+            source="ai_image",
+            image_quality="medium",
+            image_size="1024x1536",
+            style_suffix=(
+                "fotografia de época ou ilustração cinematográfica realista, "
+                "iluminação dramática, composição vertical 2:3, "
+                "sem texto na imagem, sem marca d'água"
+            ),
+            ken_burns=True,
+        ),
+        script=ScriptConfig(
+            prompt_extra=(
+                "\n\nEste vídeo é um DRAMA HISTÓRICO narrado como trailer cinematográfico."
+                "\nBase-se em um FATO REAL curioso, macabro ou pouco conhecido."
+                "\nArco narrativo obrigatório: GANCHO (cena 1) → CONTEXTO (cenas 2-3) → "
+                "CLÍMAX (cenas 4-5) → TWIST/RESOLUÇÃO (cena 6)."
+                "\nTom grave, pausado, ligeiramente teatral — narrador de documentário."
+                "\nUse EXATAMENTE 6 cenas, ~5 segundos cada."
+                "\nNÃO invente fatos — se não sabe, escolha outro evento."
+            ),
+            needs_keywords=False,
+            needs_visual_hint=True,
+            word_rate=1.8,
+        ),
+        voice=VoicePreset(
+            voice_id="TODO_VOICE_ID",
+            rate=-10,
+            pitch=-2,
+        ),
+    ),
 }
 
 
