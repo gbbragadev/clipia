@@ -89,7 +89,7 @@ def _has_nvenc() -> bool:
     return "h264_nvenc" in result.stdout
 
 
-def _prepare_scene(media_path: str, duration: float, output_path: str) -> str:
+def _prepare_video_scene(media_path: str, duration: float, output_path: str) -> str:
     """Prepare a single scene clip: resize to 1080x1920, loop if needed, set exact duration."""
     cmd = [
         "ffmpeg",
@@ -117,6 +117,11 @@ def _prepare_scene(media_path: str, duration: float, output_path: str) -> str:
     ]
     _run(cmd, "prepare scene")
     return output_path
+
+
+def _prepare_scene(media_path: str, duration: float, output_clip: str, scene_index: int = 0) -> None:
+    """Route to video or static-image preparation. Full router in Task 15."""
+    _prepare_video_scene(media_path, duration, output_clip)
 
 
 def _watermark_filter() -> str:
