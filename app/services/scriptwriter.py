@@ -8,6 +8,11 @@ from app.templates import get_template
 
 logger = logging.getLogger(__name__)
 
+
+class ScriptValidationError(Exception):
+    """Raised when script output does not meet template requirements."""
+
+
 SCRIPT_PROMPT = """Voce e um roteirista de videos curtos virais (YouTube Shorts, Reels, TikTok).
 
 Crie um roteiro sobre: {topic}
@@ -115,6 +120,13 @@ def generate_script(topic: str, style: str, duration_target: int, template_id: s
 
     # Validate and fix duration_hints
     script = _fix_durations(script, duration_target)
+
+    # Validate visual_hint presence for templates that require it
+    if template.script.needs_visual_hint:
+        for i, sc in enumerate(script.get("scenes", [])):
+            if not sc.get("visual_hint", "").strip():
+                raise ScriptValidationError(f"cena {i+1} sem visual_hint (template {template_id} exige)")
+
     return script
 
 

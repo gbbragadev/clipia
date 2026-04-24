@@ -1,5 +1,7 @@
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from app.services.scriptwriter import generate_script
 
 FAKE_CLAUDE_RESPONSE = """
@@ -64,3 +66,30 @@ def test_script_preserves_visual_hint_in_output():
 
     assert all("visual_hint" in s for s in script["scenes"])
     assert script["scenes"][0]["visual_hint"] == "sala vitoriana"
+
+
+EMPTY_HINT_RESPONSE = """
+{
+  "title": "Teste",
+  "narration": "narracao",
+  "scenes": [
+    {"text": "c1", "visual_hint": "", "duration_hint": 5},
+    {"text": "c2", "visual_hint": "x", "duration_hint": 5},
+    {"text": "c3", "visual_hint": "y", "duration_hint": 5},
+    {"text": "c4", "visual_hint": "z", "duration_hint": 5},
+    {"text": "c5", "visual_hint": "w", "duration_hint": 5},
+    {"text": "c6", "visual_hint": "v", "duration_hint": 5}
+  ],
+  "hashtags": []
+}
+"""
+
+
+def test_raises_when_visual_hint_empty_for_ai_image():
+    from app.services.scriptwriter import ScriptValidationError
+
+    with patch("app.services.scriptwriter.anthropic.Anthropic") as cls:
+        client = _mock_anthropic(EMPTY_HINT_RESPONSE)
+        cls.return_value = client
+        with pytest.raises(ScriptValidationError):
+            generate_script("tema", "estilo", 30, "novelinha_historica")
