@@ -1,8 +1,8 @@
 import asyncio
 import json
 import logging
-import smtplib
 import shutil
+import smtplib
 from datetime import datetime, timedelta, timezone
 from email.mime.text import MIMEText
 from pathlib import Path
@@ -10,13 +10,14 @@ from pathlib import Path
 from celery.exceptions import SoftTimeLimitExceeded
 
 from app.config import settings
+from app.redis_pool import get_redis
 from app.services.compositor import compose_short
 from app.services.media import download_media, search_media_for_scene
 from app.services.scriptwriter import generate_script
 from app.services.transcriber import transcribe_with_timestamps
 from app.services.tts import synthesize_narration
+from app.templates import get_template
 from app.utils.files import bytes_to_gb, cleanup_job_dir, get_job_dir, get_output_dir, remove_path
-from app.redis_pool import get_redis
 from app.worker.celery_app import celery_app
 
 logger = logging.getLogger(__name__)
@@ -93,6 +94,7 @@ def _refund_job_credit(job_id: str, status_value: str, error: str, cleanup_files
 
     try:
         from sqlalchemy import select, update
+
         from app.db.engine import async_session
         from app.db.models import Job, User
 
@@ -163,6 +165,30 @@ def _handle_soft_timeout(job_id: str, task_name: str):
     _enqueue_dead_letter(job_id, f"{task_name} soft timeout")
 
 
+@celery_app.task(name="generate_images", bind=True)
+def task_generate_images(self, data: dict, job_id: str, template_id: str) -> dict:
+    try:
+        if _check_cancelled(job_id):
+            return data
+
+        template = get_template(template_id)
+        if template.media.source != "ai_image":
+            logger.info("Job %s: template %s nao usa ai_image, skip", job_id, template_id)
+            return data
+
+        # Implementacao completa vem em Task 11
+        raise NotImplementedError("generate path implemented in Task 11")
+
+    except SoftTimeLimitExceeded:
+        _handle_soft_timeout(job_id, "generate_images")
+        raise
+    except NotImplementedError:
+        raise
+    except Exception as e:
+        _fail_job(job_id, f"Falha ao gerar imagens: {e}")
+        raise
+
+
 def dispatch_pipeline(
     job_id: str,
     topic: str,
@@ -174,16 +200,19 @@ def dispatch_pipeline(
 ):
     from celery import chain
 
-    _redis.hset(f"job:{job_id}", mapping={
-        "status": "queued",
-        "current_step": "",
-        "progress": "0",
-        "error": "",
-        "detail": "",
-        "created_at": datetime.now(timezone.utc).isoformat(),
-        "template_id": template_id,
-        "voice_provider": voice_provider,
-    })
+    _redis.hset(
+        f"job:{job_id}",
+        mapping={
+            "status": "queued",
+            "current_step": "",
+            "progress": "0",
+            "error": "",
+            "detail": "",
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "template_id": template_id,
+            "voice_provider": voice_provider,
+        },
+    )
     # Store voice config in Redis for the worker to pick up
     if voice_config:
         _redis.hset(f"job:{job_id}", mapping={"voice_config": json.dumps(voice_config)})
@@ -201,6 +230,7 @@ def dispatch_pipeline(
 
 async def _cleanup_old_jobs_async() -> dict[str, int]:
     from sqlalchemy import select
+
     from app.db.engine import async_session
     from app.db.models import Job
 
@@ -215,12 +245,8 @@ async def _cleanup_old_jobs_async() -> dict[str, int]:
     async with async_session() as session:
         result = await session.execute(
             select(Job).where(
-                (
-                    (Job.status == "failed") & (Job.created_at <= failed_cutoff)
-                )
-                | (
-                    (Job.status.in_(("completed", "editable"))) & (Job.created_at <= completed_cutoff)
-                )
+                ((Job.status == "failed") & (Job.created_at <= failed_cutoff))
+                | ((Job.status.in_(("completed", "editable"))) & (Job.created_at <= completed_cutoff))
             )
         )
         jobs = result.scalars().all()
@@ -248,6 +274,7 @@ async def _cleanup_old_jobs_async() -> dict[str, int]:
 
 async def _cleanup_orphan_files_async() -> dict[str, int]:
     from sqlalchemy import select
+
     from app.db.engine import async_session
     from app.db.models import Job
 
@@ -294,7 +321,9 @@ def cleanup_orphan_files() -> dict[str, int]:
 
 
 @celery_app.task(name="generate_script", bind=True)
-def task_generate_script(self, job_id: str, topic: str, style: str, duration_target: int, template_id: str = "stock_narration") -> dict:
+def task_generate_script(
+    self, job_id: str, topic: str, style: str, duration_target: int, template_id: str = "stock_narration"
+) -> dict:
     try:
         if _check_cancelled(job_id):
             return {"cancelled": True}
@@ -308,7 +337,9 @@ def task_generate_script(self, job_id: str, topic: str, style: str, duration_tar
         if not scenes:
             raise ValueError("Script has no scenes")
         total_dur = sum(s.get("duration_hint", 7) for s in scenes)
-        logger.info(f"Script: {len(scenes)} scenes, {total_dur}s total, {len(script.get('narration', '').split())} words")
+        logger.info(
+            f"Script: {len(scenes)} scenes, {total_dur}s total, {len(script.get('narration', '').split())} words"
+        )
 
         _update_job(job_id, "processing", "scripting", 0.16, detail="Roteiro gerado com sucesso.")
         script["_duration_target"] = duration_target
@@ -343,25 +374,30 @@ def task_synthesize_audio(self, script: dict, job_id: str, template_id: str = "s
             uploaded_path = voice_config.get("source_path", "") if voice_config else ""
             if uploaded_path and Path(uploaded_path).exists():
                 from app.services.custom_audio_provider import normalize_audio
+
                 normalize_audio(uploaded_path, output_path)
             else:
                 raise RuntimeError("Custom audio source not found")
         elif voice_provider_name == "elevenlabs":
             # ElevenLabs premium TTS
             from app.services.elevenlabs_provider import ElevenLabsProvider
+
             provider = ElevenLabsProvider()
             voice_id = voice_config.get("voice_id", "") if voice_config else ""
             if not voice_id:
                 raise RuntimeError("No ElevenLabs voice_id specified")
-            asyncio.run(provider.synthesize(
-                text=script["narration"],
-                output_path=output_path,
-                voice_id=voice_id,
-                duration_target=duration_target,
-            ))
+            asyncio.run(
+                provider.synthesize(
+                    text=script["narration"],
+                    output_path=output_path,
+                    voice_id=voice_id,
+                    duration_target=duration_target,
+                )
+            )
         else:
             # Edge TTS (default, free)
             from app.templates import get_template
+
             template = get_template(template_id)
             voice_id = (voice_config or {}).get("voice_id", template.voice.voice_id)
             rate = (voice_config or {}).get("rate", template.voice.rate)
@@ -423,8 +459,8 @@ def task_fetch_media(self, data: dict, job_id: str, template_id: str = "stock_na
     try:
         if data.get("cancelled") or _check_cancelled(job_id):
             return {"cancelled": True}
-        from app.templates import get_template
         from app.services.media_library import pick_clip
+        from app.templates import get_template
 
         template = get_template(template_id)
         _update_job(job_id, "processing", "media", 0.55, detail="Buscando videos...")
@@ -495,6 +531,7 @@ def task_compose_video(self, data: dict, job_id: str, template_id: str = "stock_
         if data.get("cancelled") or _check_cancelled(job_id):
             return ""
         from app.templates import get_template
+
         template = get_template(template_id)
 
         _update_job(job_id, "processing", "compositing", 0.7, detail="Montando video com FFmpeg...")
@@ -531,6 +568,7 @@ def task_finalize(self, video_path: str, job_id: str) -> str:
         # Save script to PostgreSQL for the editor (keep job dir for editing)
         try:
             from sqlalchemy import update
+
             from app.db.engine import async_session
             from app.db.models import Job
 
@@ -541,7 +579,9 @@ def task_finalize(self, video_path: str, job_id: str) -> str:
             async def _save_script():
                 async with async_session() as session:
                     await session.execute(
-                        update(Job).where(Job.id == job_id).values(
+                        update(Job)
+                        .where(Job.id == job_id)
+                        .values(
                             script=script_data,
                             status="editable",
                             video_url=final_path,
@@ -628,6 +668,7 @@ def task_rerender_video(self, job_id: str) -> str:
 
         # Get template layout for re-render
         from app.templates import get_template
+
         re_template_id = _redis_hget(f"job:{job_id}", "template_id") or "stock_narration"
         re_template = get_template(re_template_id)
 
