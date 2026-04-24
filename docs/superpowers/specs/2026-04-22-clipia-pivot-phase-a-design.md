@@ -2,7 +2,7 @@
 
 **Data:** 2026-04-22
 **Autor:** Gui + Claude (brainstorming)
-**Status:** Design aprovado, aguardando revisão antes de writing-plans
+**Status:** COMPLETED — 2026-04-23 (feat/phase-a-windows-resurrection merged via PR)
 **Branch atual:** `backup/2026-04-15-srv01-final` (trabalho futuro sai daqui)
 
 ## Contexto
