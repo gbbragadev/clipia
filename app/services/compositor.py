@@ -119,6 +119,45 @@ def _prepare_video_scene(media_path: str, duration: float, output_path: str) -> 
     return output_path
 
 
+def _prepare_static_image(img_path: str, duration: float, output_clip: str, scene_index: int = 0) -> None:
+    """Convert a still image into a short MP4 clip with Ken Burns (zoompan) effect."""
+    fps = 25
+    frames = int(round(duration * fps))
+    zoom_in = (scene_index % 2) == 0
+    if zoom_in:
+        z_expr = "min(zoom+0.0012,1.15)"
+    else:
+        z_expr = "max(1.15-on*0.0012,1.0)"
+
+    vf = (
+        f"zoompan=z='{z_expr}':d={frames}:s=1080x1920:fps={fps},"
+        f"scale=1080:1920:force_original_aspect_ratio=increase,"
+        f"crop=1080:1920,setsar=1"
+    )
+
+    cmd = [
+        "ffmpeg",
+        "-y",
+        "-loop",
+        "1",
+        "-t",
+        str(duration),
+        "-i",
+        img_path,
+        "-vf",
+        vf,
+        "-r",
+        str(fps),
+        "-c:v",
+        "libx264",
+        "-pix_fmt",
+        "yuv420p",
+        "-an",
+        output_clip,
+    ]
+    subprocess.run(cmd, check=True, capture_output=True)
+
+
 def _prepare_scene(media_path: str, duration: float, output_clip: str, scene_index: int = 0) -> None:
     """Route to video or static-image preparation. Full router in Task 15."""
     _prepare_video_scene(media_path, duration, output_clip)
