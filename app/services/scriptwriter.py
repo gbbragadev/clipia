@@ -1,9 +1,7 @@
 import json
 import logging
 
-import anthropic
-
-from app.config import settings
+from app.services.llm import complete_text, strip_code_fences
 from app.templates import get_template
 
 logger = logging.getLogger(__name__)
@@ -73,7 +71,6 @@ REGRAS DE VISUAL_HINT:
 
 def generate_script(topic: str, style: str, duration_target: int, template_id: str = "stock_narration") -> dict:
     template = get_template(template_id)
-    client = anthropic.Anthropic(api_key=settings.ANTHROPIC_API_KEY)
     word_count = int(duration_target * template.script.word_rate)
 
     prompt_text = SCRIPT_PROMPT.format(
@@ -107,15 +104,8 @@ def generate_script(topic: str, style: str, duration_target: int, template_id: s
 
     prompt_text += template.script.prompt_extra
 
-    message = client.messages.create(
-        model=settings.CLAUDE_MODEL,
-        max_tokens=1500,
-        messages=[{"role": "user", "content": prompt_text}],
-    )
-
-    raw = message.content[0].text
-    if raw.startswith("```"):
-        raw = raw.split("\n", 1)[1].rsplit("```", 1)[0]
+    raw = complete_text(prompt_text, max_tokens=4096)
+    raw = strip_code_fences(raw)
     script = json.loads(raw)
 
     # Validate and fix duration_hints

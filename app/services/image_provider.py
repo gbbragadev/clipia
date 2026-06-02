@@ -28,19 +28,19 @@ class OpenAIImageProvider:
     def __init__(
         self,
         api_key: str | None = None,
-        model: str = "gpt-image-2",
+        model: str | None = None,
         quality: str | None = None,
         size: str = "1024x1536",
-        moderation: str = "low",
+        moderation: str | None = None,
         cache_dir: Path | None = None,
         max_retries: int = 3,
         timeout_s: float = 60.0,
     ) -> None:
         self.api_key = api_key or settings.OPENAI_API_KEY
-        self.model = model
+        self.model = model or settings.GPT_IMAGE_MODEL
         self.quality = quality or settings.GPT_IMAGE_QUALITY
         self.size = size
-        self.moderation = moderation
+        self.moderation = moderation or settings.GPT_IMAGE_MODERATION
         self.cache_dir = cache_dir or (settings.STORAGE_DIR / "image-cache")
         self.cache_dir.mkdir(parents=True, exist_ok=True)
         self.max_retries = max_retries
@@ -50,7 +50,7 @@ class OpenAIImageProvider:
         return OpenAI(api_key=self.api_key, timeout=self.timeout_s)
 
     def _cache_key(self, prompt: str) -> str:
-        raw = f"{prompt}|{self.size}|{self.quality}".encode("utf-8")
+        raw = f"{self.model}|{prompt}|{self.size}|{self.quality}|{self.moderation}".encode("utf-8")
         return hashlib.sha256(raw).hexdigest()
 
     def generate(self, prompt: str, output_path: Path) -> Path:

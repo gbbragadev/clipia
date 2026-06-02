@@ -26,14 +26,14 @@ def test_warns_missing_api_keys(caplog):
     with caplog.at_level(logging.WARNING):
         s = Settings(
             JWT_SECRET="a" * 32,
-            ANTHROPIC_API_KEY="",
+            OPEN_ROUTER_API_KEY="",
             PEXELS_API_KEY="",
             GROQ_API_KEY="",
             OPENAI_API_KEY="",
             ELEVENLABS_API_KEY="",
         )
         validate_production_settings(s)
-    assert "ANTHROPIC_API_KEY" in caplog.text
+    assert "OPEN_ROUTER_API_KEY" in caplog.text
     assert "GROQ_API_KEY" in caplog.text
     assert "OPENAI_API_KEY" in caplog.text
     assert "ELEVENLABS_API_KEY" in caplog.text

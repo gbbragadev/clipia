@@ -54,6 +54,15 @@ def test_templates_endpoint_unchanged():
     }
 
 
+def test_templates_endpoint_exposes_pricing_metadata():
+    response = run(api_routes.list_templates())
+    novelinha = next(item for item in response if item["id"] == "novelinha_historica")
+    assert novelinha["media_source"] == "ai_image"
+    assert novelinha["default_voice_provider"] == "elevenlabs"
+    assert novelinha["credit_costs"]["edge"] == 5
+    assert novelinha["credit_costs"]["elevenlabs"] == 5
+
+
 def test_job_status_format_unchanged(tmp_path, monkeypatch):
     env = create_test_env(tmp_path, monkeypatch)
     job = create_job(env)

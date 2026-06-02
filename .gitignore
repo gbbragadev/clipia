@@ -15,3 +15,8 @@ reference_voices/*.wav
 .playwright-mcp/
 .remember/
 finalTEMP_MPY_wvf_snd.mp4
+
+# Local agent / QA artifacts
+.claude/
+evidence/
+excalidraw.log

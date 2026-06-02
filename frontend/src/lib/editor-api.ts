@@ -139,6 +139,10 @@ export interface VideoTemplateInfo {
   description: string
   icon: string
   layout_type: string
+  media_source?: string
+  default_voice_provider?: 'edge' | 'elevenlabs' | 'custom'
+  default_voice_id?: string
+  credit_costs?: Partial<Record<'edge' | 'elevenlabs' | 'custom', number>>
 }
 
 export async function fetchTemplates(): Promise<VideoTemplateInfo[]> {

@@ -101,6 +101,12 @@ def test_cache_key_differs_by_size(tmp_path):
     assert p1._cache_key("mesma") != p2._cache_key("mesma")
 
 
+def test_cache_key_differs_by_model(tmp_path):
+    p1 = OpenAIImageProvider(api_key="sk-test", model="gpt-image-2", cache_dir=tmp_path / "c")
+    p2 = OpenAIImageProvider(api_key="sk-test", model="gpt-image-1.5", cache_dir=tmp_path / "c")
+    assert p1._cache_key("mesma") != p2._cache_key("mesma")
+
+
 def _api_status_error(status_code: int, message: str = "transient") -> APIStatusError:
     request = httpx.Request("POST", "https://api.openai.com/v1/images/generations")
     response = httpx.Response(status_code, request=request, json={"error": {"message": message}})

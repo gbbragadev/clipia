@@ -33,6 +33,7 @@ class ScriptConfig:
 
 @dataclass(frozen=True)
 class VoicePreset:
+    provider: str = "edge"  # "edge" | "elevenlabs" | "custom"
     voice_id: str = "pt-BR-AntonioNeural"
     rate: int = -10
     pitch: int = 5
@@ -158,6 +159,7 @@ TEMPLATES: dict[str, VideoTemplate] = {
             word_rate=1.8,
         ),
         voice=VoicePreset(
+            provider="elevenlabs",
             voice_id="KHmfNHtEjHhLK9eER20w",  # Fernanda (pt-BR). Swap em Task 17 se quiser outra voz.
             rate=-10,
             pitch=-2,

@@ -24,6 +24,7 @@ def test_novelinha_script_needs_visual_hint():
 
 def test_novelinha_voice_is_configured():
     tpl = get_template("novelinha_historica")
+    assert tpl.voice.provider == "elevenlabs"
     # Deve ser um voice_id real ElevenLabs (20 chars alfanuméricos) ou o TODO placeholder
     assert tpl.voice.voice_id, "voice_id não pode estar vazio"
     assert len(tpl.voice.voice_id) >= 10, "voice_id muito curto pra ser real"

@@ -419,6 +419,7 @@ def task_synthesize_audio(self, script: dict, job_id: str, template_id: str = "s
         voice_provider_name = _redis_hget(f"job:{job_id}", "voice_provider") or "edge"
         voice_config_raw = _redis_hget(f"job:{job_id}", "voice_config")
         voice_config = json.loads(voice_config_raw) if voice_config_raw else None
+        template = get_template(template_id)
 
         if voice_provider_name == "custom":
             # Custom audio — just copy the uploaded file (already validated)
@@ -435,6 +436,8 @@ def task_synthesize_audio(self, script: dict, job_id: str, template_id: str = "s
 
             provider = ElevenLabsProvider()
             voice_id = voice_config.get("voice_id", "") if voice_config else ""
+            if not voice_id and template.voice.provider == "elevenlabs":
+                voice_id = template.voice.voice_id
             if not voice_id:
                 raise RuntimeError("No ElevenLabs voice_id specified")
             asyncio.run(
@@ -447,12 +450,12 @@ def task_synthesize_audio(self, script: dict, job_id: str, template_id: str = "s
             )
         else:
             # Edge TTS (default, free)
-            from app.templates import get_template
-
-            template = get_template(template_id)
-            voice_id = (voice_config or {}).get("voice_id", template.voice.voice_id)
-            rate = (voice_config or {}).get("rate", template.voice.rate)
-            pitch = (voice_config or {}).get("pitch", template.voice.pitch)
+            voice_id = (voice_config or {}).get(
+                "voice_id",
+                template.voice.voice_id if template.voice.provider == "edge" else "pt-BR-AntonioNeural",
+            )
+            rate = (voice_config or {}).get("rate", template.voice.rate if template.voice.provider == "edge" else -10)
+            pitch = (voice_config or {}).get("pitch", template.voice.pitch if template.voice.provider == "edge" else 5)
             synthesize_narration(
                 text=script["narration"],
                 output_path=output_path,

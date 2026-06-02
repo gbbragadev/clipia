@@ -20,6 +20,31 @@ async def test_generate_debits_exactly_one_credit(client, db_session, verified_u
 
 
 @pytest.mark.asyncio
+async def test_generate_ai_image_template_debits_ai_image_floor(client, db_session, verified_user, auth_headers, app):
+    before = (await db_session.get(User, verified_user.id)).credits
+
+    response = await client.post(
+        "/api/v1/generate",
+        headers=auth_headers(verified_user),
+        json={
+            "topic": "Tema valido para novelinha historica",
+            "style": "storytelling",
+            "duration_target": 45,
+            "template_id": "novelinha_historica",
+            "voice_provider": "edge",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["credit_cost"] == 5
+    after = (await db_session.get(User, verified_user.id)).credits
+    assert before - after == 5
+    job = await db_session.get(Job, response.json()["job_id"])
+    assert job.credit_cost == 5
+    app.state.dispatch_pipeline.assert_called_once()
+
+
+@pytest.mark.asyncio
 async def test_generate_with_zero_credits_returns_402(client, db_session, verified_user, auth_headers):
     db_user = await db_session.get(User, verified_user.id)
     db_user.credits = 0
@@ -37,20 +62,15 @@ async def test_generate_with_zero_credits_returns_402(client, db_session, verifi
 
 
 @pytest.mark.asyncio
-async def test_ai_suggest_only_charges_after_success(client, db_session, job_factory, verified_user, auth_headers, monkeypatch):
+async def test_ai_suggest_only_charges_after_success(
+    client, db_session, job_factory, verified_user, auth_headers, monkeypatch
+):
     job = await job_factory()
 
-    class _Message:
-        content = [type("Text", (), {"text": '{"suggestions":[],"general_feedback":"ok"}'})()]
-
-    class _Client:
-        class messages:
-            @staticmethod
-            def create(**_kwargs):
-                return _Message()
-
-    monkeypatch.setattr("app.api.routes.anthropic", None, raising=False)
-    monkeypatch.setattr("anthropic.Anthropic", lambda api_key: _Client())
+    monkeypatch.setattr(
+        "app.api.routes.complete_text",
+        lambda *a, **k: '{"suggestions":[],"general_feedback":"ok"}',
+    )
 
     response = await client.post(
         f"/api/v1/jobs/{job.id}/ai-suggest",
@@ -64,31 +84,33 @@ async def test_ai_suggest_only_charges_after_success(client, db_session, job_fac
 
 
 @pytest.mark.asyncio
-async def test_ai_suggest_external_failure_does_not_charge(client, db_session, job_factory, verified_user, auth_headers, monkeypatch):
+async def test_ai_suggest_external_failure_does_not_charge(
+    client, db_session, job_factory, verified_user, auth_headers, monkeypatch
+):
     job = await job_factory()
 
-    class _Client:
-        class messages:
-            @staticmethod
-            def create(**_kwargs):
-                raise RuntimeError("Anthropic unavailable")
+    def _boom(*a, **k):
+        raise RuntimeError("OpenRouter unavailable")
 
-    monkeypatch.setattr("app.api.routes.anthropic", None, raising=False)
-    monkeypatch.setattr("anthropic.Anthropic", lambda api_key: _Client())
+    monkeypatch.setattr("app.api.routes.complete_text", _boom)
 
     response = await client.post(
         f"/api/v1/jobs/{job.id}/ai-suggest",
         headers=auth_headers(verified_user),
         json={"message": "melhore o roteiro", "context": {"scenes": []}},
     )
-    assert response.status_code == 500, "Anthropic failures should surface as server errors with current route behavior."
+    assert (
+        response.status_code == 500
+    ), "Anthropic failures should surface as server errors with current route behavior."
 
     refreshed_job = await db_session.get(Job, job.id)
     assert refreshed_job.pending_credits == 0.0, "Failed AI suggestions must not add pending credits."
 
 
 @pytest.mark.asyncio
-async def test_render_debits_pending_credits_once_and_resets_job(client, db_session, job_factory, verified_user, auth_headers, storage_dir, app):
+async def test_render_debits_pending_credits_once_and_resets_job(
+    client, db_session, job_factory, verified_user, auth_headers, storage_dir, app
+):
     job = await job_factory(pending_credits=2.0)
     job_dir = storage_dir / "jobs" / str(job.id)
     job_dir.mkdir(parents=True)
@@ -105,7 +127,9 @@ async def test_render_debits_pending_credits_once_and_resets_job(client, db_sess
 
 
 @pytest.mark.asyncio
-async def test_reset_debits_one_credit_and_clears_editor_state(client, db_session, job_factory, verified_user, auth_headers):
+async def test_reset_debits_one_credit_and_clears_editor_state(
+    client, db_session, job_factory, verified_user, auth_headers
+):
     job = await job_factory(pending_credits=1.5, editor_state={"composition": {"scenes": []}})
     before = (await db_session.get(User, verified_user.id)).credits
 

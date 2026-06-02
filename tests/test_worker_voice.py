@@ -87,6 +87,30 @@ def test_synthesize_audio_edge_explicit(monkeypatch, tmp_path):
     assert synth_calls[0]["voice_id"] == "pt-BR-AntonioNeural"
 
 
+def test_synthesize_audio_edge_ignores_non_edge_template_voice(monkeypatch, tmp_path):
+    redis_client = LocalRedis()
+    redis_client.hset("job:job-edge-ai-template", mapping={"voice_provider": "edge"})
+    output_path = tmp_path / "narration.wav"
+    synth_calls = []
+    monkeypatch.setattr(worker_tasks, "_redis", redis_client)
+    monkeypatch.setattr(worker_tasks, "_check_cancelled", lambda _job_id: False)
+    monkeypatch.setattr(worker_tasks, "get_job_dir", lambda _job_id: tmp_path)
+    monkeypatch.setattr(
+        worker_tasks,
+        "synthesize_narration",
+        lambda **kwargs: (synth_calls.append(kwargs), output_path.write_bytes(b"x" * 12000)),
+    )
+
+    worker_tasks.task_synthesize_audio.run.__func__(
+        FakeTaskSelf(),
+        {"narration": "texto", "_duration_target": 45},
+        "job-edge-ai-template",
+        "novelinha_historica",
+    )
+
+    assert synth_calls[0]["voice_id"] == "pt-BR-AntonioNeural"
+
+
 def test_synthesize_audio_elevenlabs(monkeypatch, tmp_path):
     redis_client = LocalRedis()
     redis_client.hset(
@@ -112,6 +136,28 @@ def test_synthesize_audio_elevenlabs(monkeypatch, tmp_path):
 
     assert result == str(output_path)
     synth_mock.assert_awaited_once()
+
+
+def test_synthesize_audio_elevenlabs_uses_template_default_voice(monkeypatch, tmp_path):
+    redis_client = LocalRedis()
+    redis_client.hset("job:job-elevenlabs-template", mapping={"voice_provider": "elevenlabs"})
+    output_path = tmp_path / "narration.wav"
+    synth_mock = AsyncMock(side_effect=lambda **_kwargs: output_path.write_bytes(b"x" * 12000) or output_path)
+    monkeypatch.setattr(worker_tasks, "_redis", redis_client)
+    monkeypatch.setattr(worker_tasks, "_check_cancelled", lambda _job_id: False)
+    monkeypatch.setattr(worker_tasks, "get_job_dir", lambda _job_id: tmp_path)
+    monkeypatch.setattr("app.services.elevenlabs_provider.ElevenLabsProvider.synthesize", synth_mock)
+
+    result = worker_tasks.task_synthesize_audio.run.__func__(
+        FakeTaskSelf(),
+        {"narration": "texto", "_duration_target": 45},
+        "job-elevenlabs-template",
+        "novelinha_historica",
+    )
+
+    assert result == str(output_path)
+    synth_mock.assert_awaited_once()
+    assert synth_mock.await_args.kwargs["voice_id"] == "KHmfNHtEjHhLK9eER20w"
 
 
 def test_synthesize_audio_custom(monkeypatch, tmp_path):

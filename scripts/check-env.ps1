@@ -3,7 +3,7 @@
 # Uso: .\scripts\check-env.ps1
 
 $required = @{
-    'ANTHROPIC_API_KEY'    = 'Claude (scripts)'
+    'OPEN_ROUTER_API_KEY'  = 'OpenRouter / DeepSeek (roteiro + IA editor)'
     'PEXELS_API_KEY'       = 'Stock media'
     'GROQ_API_KEY'         = 'Whisper ASR primario'
     'OPENAI_API_KEY'       = 'OpenAI (Whisper fallback + futuro gpt-image)'

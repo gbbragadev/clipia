@@ -1,4 +1,4 @@
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
@@ -21,21 +21,16 @@ FAKE_CLAUDE_RESPONSE = """
 """
 
 
-def _mock_anthropic(body: str = FAKE_CLAUDE_RESPONSE):
-    msg = MagicMock()
-    msg.content = [MagicMock(text=body)]
-    client = MagicMock()
-    client.messages.create.return_value = msg
-    return client
+def _patch_llm(body: str = FAKE_CLAUDE_RESPONSE):
+    """Mocka a chamada LLM (OpenRouter/DeepSeek) retornando o corpo JSON dado."""
+    return patch("app.services.scriptwriter.complete_text", return_value=body)
 
 
 def test_visual_hint_instruction_appears_for_ai_image_template():
-    with patch("app.services.scriptwriter.anthropic.Anthropic") as cls:
-        client = _mock_anthropic()
-        cls.return_value = client
+    with _patch_llm() as m:
         generate_script("Titanic", "dramático", 30, "novelinha_historica")
 
-    sent_prompt = client.messages.create.call_args.kwargs["messages"][0]["content"]
+    sent_prompt = m.call_args.args[0]
     assert "VISUAL_HINT" in sent_prompt.upper()
     assert "visual_hint" in sent_prompt
 
@@ -50,18 +45,15 @@ def test_visual_hint_instruction_absent_for_stock_template():
         .replace('"visual_hint": "lapide no cemiterio", ', "")
     )
 
-    with patch("app.services.scriptwriter.anthropic.Anthropic") as cls:
-        client = _mock_anthropic(stock_response)
-        cls.return_value = client
+    with _patch_llm(stock_response) as m:
         generate_script("teste", "informativo", 30, "stock_narration")
 
-    sent_prompt = client.messages.create.call_args.kwargs["messages"][0]["content"]
+    sent_prompt = m.call_args.args[0]
     assert "VISUAL_HINT" not in sent_prompt.upper()
 
 
 def test_script_preserves_visual_hint_in_output():
-    with patch("app.services.scriptwriter.anthropic.Anthropic") as cls:
-        cls.return_value = _mock_anthropic()
+    with _patch_llm():
         script = generate_script("tema", "estilo", 30, "novelinha_historica")
 
     assert all("visual_hint" in s for s in script["scenes"])
@@ -88,8 +80,6 @@ EMPTY_HINT_RESPONSE = """
 def test_raises_when_visual_hint_empty_for_ai_image():
     from app.services.scriptwriter import ScriptValidationError
 
-    with patch("app.services.scriptwriter.anthropic.Anthropic") as cls:
-        client = _mock_anthropic(EMPTY_HINT_RESPONSE)
-        cls.return_value = client
+    with _patch_llm(EMPTY_HINT_RESPONSE):
         with pytest.raises(ScriptValidationError):
             generate_script("tema", "estilo", 30, "novelinha_historica")

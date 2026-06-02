@@ -8,8 +8,12 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 
 class Settings(BaseSettings):
     # API Keys
-    ANTHROPIC_API_KEY: str = ""
     PEXELS_API_KEY: str = ""
+
+    # LLM (OpenRouter — API compativel com OpenAI; usado p/ roteiro e IA do editor)
+    OPEN_ROUTER_API_KEY: str = ""
+    OPENROUTER_BASE_URL: str = "https://openrouter.ai/api/v1"
+    LLM_MODEL: str = "deepseek/deepseek-v4-pro"  # slug OpenRouter; alt: deepseek/deepseek-v4-flash
 
     # Database
     DATABASE_URL: str = "postgresql+asyncpg://clipia:clipia_dev@localhost:5435/clipia"
@@ -39,9 +43,6 @@ class Settings(BaseSettings):
     WHISPER_MODEL_SIZE: str = "large-v3"
     WHISPER_COMPUTE_TYPE: str = "float16"
 
-    # Claude
-    CLAUDE_MODEL: str = "claude-sonnet-4-6"
-
     # Voice Providers
     ELEVENLABS_API_KEY: str = ""
 
@@ -53,7 +54,9 @@ class Settings(BaseSettings):
     OPENAI_WHISPER_MODEL: str = "whisper-1"
 
     # GPT Image 2
+    GPT_IMAGE_MODEL: str = "gpt-image-2"
     GPT_IMAGE_QUALITY: str = "medium"  # "low" | "medium" | "high"
+    GPT_IMAGE_MODERATION: str = "low"  # "auto" | "low"
 
     # Kling AI (Phase 3)
     KLING_ACCESS_KEY: str = ""
@@ -63,6 +66,7 @@ class Settings(BaseSettings):
     CREDIT_COST_EDGE: int = 1
     CREDIT_COST_ELEVENLABS: int = 2
     CREDIT_COST_CUSTOM_AUDIO: int = 1
+    CREDIT_COST_AI_IMAGE: int = 5
     CREDIT_COST_AI_VIDEO: int = 5
 
     # MercadoPago
@@ -100,7 +104,7 @@ def validate_production_settings(s: Settings) -> None:
     """Validate critical settings. Call on startup."""
     if s.JWT_SECRET in _WEAK_SECRETS or len(s.JWT_SECRET) < 32:
         raise ValueError("JWT_SECRET inseguro! Gere um com: openssl rand -hex 32")
-    warn_keys = ("ANTHROPIC_API_KEY", "PEXELS_API_KEY", "GROQ_API_KEY", "OPENAI_API_KEY", "ELEVENLABS_API_KEY")
+    warn_keys = ("OPEN_ROUTER_API_KEY", "PEXELS_API_KEY", "GROQ_API_KEY", "OPENAI_API_KEY", "ELEVENLABS_API_KEY")
     for key in warn_keys:
         if not getattr(s, key):
             _logger.warning("Config: %s nao configurado — funcionalidade limitada", key)

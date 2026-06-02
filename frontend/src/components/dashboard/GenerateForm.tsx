@@ -6,8 +6,10 @@ import { useAuth } from '@/contexts/AuthContext'
 import {
   generateVideo,
   fetchJobStatus,
+  fetchTemplates,
   type GenerateParams,
   type JobStatusResponse,
+  type VideoTemplateInfo,
 } from '@/lib/editor-api'
 import TemplateSelector from './TemplateSelector'
 import StyleSelector, { type StyleValue } from './StyleSelector'
@@ -20,6 +22,7 @@ import { useToast } from '@/components/ui/feedback'
 
 const STEP_LABELS: Record<string, string> = {
   scripting: 'Escrevendo roteiro...',
+  generating_images: 'Gerando imagens IA...',
   tts: 'Gerando narração...',
   transcribing: 'Transcrevendo áudio...',
   media: 'Buscando vídeos...',
@@ -47,8 +50,17 @@ export default function GenerateForm({ onJobComplete }: GenerateFormProps) {
   const [wpm, setWpm] = useState(150)
   const [showAdvancedScript, setShowAdvancedScript] = useState(false)
   const [voiceProvider, setVoiceProvider] = useState<'edge' | 'elevenlabs'>('edge')
+  const [templates, setTemplates] = useState<VideoTemplateInfo[]>([])
 
-  const creditCost = voiceProvider === 'elevenlabs' ? 2 : 1
+  const selectedTemplate = templates.find((template) => template.id === templateId)
+  const isFallbackAiTemplate = templateId === 'novelinha_historica'
+  const supportsDefaultPremiumVoice = Boolean(
+    (selectedTemplate?.default_voice_provider === 'elevenlabs' && selectedTemplate.default_voice_id)
+      || isFallbackAiTemplate,
+  )
+  const creditCost = selectedTemplate?.credit_costs?.[voiceProvider]
+    ?? (isFallbackAiTemplate ? 5 : voiceProvider === 'elevenlabs' ? 2 : 1)
+  const edgeCreditCost = selectedTemplate?.credit_costs?.edge ?? (isFallbackAiTemplate ? 5 : 1)
 
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const lastRequestRef = useRef<GenerateParams | null>(null)
@@ -79,6 +91,22 @@ export default function GenerateForm({ onJobComplete }: GenerateFormProps) {
     return () => { if (pollRef.current) clearInterval(pollRef.current) }
   }, [])
 
+  useEffect(() => {
+    fetchTemplates()
+      .then(setTemplates)
+      .catch(() => setTemplates([]))
+  }, [])
+
+  const handleTemplateSelect = (id: string) => {
+    const nextTemplate = templates.find((template) => template.id === id)
+    setTemplateId(id)
+    if ((nextTemplate?.default_voice_provider === 'elevenlabs' && nextTemplate.default_voice_id) || id === 'novelinha_historica') {
+      setVoiceProvider('elevenlabs')
+    } else if (voiceProvider === 'elevenlabs') {
+      setVoiceProvider('edge')
+    }
+  }
+
   const handleGenerate = async () => {
     if (!topic.trim() || generating) return
 
@@ -98,6 +126,9 @@ export default function GenerateForm({ onJobComplete }: GenerateFormProps) {
         duration_target: duration,
         template_id: templateId,
         voice_provider: voiceProvider,
+        voice_config: voiceProvider === 'elevenlabs' && selectedTemplate?.default_voice_id
+          ? { voice_id: selectedTemplate.default_voice_id }
+          : undefined,
       }
       lastRequestRef.current = params
       const result = await generateVideo(params)
@@ -127,7 +158,12 @@ export default function GenerateForm({ onJobComplete }: GenerateFormProps) {
       {/* Template */}
       <div className="mb-5">
         <label className="block text-xs text-[var(--text-tertiary)] mb-2">Template</label>
-        <TemplateSelector selected={templateId} onSelect={setTemplateId} disabled={generating} />
+        <TemplateSelector
+          selected={templateId}
+          onSelect={handleTemplateSelect}
+          disabled={generating}
+          templates={templates}
+        />
       </div>
 
       {/* Topic */}
@@ -187,12 +223,16 @@ export default function GenerateForm({ onJobComplete }: GenerateFormProps) {
             } disabled:opacity-50 cursor-pointer`}
           >
             <div className="font-semibold">Edge TTS</div>
-            <div className="text-[10px] opacity-60 mt-0.5">Grátis · 1 crédito</div>
+            <div className="text-[10px] opacity-60 mt-0.5">
+              Edge · {edgeCreditCost} credito{edgeCreditCost > 1 ? 's' : ''}
+            </div>
           </button>
           <button
             type="button"
-            onClick={() => setVoiceProvider('elevenlabs')}
-            disabled={generating}
+            onClick={() => {
+              if (supportsDefaultPremiumVoice) setVoiceProvider('elevenlabs')
+            }}
+            disabled={generating || !supportsDefaultPremiumVoice}
             className={`flex-1 py-2.5 px-3 rounded-xl border text-xs font-medium transition ${
               voiceProvider === 'elevenlabs'
                 ? 'border-blue-500/50 bg-blue-500/10 text-blue-300'
@@ -200,7 +240,9 @@ export default function GenerateForm({ onJobComplete }: GenerateFormProps) {
             } disabled:opacity-50 cursor-pointer`}
           >
             <div className="font-semibold">ElevenLabs</div>
-            <div className="text-[10px] opacity-60 mt-0.5">Premium · 2 créditos</div>
+            <div className="text-[10px] opacity-60 mt-0.5">
+              {supportsDefaultPremiumVoice ? `Premium · ${creditCost} creditos` : 'Premium no template IA'}
+            </div>
           </button>
         </div>
       </div>
@@ -321,13 +363,13 @@ export default function GenerateForm({ onJobComplete }: GenerateFormProps) {
             <div className="text-4xl mb-4">💰</div>
             <h3 className="text-lg font-bold mb-2">Seus créditos acabaram</h3>
             <p className="text-sm text-gray-400 mb-1">Plano: <span className="text-gray-300 capitalize">{user?.plan || 'free'}</span></p>
-            <p className="text-xs text-[var(--text-tertiary)] mb-6">Cada vídeo consome 1 crédito</p>
-            <button
-              disabled
-              className="w-full py-3 rounded-xl bg-purple-600/30 text-purple-300 font-medium text-sm cursor-not-allowed opacity-50 mb-3"
+            <p className="text-xs text-[var(--text-tertiary)] mb-6">Este template consome {creditCost} crédito{creditCost > 1 ? 's' : ''}</p>
+            <a
+              href="/dashboard/credits"
+              className="block w-full py-3 rounded-xl bg-purple-600 text-white font-medium text-sm hover:bg-purple-500 transition mb-3"
             >
-              Comprar créditos (em breve)
-            </button>
+              Comprar créditos
+            </a>
             <button
               onClick={() => setShowCreditsModal(false)}
               className="text-sm text-gray-400 hover:text-white transition cursor-pointer"

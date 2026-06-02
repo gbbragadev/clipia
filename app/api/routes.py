@@ -1,12 +1,9 @@
 import json
 import logging
 import shutil
-import uuid
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-
-logger = logging.getLogger(__name__)
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import FileResponse
@@ -18,28 +15,29 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.security import get_owned_job
 from app.auth.dependencies import get_current_admin_user, get_current_user
 from app.config import settings
-from app.errors import ErrorMessages, not_found_error, validate_uuid
-
-limiter = Limiter(key_func=get_remote_address)
 from app.db.engine import get_db
 from app.db.models import CreditPurchase, Job, User, VoiceClone, WaitlistEntry
+from app.errors import ErrorMessages, not_found_error, validate_uuid
 from app.models import (
     AISuggestRequest,
     CompositionResponse,
     EditRequest,
     GenerateRequest,
     JobStatus,
-    RegenerateMediaRequest,
     RegenerateTTSRequest,
     VoiceCloneRequest,
     WaitlistRequest,
 )
 from app.observability import record_credit_metric
+from app.pricing import get_generation_credit_cost
+from app.redis_pool import get_redis
+from app.services.llm import complete_text, strip_code_fences
 from app.utils.files import bytes_to_gb, path_size_bytes
 from app.utils.locks import get_lock
-from app.redis_pool import get_redis
 from app.worker.tasks import dispatch_pipeline
 
+logger = logging.getLogger(__name__)
+limiter = Limiter(key_func=get_remote_address)
 router = APIRouter(tags=["jobs"])
 _redis = get_redis()
 
@@ -142,7 +140,7 @@ def _ensure_storage_ready() -> None:
     "/generate",
     summary="Generate a video",
     description="Starts a new video generation job.",
-    responses={200: {"description": "Job queued"}}
+    responses={200: {"description": "Job queued"}},
 )
 @limiter.limit(settings.RATE_LIMIT_GENERATE)
 async def generate(
@@ -152,13 +150,7 @@ async def generate(
     db: AsyncSession = Depends(get_db),
 ):
     """Queue a video generation job."""
-    # Determine credit cost based on voice provider
-    credit_cost_map = {
-        "edge": settings.CREDIT_COST_EDGE,
-        "elevenlabs": settings.CREDIT_COST_ELEVENLABS,
-        "custom": settings.CREDIT_COST_CUSTOM_AUDIO,
-    }
-    credit_cost = credit_cost_map.get(req.voice_provider, 1)
+    credit_cost = get_generation_credit_cost(req.template_id, req.voice_provider)
 
     async with get_lock(f"generate:{user.id}"):
         _ensure_storage_ready()
@@ -197,18 +189,24 @@ async def generate(
 
     job_id = str(job.id)
 
-    _redis.hset(f"job:{job_id}", mapping={
-        "status": "queued",
-        "progress": "0",
-        "current_step": "",
-        "error": "",
-        "detail": "",
-        "template_id": req.template_id,
-        "created_at": datetime.now(timezone.utc).isoformat(),
-    })
+    _redis.hset(
+        f"job:{job_id}",
+        mapping={
+            "status": "queued",
+            "progress": "0",
+            "current_step": "",
+            "error": "",
+            "detail": "",
+            "template_id": req.template_id,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        },
+    )
 
     dispatch_pipeline(
-        job_id, req.topic, req.style, req.duration_target,
+        job_id,
+        req.topic,
+        req.style,
+        req.duration_target,
         template_id=req.template_id,
         voice_provider=req.voice_provider,
         voice_config=req.voice_config,
@@ -221,7 +219,7 @@ async def generate(
     "/jobs/{job_id}",
     summary="Get job status",
     description="Gets current job status.",
-    responses={200: {"description": "Job status"}}
+    responses={200: {"description": "Job status"}},
 )
 async def get_job(
     job_id: str,
@@ -250,7 +248,7 @@ async def get_job(
     "/jobs/{job_id}/download",
     summary="Download job",
     description="Downloads generated video.",
-    responses={200: {"description": "Video stream"}, 404: {"description": "Not found"}}
+    responses={200: {"description": "Video stream"}, 404: {"description": "Not found"}},
 )
 async def download_job(
     job_id: str,
@@ -270,7 +268,7 @@ async def download_job(
     status_code=201,
     summary="Join waitlist",
     description="Adds an email to waitlist.",
-    responses={201: {"description": "Added to waitlist"}}
+    responses={201: {"description": "Added to waitlist"}},
 )
 async def join_waitlist(body: WaitlistRequest, db: AsyncSession = Depends(get_db)):
     """Join waitlist."""
@@ -288,11 +286,12 @@ async def join_waitlist(body: WaitlistRequest, db: AsyncSession = Depends(get_db
     "/templates",
     summary="List templates",
     description="Returns available templates.",
-    responses={200: {"description": "List of templates"}}
+    responses={200: {"description": "List of templates"}},
 )
 async def list_templates():
     """Return available video templates."""
     from app.templates import TEMPLATES
+
     return [
         {
             "id": t.id,
@@ -300,6 +299,14 @@ async def list_templates():
             "description": t.description,
             "icon": t.icon,
             "layout_type": t.layout.type,
+            "media_source": t.media.source,
+            "default_voice_provider": t.voice.provider,
+            "default_voice_id": t.voice.voice_id,
+            "credit_costs": {
+                "edge": get_generation_credit_cost(t.id, "edge"),
+                "elevenlabs": get_generation_credit_cost(t.id, "elevenlabs"),
+                "custom": get_generation_credit_cost(t.id, "custom"),
+            },
         }
         for t in TEMPLATES.values()
     ]
@@ -312,7 +319,7 @@ async def list_templates():
     "/voices",
     summary="List voices",
     description="Returns available voices across all providers.",
-    responses={200: {"description": "List of voices"}}
+    responses={200: {"description": "List of voices"}},
 )
 async def list_voices(
     user: User = Depends(get_current_user),
@@ -327,6 +334,7 @@ async def list_voices(
     if settings.ELEVENLABS_API_KEY:
         try:
             from app.services.elevenlabs_provider import ElevenLabsProvider
+
             provider = ElevenLabsProvider()
             el_voices = await provider.list_voices()
             voices.extend(v.__dict__ for v in el_voices)
@@ -334,19 +342,19 @@ async def list_voices(
             logger.warning(f"Failed to fetch ElevenLabs voices: {e}")
 
     # User's cloned voices from DB
-    result = await db.execute(
-        select(VoiceClone).where(VoiceClone.user_id == user.id)
-    )
+    result = await db.execute(select(VoiceClone).where(VoiceClone.user_id == user.id))
     clones = result.scalars().all()
     for clone in clones:
-        voices.append({
-            "id": clone.external_voice_id,
-            "name": f"{clone.name} (clone)",
-            "provider": clone.provider,
-            "language": "multilingual",
-            "is_clone": True,
-            "clone_id": str(clone.id),
-        })
+        voices.append(
+            {
+                "id": clone.external_voice_id,
+                "name": f"{clone.name} (clone)",
+                "provider": clone.provider,
+                "language": "multilingual",
+                "is_clone": True,
+                "clone_id": str(clone.id),
+            }
+        )
 
     return voices
 
@@ -355,7 +363,7 @@ async def list_voices(
     "/voices/clone",
     summary="Clone voice",
     description="Clone a voice using ElevenLabs Instant Voice Cloning.",
-    responses={200: {"description": "Voice cloned"}}
+    responses={200: {"description": "Voice cloned"}},
 )
 @limiter.limit("3/hour")
 async def clone_voice(
@@ -369,9 +377,7 @@ async def clone_voice(
         raise HTTPException(status_code=503, detail="Voice cloning not available")
 
     # Check max clones per user (limit 5)
-    result = await db.execute(
-        select(VoiceClone).where(VoiceClone.user_id == user.id)
-    )
+    result = await db.execute(select(VoiceClone).where(VoiceClone.user_id == user.id))
     if len(result.scalars().all()) >= 5:
         raise HTTPException(status_code=400, detail="Máximo de 5 vozes clonadas por usuário")
 
@@ -391,6 +397,7 @@ async def clone_voice(
         audio_bytes.append(content)
 
     from app.services.elevenlabs_provider import ElevenLabsProvider
+
     provider = ElevenLabsProvider()
     voice_id = await provider.clone_voice(req.name, audio_bytes, req.description)
 
@@ -416,7 +423,7 @@ async def clone_voice(
     "/voices/{clone_id}",
     summary="Delete cloned voice",
     description="Deletes a user's cloned voice.",
-    responses={200: {"description": "Voice deleted"}}
+    responses={200: {"description": "Voice deleted"}},
 )
 async def delete_voice(
     clone_id: str,
@@ -425,9 +432,7 @@ async def delete_voice(
 ):
     """Delete a cloned voice."""
     validate_uuid(clone_id)
-    result = await db.execute(
-        select(VoiceClone).where(VoiceClone.id == clone_id, VoiceClone.user_id == user.id)
-    )
+    result = await db.execute(select(VoiceClone).where(VoiceClone.id == clone_id, VoiceClone.user_id == user.id))
     clone = result.scalar_one_or_none()
     if clone is None:
         raise not_found_error()
@@ -436,6 +441,7 @@ async def delete_voice(
     if clone.provider == "elevenlabs" and settings.ELEVENLABS_API_KEY:
         try:
             from app.services.elevenlabs_provider import ElevenLabsProvider
+
             provider = ElevenLabsProvider()
             await provider.delete_voice(clone.external_voice_id)
         except Exception as e:
@@ -450,7 +456,7 @@ async def delete_voice(
     "/jobs/{job_id}/upload-audio",
     summary="Upload custom audio",
     description="Upload a custom audio file for a job.",
-    responses={200: {"description": "Audio uploaded"}}
+    responses={200: {"description": "Audio uploaded"}},
 )
 @limiter.limit("10/minute")
 async def upload_audio(
@@ -484,6 +490,7 @@ async def upload_audio(
 
     # Validate
     from app.services.custom_audio_provider import validate_audio_file
+
     try:
         meta = validate_audio_file(upload_path)
     except ValueError as e:
@@ -493,12 +500,14 @@ async def upload_audio(
     # Normalize to WAV
     output_path = str(job_dir / "narration.wav")
     from app.services.custom_audio_provider import normalize_audio
+
     normalize_audio(upload_path, output_path)
 
     # Transcribe with Whisper for word timestamps
     words = []
     try:
         from app.services.transcriber import transcribe_with_timestamps
+
         words = transcribe_with_timestamps(output_path)
         (job_dir / "words.json").write_text(json.dumps(words, ensure_ascii=False))
     except Exception as e:
@@ -518,7 +527,7 @@ async def upload_audio(
     "/jobs/{job_id}/composition",
     summary="Get composition",
     description="Returns the job's script and media.",
-    responses={200: {"description": "Composition data"}}
+    responses={200: {"description": "Composition data"}},
 )
 async def get_composition(
     job_id: str,
@@ -565,6 +574,7 @@ async def get_composition(
 
     # Get template info
     from app.templates import get_template
+
     job_template_id = getattr(job, "template_id", "stock_narration")
     tmpl = get_template(job_template_id)
 
@@ -595,7 +605,7 @@ async def get_composition(
     "/jobs/{job_id}/edit",
     summary="Save edit",
     description="Saves current editor state.",
-    responses={200: {"description": "Saved"}}
+    responses={200: {"description": "Saved"}},
 )
 async def save_editor_state(
     request: Request,
@@ -643,7 +653,7 @@ async def save_editor_state(
     "/jobs/{job_id}/regenerate-tts",
     summary="Regenerate TTS",
     description="Regenerates the video narration.",
-    responses={200: {"description": "Regenerated"}}
+    responses={200: {"description": "Regenerated"}},
 )
 async def regenerate_tts(
     job_id: str,
@@ -668,8 +678,11 @@ async def regenerate_tts(
 
     # Regenerate TTS (async)
     audio_path = str(job_dir / "narration.wav")
-    if req.voice_provider == "elevenlabs" and settings.ELEVENLABS_API_KEY:
+    if req.voice_provider == "elevenlabs":
+        if not settings.ELEVENLABS_API_KEY:
+            raise HTTPException(status_code=503, detail="ELEVENLABS_API_KEY not configured")
         from app.services.elevenlabs_provider import ElevenLabsProvider
+
         provider = ElevenLabsProvider()
         await provider.synthesize(
             text=narration,
@@ -677,11 +690,17 @@ async def regenerate_tts(
             voice_id=req.voice_id or "",
         )
     else:
+        from app.services.edge_provider import EDGE_VOICES
         from app.services.tts import synthesize_narration_async
+
+        voice_id = req.voice_id or "pt-BR-AntonioNeural"
+        if voice_id not in {voice.id for voice in EDGE_VOICES}:
+            raise HTTPException(status_code=422, detail=ErrorMessages.INVALID_INPUT)
+
         await synthesize_narration_async(
             text=narration,
             output_path=audio_path,
-            voice_id=req.voice_id or "pt-BR-AntonioNeural",
+            voice_id=voice_id,
             rate=req.rate if req.rate is not None else -10,
             pitch=req.pitch if req.pitch is not None else 5,
         )
@@ -692,6 +711,7 @@ async def regenerate_tts(
     words = []
     try:
         from app.services.transcriber import transcribe_with_timestamps
+
         words = transcribe_with_timestamps(audio_path)
     except Exception as e:
         logger.warning(f"Whisper transcription failed, keeping old timestamps: {e}")
@@ -711,7 +731,7 @@ async def regenerate_tts(
     "/jobs/{job_id}/ai-suggest",
     summary="AI Suggestions",
     description="Suggests edits using AI.",
-    responses={200: {"description": "Suggestions"}}
+    responses={200: {"description": "Suggestions"}},
 )
 async def ai_suggest(
     job_id: str,
@@ -722,18 +742,9 @@ async def ai_suggest(
     """Get AI suggestions for script improvement. Acumula 0.5 credito por chamada."""
     job = await get_owned_job(db, user, job_id)
 
-    import anthropic
-
-    client = anthropic.Anthropic(api_key=settings.ANTHROPIC_API_KEY)
-
     script_json = json.dumps(req.context, ensure_ascii=False, indent=2) if req.context else "{}"
 
-    message = client.messages.create(
-        model=settings.CLAUDE_MODEL,
-        max_tokens=1500,
-        messages=[{
-            "role": "user",
-            "content": f"""Voce e um editor de video especialista em conteudo viral para TikTok, Reels e Shorts.
+    prompt = f"""Voce e um editor de video especialista em conteudo viral para TikTok, Reels e Shorts.
 
 Roteiro atual do video:
 {script_json}
@@ -758,14 +769,10 @@ Regras:
 - Cada sugestao deve ter um scene_index valido (0-based)
 - O new_text deve ter duracao similar ao original
 - Seja especifico no reason (nao generico)
-- Maximo 3 sugestoes por resposta""",
-        }],
-    )
+- Maximo 3 sugestoes por resposta"""
 
-    raw = message.content[0].text
-    # Try to parse JSON, handling potential markdown code blocks
-    if raw.startswith("```"):
-        raw = raw.split("\n", 1)[1].rsplit("```", 1)[0]
+    raw = complete_text(prompt, max_tokens=2048)
+    raw = strip_code_fences(raw)
 
     try:
         result = json.loads(raw)
@@ -786,7 +793,7 @@ Regras:
     "/jobs/{job_id}/render",
     summary="Render video",
     description="Starts render job.",
-    responses={200: {"description": "Render queued"}}
+    responses={200: {"description": "Render queued"}},
 )
 async def render_video(
     job_id: str,
@@ -816,6 +823,7 @@ async def render_video(
         raise not_found_error()
 
     from app.worker.tasks import task_rerender_video
+
     task_rerender_video.delay(job_id)
 
     return {
@@ -828,7 +836,7 @@ async def render_video(
     "/jobs/{job_id}/reset",
     summary="Reset job",
     description="Resets job state to defaults.",
-    responses={200: {"description": "Reset successfully"}}
+    responses={200: {"description": "Reset successfully"}},
 )
 async def reset_job(
     job_id: str,
@@ -855,7 +863,7 @@ async def reset_job(
     "/jobs/{job_id}/status",
     summary="Job status",
     description="Gets job status from Redis.",
-    responses={200: {"description": "Status"}}
+    responses={200: {"description": "Status"}},
 )
 async def job_status(
     job_id: str,
@@ -881,7 +889,7 @@ async def job_status(
     "/jobs/{job_id}/cancel",
     summary="Cancel job",
     description="Cancels an ongoing job.",
-    responses={200: {"description": "Cancel initiated"}}
+    responses={200: {"description": "Cancel initiated"}},
 )
 async def cancel_job(
     job_id: str,
@@ -901,19 +909,14 @@ async def cancel_job(
 
 
 @router.get(
-    "/jobs",
-    summary="List jobs",
-    description="List user's jobs.",
-    responses={200: {"description": "List of jobs"}}
+    "/jobs", summary="List jobs", description="List user's jobs.", responses={200: {"description": "List of jobs"}}
 )
 async def list_jobs(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     """List all jobs for the current user, with real-time status from Redis."""
-    result = await db.execute(
-        select(Job).where(Job.user_id == user.id).order_by(Job.created_at.desc()).limit(50)
-    )
+    result = await db.execute(select(Job).where(Job.user_id == user.id).order_by(Job.created_at.desc()).limit(50))
     jobs = result.scalars().all()
     items = []
     for j in jobs:
@@ -926,15 +929,17 @@ async def list_jobs(
             job_dir = Path(settings.STORAGE_DIR) / "jobs" / str(j.id)
             if (job_dir / "script.json").exists():
                 status = "editable"
-        items.append({
-            "job_id": str(j.id),
-            "topic": j.topic,
-            "style": j.style,
-            "status": status,
-            "duration_target": j.duration_target,
-            "created_at": j.created_at.isoformat() if j.created_at else None,
-            "download_url": f"/api/v1/jobs/{j.id}/download" if has_video else None,
-        })
+        items.append(
+            {
+                "job_id": str(j.id),
+                "topic": j.topic,
+                "style": j.style,
+                "status": status,
+                "duration_target": j.duration_target,
+                "created_at": j.created_at.isoformat() if j.created_at else None,
+                "download_url": f"/api/v1/jobs/{j.id}/download" if has_video else None,
+            }
+        )
     return items
 
 
@@ -942,7 +947,7 @@ async def list_jobs(
     "/admin/dashboard",
     summary="Admin dashboard",
     description="Aggregated admin metrics for the SaaS control panel.",
-    responses={200: {"description": "Dashboard metrics"}}
+    responses={200: {"description": "Dashboard metrics"}},
 )
 async def admin_dashboard(
     range: str = "30d",
@@ -957,19 +962,13 @@ async def admin_dashboard(
     window_start = now.replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=days - 1)
 
     # SQL-filtered queries — only load rows within the time window
-    users_result = await db.execute(
-        select(User).where(User.created_at >= window_start)
-    )
+    users_result = await db.execute(select(User).where(User.created_at >= window_start))
     users_in_range = list(users_result.scalars().all())
 
-    purchases_result = await db.execute(
-        select(CreditPurchase).where(CreditPurchase.created_at >= window_start)
-    )
+    purchases_result = await db.execute(select(CreditPurchase).where(CreditPurchase.created_at >= window_start))
     purchases_in_range = list(purchases_result.scalars().all())
 
-    jobs_result = await db.execute(
-        select(Job).where(Job.created_at >= window_start)
-    )
+    jobs_result = await db.execute(select(Job).where(Job.created_at >= window_start))
     jobs_in_range = list(jobs_result.scalars().all())
 
     # Aggregate totals via SQL — no need to load all rows
@@ -982,21 +981,15 @@ async def admin_dashboard(
     approved_user_ids = {str(uid) for uid in approved_user_ids_result.scalars().all()}
 
     # Job status counts via SQL GROUP BY
-    job_status_rows = await db.execute(
-        select(Job.status, func.count(Job.id)).group_by(Job.status)
-    )
+    job_status_rows = await db.execute(select(Job.status, func.count(Job.id)).group_by(Job.status))
     current_job_statuses: dict[str, int] = defaultdict(int, {row[0]: row[1] for row in job_status_rows.all()})
 
     # Pending credits via SQL aggregation — only jobs that have pending_credits > 0
-    pending_credits_result = await db.execute(
-        select(Job.pending_credits).where(Job.pending_credits > 0)
-    )
+    pending_credits_result = await db.execute(select(Job.pending_credits).where(Job.pending_credits > 0))
     pending_credits_jobs = [float(v) for v in pending_credits_result.scalars().all()]
 
     # Recent activity via SQL ORDER BY + LIMIT (avoids loading full tables)
-    recent_users_result = await db.execute(
-        select(User).order_by(User.created_at.desc()).limit(5)
-    )
+    recent_users_result = await db.execute(select(User).order_by(User.created_at.desc()).limit(5))
     recent_users = list(recent_users_result.scalars().all())
 
     recent_purchases_result = await db.execute(
@@ -1050,11 +1043,11 @@ async def admin_dashboard(
     settled_jobs = [job for job in jobs_in_range if job.status in {"completed", "failed"}]
     success_rate = 0.0
     if settled_jobs:
-        success_rate = _round2(
-            (sum(1 for job in settled_jobs if job.status == "completed") / len(settled_jobs)) * 100
-        )
+        success_rate = _round2((sum(1 for job in settled_jobs if job.status == "completed") / len(settled_jobs)) * 100)
 
-    avg_pending_credits = _round2(sum(pending_credits_jobs) / len(pending_credits_jobs)) if pending_credits_jobs else 0.0
+    avg_pending_credits = (
+        _round2(sum(pending_credits_jobs) / len(pending_credits_jobs)) if pending_credits_jobs else 0.0
+    )
 
     storage_stats = await _build_storage_stats(db)
 
@@ -1159,7 +1152,7 @@ async def admin_dashboard(
     "/admin/storage-stats",
     summary="Storage stats",
     description="Admin storage stats.",
-    responses={200: {"description": "Stats"}}
+    responses={200: {"description": "Stats"}},
 )
 async def storage_stats(
     _admin_user: User = Depends(get_current_admin_user),
@@ -1172,12 +1165,13 @@ async def storage_stats(
     "/public/stats",
     summary="Public stats",
     description="Public platform statistics for landing page.",
-    responses={200: {"description": "Stats"}}
+    responses={200: {"description": "Stats"}},
 )
 @limiter.limit("30/minute")
 async def public_stats(request: Request, db: AsyncSession = Depends(get_db)):
     """Return public stats (total videos generated). No auth required."""
     from sqlalchemy import func
+
     result = await db.execute(select(func.count()).select_from(Job).where(Job.status == "completed"))
     total_videos = result.scalar() or 0
     return {"total_videos": total_videos}

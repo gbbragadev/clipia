@@ -10,7 +10,7 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy import event
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-os.environ.setdefault("ANTHROPIC_API_KEY", "test-key")
+os.environ.setdefault("OPEN_ROUTER_API_KEY", "test-key")
 os.environ.setdefault("PEXELS_API_KEY", "test-key")
 
 from app.api import routes as api_routes
