@@ -381,7 +381,7 @@ def task_generate_script(
         _update_job(job_id, "processing", "scripting", 0.1, detail="Gerando roteiro com IA...")
         script = generate_script(topic, style, duration_target, template_id=template_id)
         job_dir = get_job_dir(job_id)
-        (job_dir / "script.json").write_text(json.dumps(script, ensure_ascii=False, indent=2))
+        (job_dir / "script.json").write_text(json.dumps(script, ensure_ascii=False, indent=2), encoding="utf-8")
 
         # Validate script
         scenes = script.get("scenes", [])
@@ -491,8 +491,8 @@ def task_transcribe_audio(self, audio_path: str, job_id: str) -> dict:
         _update_job(job_id, "processing", "transcribing", 0.45, detail="Transcrevendo com Whisper...")
         words = transcribe_with_timestamps(audio_path)
         job_dir = get_job_dir(job_id)
-        (job_dir / "words.json").write_text(json.dumps(words, ensure_ascii=False))
-        script = json.loads((job_dir / "script.json").read_text())
+        (job_dir / "words.json").write_text(json.dumps(words, ensure_ascii=False), encoding="utf-8")
+        script = json.loads((job_dir / "script.json").read_text(encoding="utf-8"))
 
         if not words:
             raise RuntimeError("Whisper produced no word timestamps")
@@ -636,7 +636,7 @@ def task_finalize(self, video_path: str, job_id: str) -> str:
 
             job_dir = get_job_dir(job_id)
             script_path = job_dir / "script.json"
-            script_data = json.loads(script_path.read_text()) if script_path.exists() else None
+            script_data = json.loads(script_path.read_text(encoding="utf-8")) if script_path.exists() else None
 
             async def _save_script():
                 async with async_session() as session:
@@ -682,10 +682,10 @@ def task_rerender_video(self, job_id: str) -> str:
         script_path = job_dir / "script.json"
         if not script_path.exists():
             raise RuntimeError("script.json not found")
-        script = json.loads(script_path.read_text())
+        script = json.loads(script_path.read_text(encoding="utf-8"))
 
         words_path = job_dir / "words.json"
-        words = json.loads(words_path.read_text()) if words_path.exists() else []
+        words = json.loads(words_path.read_text(encoding="utf-8")) if words_path.exists() else []
 
         audio_path = str(job_dir / "narration.wav")
         if not Path(audio_path).exists():
