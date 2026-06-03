@@ -71,6 +71,7 @@ export interface CompositionData {
   templateId?: string
   layoutType?: LayoutType
   pendingCredits?: number
+  watermark?: string
 }
 
 export const DEFAULT_SUBTITLE_STYLE: SubtitleStyle = {

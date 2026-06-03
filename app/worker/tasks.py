@@ -26,6 +26,17 @@ logger = logging.getLogger(__name__)
 _redis = get_redis()
 
 
+def _read_json_file(path: Path):
+    """Read JSON tolerating legacy non-UTF-8 files (older worker wrote cp1252)."""
+    raw = path.read_bytes()
+    for enc in ("utf-8", "cp1252", "latin-1"):
+        try:
+            return json.loads(raw.decode(enc))
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            continue
+    return json.loads(raw.decode("utf-8", errors="replace"))
+
+
 def _update_job(
     job_id: str,
     status: str,
@@ -180,7 +191,7 @@ def task_generate_images(self, data: dict, job_id: str, template_id: str) -> dic
         script = data.get("script")
         if not script:
             script_path = get_job_dir(job_id) / "script.json"
-            script = json.loads(script_path.read_text(encoding="utf-8"))
+            script = _read_json_file(script_path)
 
         scenes = script.get("scenes", [])
         if not scenes:
@@ -492,7 +503,7 @@ def task_transcribe_audio(self, audio_path: str, job_id: str) -> dict:
         words = transcribe_with_timestamps(audio_path)
         job_dir = get_job_dir(job_id)
         (job_dir / "words.json").write_text(json.dumps(words, ensure_ascii=False), encoding="utf-8")
-        script = json.loads((job_dir / "script.json").read_text(encoding="utf-8"))
+        script = _read_json_file(job_dir / "script.json")
 
         if not words:
             raise RuntimeError("Whisper produced no word timestamps")
@@ -636,7 +647,7 @@ def task_finalize(self, video_path: str, job_id: str) -> str:
 
             job_dir = get_job_dir(job_id)
             script_path = job_dir / "script.json"
-            script_data = json.loads(script_path.read_text(encoding="utf-8")) if script_path.exists() else None
+            script_data = _read_json_file(script_path) if script_path.exists() else None
 
             async def _save_script():
                 async with async_session() as session:
@@ -665,27 +676,28 @@ def task_finalize(self, video_path: str, job_id: str) -> str:
         raise
 
 
-@celery_app.task(name="rerender_video", bind=True, soft_time_limit=90, time_limit=120)
+@celery_app.task(name="rerender_video", bind=True, soft_time_limit=300, time_limit=360)
 def task_rerender_video(self, job_id: str) -> str:
-    """Re-render video with editor changes using FFmpeg + NVENC (~15s).
+    """Re-render the edited video for export.
 
-    Runs in background — user never waits. Previous version stays available.
+    Hybrid engine: Remotion (fiel ao preview) by default, FFmpeg+NVENC as fallback
+    via settings.RENDER_ENGINE. Runs in background — user never waits.
     """
     try:
         if _check_cancelled(job_id):
             return ""
         _update_job(job_id, "rendering", "preparing", 0.05, detail="Preparando arquivos para re-render...")
         job_dir = get_job_dir(job_id)
-        from app.config import BASE_DIR
+        from app.config import BASE_DIR, settings
         from app.services.compositor import compose_short
 
         script_path = job_dir / "script.json"
         if not script_path.exists():
             raise RuntimeError("script.json not found")
-        script = json.loads(script_path.read_text(encoding="utf-8"))
+        script = _read_json_file(script_path)
 
         words_path = job_dir / "words.json"
-        words = json.loads(words_path.read_text(encoding="utf-8")) if words_path.exists() else []
+        words = _read_json_file(words_path) if words_path.exists() else []
 
         audio_path = str(job_dir / "narration.wav")
         if not Path(audio_path).exists():
@@ -715,36 +727,52 @@ def task_rerender_video(self, job_id: str) -> str:
             editor_state = json.loads(editor_state_path.read_text())
             comp_data = editor_state.get("composition", {})
 
-        # Resolve music path
-        music_path = None
-        music_url = comp_data.get("musicUrl")
-        if music_url:
-            music_file = BASE_DIR / "frontend" / "public" / music_url.lstrip("/")
-            if music_file.exists():
-                music_path = str(music_file)
+        if settings.RENDER_ENGINE == "remotion":
+            from app.services.remotion import invoke_remotion_render
 
-        output_path = str(job_dir / "final_edited.mp4")
+            output_path = str(job_dir / "final_remotion.mp4")
+            _update_job(job_id, "rendering", "encoding", 0.2, detail="Renderizando com Remotion...")
+            logger.info(f"Starting Remotion re-render for job {job_id}")
+            invoke_remotion_render(
+                job_id,
+                output_path,
+                on_progress=lambda p: _update_job(
+                    job_id,
+                    "rendering",
+                    "encoding",
+                    0.2 + (p / 100) * 0.7,
+                    detail=f"Renderizando com Remotion... {p}%",
+                ),
+            )
+        else:
+            # FFmpeg+NVENC fallback path
+            music_path = None
+            music_url = comp_data.get("musicUrl")
+            if music_url:
+                music_file = BASE_DIR / "frontend" / "public" / music_url.lstrip("/")
+                if music_file.exists():
+                    music_path = str(music_file)
 
-        _update_job(job_id, "rendering", "encoding", 0.2, detail="Re-renderizando video...")
-        logger.info(f"Starting FFmpeg+NVENC re-render for job {job_id}")
+            output_path = str(job_dir / "final_edited.mp4")
+            _update_job(job_id, "rendering", "encoding", 0.2, detail="Re-renderizando video...")
+            logger.info(f"Starting FFmpeg+NVENC re-render for job {job_id}")
 
-        # Get template layout for re-render
-        from app.templates import get_template
+            from app.templates import get_template
 
-        re_template_id = _redis_hget(f"job:{job_id}", "template_id") or "stock_narration"
-        re_template = get_template(re_template_id)
+            re_template_id = _redis_hget(f"job:{job_id}", "template_id") or "stock_narration"
+            re_template = get_template(re_template_id)
 
-        compose_short(
-            scenes=script.get("scenes", []),
-            media_paths=media_paths,
-            audio_path=audio_path,
-            words=words,
-            output_path=output_path,
-            music_path=music_path,
-            music_volume=comp_data.get("musicVolume", 0.15),
-            subtitle_style=comp_data.get("subtitleStyle"),
-            layout=re_template.layout,
-        )
+            compose_short(
+                scenes=script.get("scenes", []),
+                media_paths=media_paths,
+                audio_path=audio_path,
+                words=words,
+                output_path=output_path,
+                music_path=music_path,
+                music_volume=comp_data.get("musicVolume", 0.15),
+                subtitle_style=comp_data.get("subtitleStyle"),
+                layout=re_template.layout,
+            )
 
         _update_job(job_id, "rendering", "finalizing", 0.9, detail="Finalizando re-render...")
 

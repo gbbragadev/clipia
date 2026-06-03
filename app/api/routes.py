@@ -631,7 +631,7 @@ async def save_editor_state(
         if req.editor_state:
             # Save full editor_state for re-render (music, subtitleStyle, overlays)
             state_path = job_dir / "editor_state.json"
-            state_path.write_text(json.dumps(req.editor_state, ensure_ascii=False, indent=2))
+            state_path.write_text(json.dumps(req.editor_state, ensure_ascii=False, indent=2), encoding="utf-8")
 
             # Sync scenes/words to their own files
             comp = req.editor_state.get("composition", {})

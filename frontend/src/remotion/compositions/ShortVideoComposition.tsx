@@ -22,6 +22,24 @@ function getTransitionPresentation(type: TransitionType) {
   }
 }
 
+const Watermark: React.FC<{ text: string }> = ({ text }) => (
+  <div
+    style={{
+      position: 'absolute',
+      bottom: 40,
+      right: 30,
+      fontSize: 22,
+      fontFamily: 'Montserrat, sans-serif',
+      fontWeight: 600,
+      color: 'rgba(255, 255, 255, 0.55)',
+      textShadow: '0 1px 3px rgba(0, 0, 0, 0.6)',
+      pointerEvents: 'none',
+    }}
+  >
+    {text}
+  </div>
+)
+
 export const ShortVideoComposition: React.FC<CompositionData> = ({
   scenes,
   words,
@@ -33,6 +51,7 @@ export const ShortVideoComposition: React.FC<CompositionData> = ({
   musicVolume,
   isRendering,
   layoutType,
+  watermark,
 }) => {
   const { fps, width, height, durationInFrames } = useVideoConfig()
   const layout = (layoutType || 'fullscreen') as LayoutType
@@ -55,6 +74,7 @@ export const ShortVideoComposition: React.FC<CompositionData> = ({
         </div>
         {audioUrl && <Html5Audio src={audioUrl} />}
         {musicUrl && <Html5Audio src={musicUrl} volume={musicVolume ?? 0.15} />}
+        {watermark && <Watermark text={watermark} />}
       </AbsoluteFill>
     )
   }
@@ -77,6 +97,7 @@ export const ShortVideoComposition: React.FC<CompositionData> = ({
         {audioUrl && <Html5Audio src={audioUrl} />}
         {musicUrl && <Html5Audio src={musicUrl} volume={musicVolume ?? 0.15} />}
         {isRendering && <SubtitleOverlay words={words} style={subtitleStyle} />}
+        {watermark && <Watermark text={watermark} />}
       </AbsoluteFill>
     )
   }
@@ -150,6 +171,7 @@ export const ShortVideoComposition: React.FC<CompositionData> = ({
         </Sequence>
       ))}
 
+      {watermark && <Watermark text={watermark} />}
     </AbsoluteFill>
   )
 }

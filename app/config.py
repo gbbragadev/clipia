@@ -38,6 +38,10 @@ class Settings(BaseSettings):
     WATERMARK_ENABLED: bool = True
     WATERMARK_TEXT: str = "clipia.com.br"
 
+    # Render engine para o export editado (hibrido: FFmpeg na geracao inicial, Remotion no export)
+    RENDER_ENGINE: str = "remotion"  # "remotion" | "ffmpeg"
+    REMOTION_RENDER_TIMEOUT: int = 300
+
     # GPU
     DEVICE: str = "cuda"
     WHISPER_MODEL_SIZE: str = "large-v3"
