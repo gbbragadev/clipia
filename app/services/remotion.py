@@ -73,11 +73,15 @@ def build_composition_props(job_id: str, backend_url: str | None = None) -> dict
     words = words_raw["words"] if isinstance(words_raw, dict) and "words" in words_raw else words_raw
 
     media_dir = job_dir / "media"
+    images_dir = job_dir / "images"
     bg = media_dir / "background.mp4"
     if bg.exists():
         media_files = [bg]
     else:
         media_files = sorted(media_dir.glob("scene_*.mp4"), key=lambda p: int(p.stem.split("_")[1]))
+        if not media_files and images_dir.exists():
+            # Jobs ai_image (novelinha): cenas sao PNGs 1-based gerados pelo worker
+            media_files = sorted(images_dir.glob("scene_*.png"), key=lambda p: int(p.stem.split("_")[1]))
 
     def url(rel: str) -> str:
         return f"{backend}/storage/jobs/{job_id}/{rel}"
@@ -97,7 +101,7 @@ def build_composition_props(job_id: str, backend_url: str | None = None) -> dict
         "scenes": scenes,
         "words": words,
         "audioUrl": url("narration.wav"),
-        "mediaUrls": [url(f"media/{p.name}") for p in media_files],
+        "mediaUrls": [url(f"{p.parent.name}/{p.name}") for p in media_files],
         "subtitleStyle": DEFAULT_SUBTITLE_STYLE,
         "voiceConfig": DEFAULT_VOICE_CONFIG,
         "fps": settings.VIDEO_FPS,

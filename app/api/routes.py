@@ -567,6 +567,12 @@ async def get_composition(
                 if scene_file.exists():
                     media_urls.append(f"/storage/jobs/{job_id}/media/scene_{i}.mp4")
 
+    if not media_urls:
+        images_dir = job_dir / "images"
+        if images_dir.exists():
+            for p in sorted(images_dir.glob("scene_*.png"), key=lambda x: int(x.stem.split("_")[1])):
+                media_urls.append(f"/storage/jobs/{job_id}/images/{p.name}")
+
     audio_url = f"/storage/jobs/{job_id}/narration.wav" if (job_dir / "narration.wav").exists() else ""
 
     # Load editor state from DB if exists

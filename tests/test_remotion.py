@@ -69,3 +69,25 @@ def test_build_props_without_editor_state_uses_defaults(tmp_path, monkeypatch):
 
     assert props["overlays"] == []
     assert props["subtitleStyle"]["preset"] == "minimal"
+
+
+def test_build_props_falls_back_to_ai_images(tmp_path, monkeypatch):
+    monkeypatch.setattr(settings, "STORAGE_DIR", tmp_path)
+    job_dir = tmp_path / "jobs" / "job4"
+    (job_dir / "images").mkdir(parents=True)
+    (job_dir / "media").mkdir()
+    (job_dir / "script.json").write_text(
+        json.dumps({"title": "T", "scenes": [{"text": "a", "duration_hint": 5}, {"text": "b", "duration_hint": 5}]}),
+        encoding="utf-8",
+    )
+    (job_dir / "words.json").write_text(json.dumps([]), encoding="utf-8")
+    # imagens 1-based como o worker grava (tasks.py: scene_{i+1}.png)
+    (job_dir / "images" / "scene_1.png").write_bytes(b"x")
+    (job_dir / "images" / "scene_2.png").write_bytes(b"x")
+
+    props = build_composition_props("job4", backend_url="http://x:8005")
+
+    assert props["mediaUrls"] == [
+        "http://x:8005/storage/jobs/job4/images/scene_1.png",
+        "http://x:8005/storage/jobs/job4/images/scene_2.png",
+    ]
