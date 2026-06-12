@@ -18,12 +18,13 @@ interface PlatformCaption {
 }
 
 export function ExportPanel({ onClose }: { onClose: () => void }) {
-  const { composition, jobId } = useEditor()
+  const { composition, jobId, narrationStale, setActivePanel } = useEditor()
   const { user } = useAuth()
   const [renderStatus, setRenderStatus] = useState<RenderStatus>('ready')
   const [error, setError] = useState<string | null>(null)
   const [copiedIndex, setCopiedIndex] = useState<number | null>(null)
   const [rendering, setRendering] = useState(false)
+  const [staleAccepted, setStaleAccepted] = useState(false)
 
   const generateCaptions = useCallback((): PlatformCaption[] => {
     const title = composition?.title || 'Meu video'
@@ -101,7 +102,7 @@ export function ExportPanel({ onClose }: { onClose: () => void }) {
 
   // Auto-trigger render on open
   useEffect(() => {
-    handleRender()
+    if (!narrationStale) handleRender()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
@@ -135,6 +136,30 @@ export function ExportPanel({ onClose }: { onClose: () => void }) {
         </button>
 
         <h2 style={{ color: '#E8E8E8', margin: '0 0 20px', fontSize: 20 }}>Exportar Vídeo</h2>
+
+        {narrationStale && !staleAccepted && (
+          <div style={{
+            background: 'rgba(245,158,11,0.1)', border: '1px solid rgba(245,158,11,0.3)',
+            borderRadius: 8, padding: 12, marginBottom: 12, fontSize: 13, color: '#fbbf24',
+          }}>
+            O texto das cenas mudou desde a última narração. Se exportar agora, o áudio e as
+            legendas NÃO vão refletir o novo texto.
+            <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
+              <button
+                onClick={() => { setActivePanel('voice'); onClose() }}
+                style={{ background: '#6C5CE7', color: '#fff', border: 'none', borderRadius: 6, padding: '6px 12px', fontSize: 12, cursor: 'pointer' }}
+              >
+                Regenerar narração primeiro
+              </button>
+              <button
+                onClick={() => { setStaleAccepted(true); handleRender() }}
+                style={{ background: 'rgba(255,255,255,0.08)', color: '#ccc', border: '1px solid rgba(255,255,255,0.15)', borderRadius: 6, padding: '6px 12px', fontSize: 12, cursor: 'pointer' }}
+              >
+                Exportar mesmo assim
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* Cost banner */}
         {(composition?.pendingCredits ?? 0) > 0 && (
@@ -177,7 +202,7 @@ export function ExportPanel({ onClose }: { onClose: () => void }) {
                 background: '#6C5CE7',
                 animation: 'pulse 1.5s ease-in-out infinite',
               }} />
-              <span style={{ color: '#a78bfa' }}>Atualizando com suas edições... (~15s)</span>
+              <span style={{ color: '#a78bfa' }}>Atualizando com suas edições... (~2 min)</span>
               <style>{`@keyframes pulse { 0%,100% { opacity: 0.4 } 50% { opacity: 1 } }`}</style>
               </>
           )}

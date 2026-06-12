@@ -22,6 +22,7 @@ interface EditorContextValue {
   isPlaying: boolean
   playerRef: React.RefObject<PlayerRef | null>
   totalFrames: number
+  narrationStale: boolean
 
   // Actions
   selectScene: (index: number) => void
@@ -63,6 +64,8 @@ export function EditorProvider({ jobId, children }: { jobId: string; children: R
 
   const playerRef = useRef<PlayerRef | null>(null)
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const [narrationStale, setNarrationStale] = useState(false)
+  const baselineTextsRef = useRef<string[]>([])
 
   // Undo/redo
   const [history, setHistory] = useState<CompositionData[]>([])
@@ -79,6 +82,7 @@ export function EditorProvider({ jobId, children }: { jobId: string; children: R
     fetchComposition(jobId)
       .then((data) => {
         setComposition(data)
+        baselineTextsRef.current = data.scenes.map((s: Scene) => s.text)
         setHistory([data])
         setHistoryIndex(0)
         historyIndexRef.current = 0
@@ -148,6 +152,9 @@ export function EditorProvider({ jobId, children }: { jobId: string; children: R
   const selectScene = useCallback((index: number) => setSelectedSceneIndex(index), [])
 
   const updateScene = useCallback((index: number, updates: Partial<Scene>) => {
+    if (updates.text !== undefined && updates.text !== baselineTextsRef.current[index]) {
+      setNarrationStale(true)
+    }
     updateComposition((prev) => {
       const newScenes = [...prev.scenes]
       newScenes[index] = { ...newScenes[index], ...updates }
@@ -169,11 +176,15 @@ export function EditorProvider({ jobId, children }: { jobId: string; children: R
 
   // Audio update (after TTS regeneration)
   const updateAudio = useCallback((words: Array<Record<string, unknown>>, audioUrl: string) => {
-    updateComposition((prev) => ({
-      ...prev,
-      words: words as unknown as CompositionData['words'],
-      audioUrl,
-    }))
+    updateComposition((prev) => {
+      baselineTextsRef.current = prev.scenes.map((s) => s.text)
+      return {
+        ...prev,
+        words: words as unknown as CompositionData['words'],
+        audioUrl,
+      }
+    })
+    setNarrationStale(false)
   }, [updateComposition])
 
   // Music update
@@ -262,7 +273,7 @@ export function EditorProvider({ jobId, children }: { jobId: string; children: R
 
   const value: EditorContextValue = {
     jobId, composition, loading, error, selectedSceneIndex, activePanel, panelCollapsed,
-    dirty, saving, playerFrame, isPlaying, playerRef, totalFrames,
+    dirty, saving, playerFrame, isPlaying, playerRef, totalFrames, narrationStale,
     selectScene, setActivePanel, updateScene, updateSubtitleStyle, updateVoiceConfig,
     updateAudio, updateMusic, addOverlay, removeOverlay, updateOverlay, getSceneStartFrame,
     setPlayerFrame, seekToFrame, togglePlayback, togglePanel,
