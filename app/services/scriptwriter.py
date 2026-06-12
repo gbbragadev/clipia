@@ -110,6 +110,7 @@ def generate_script(topic: str, style: str, duration_target: int, template_id: s
 
     # Validate and fix duration_hints
     script = _fix_durations(script, duration_target)
+    script = _apply_default_transitions(script)
 
     # Validate visual_hint presence for templates that require it
     if template.script.needs_visual_hint:
@@ -142,4 +143,12 @@ def _fix_durations(script: dict, target: int) -> dict:
         scenes[-1]["duration_hint"] += diff
 
     logger.info(f"Fixed durations: {total}s -> {target}s (ratio={ratio:.2f})")
+    return script
+
+
+def _apply_default_transitions(script: dict) -> dict:
+    """Cenas novas entram com fade por default (cena 0 nao tem transicao de entrada)."""
+    for i, scene in enumerate(script.get("scenes", [])):
+        if i > 0 and not scene.get("transition"):
+            scene["transition"] = "fade"
     return script

@@ -28,3 +28,25 @@ def test_generate_script_returns_valid_structure():
     assert "scenes" in result
     assert len(result["scenes"]) >= 1
     assert "keywords_en" in result["scenes"][0]
+
+
+def test_generate_script_applies_default_fade_transitions():
+    fake = json.dumps(
+        {
+            "title": "T",
+            "narration": "abc",
+            "scenes": [
+                {"text": "a", "keywords_en": [], "duration_hint": 10},
+                {"text": "b", "keywords_en": [], "duration_hint": 10},
+                {"text": "c", "keywords_en": [], "duration_hint": 10},
+            ],
+            "hashtags": [],
+        }
+    )
+    with patch("app.services.scriptwriter.complete_text", return_value=fake):
+        result = generate_script("tema", "educational", 30)
+
+    scenes = result["scenes"]
+    assert "transition" not in scenes[0] or scenes[0].get("transition") in (None, "none")
+    assert scenes[1]["transition"] == "fade"
+    assert scenes[2]["transition"] == "fade"
