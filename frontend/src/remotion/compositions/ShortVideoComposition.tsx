@@ -140,7 +140,7 @@ export const ShortVideoComposition: React.FC<CompositionData> = ({
 
           elements.push(
             <TransitionSeries.Sequence key={`seq-${i}`} durationInFrames={sf.duration}>
-              {i < mediaUrls.length && <SceneClip mediaUrl={mediaUrls[i]} />}
+              {i < mediaUrls.length && <SceneClip mediaUrl={mediaUrls[i]} sceneIndex={i} durationInFrames={sf.duration} />}
             </TransitionSeries.Sequence>
           )
 
