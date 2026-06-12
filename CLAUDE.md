@@ -97,7 +97,7 @@ LD_LIBRARY_PATH=/usr/local/lib/ollama/cuda_v12:$LD_LIBRARY_PATH \
 - **TTS async**: No FastAPI usar `synthesize_narration_async()`. A versao sync (`synthesize_narration`) e so para Celery worker.
 - **Whisper CUDA**: `transcriber.py` pre-carrega `libcublas.so.12` via `ctypes.cdll.LoadLibrary` de `/usr/local/lib/ollama/cuda_v12/`. Sem isso, Whisper falha silenciosamente.
 - **Job status**: Redis tem status real-time, Postgres pode estar stale. O endpoint `/jobs` cruza ambos.
-- **Export nao re-renderiza**: O `/render` atual so copia `final.mp4` — NAO re-compoe com edicoes do editor. Precisa implementar re-render real via Celery.
+- **Render hibrido (Fase 2+)**: geracao inicial usa FFmpeg/NVENC (~15s); o export editado (`POST /render` → `task_rerender_video`) renderiza via **Remotion** (`app/services/remotion.py` + `frontend/scripts/render-composition.mjs`, ~105s) para fidelidade editor==export. Flag `RENDER_ENGINE` (remotion|ffmpeg) em `app/config.py`.
 - **Remotion Player ref**: Carregado via dynamic import SSR:false. Polling 100ms sincroniza playerFrame.
 
 Sempre responder em portugues (pt-BR).
