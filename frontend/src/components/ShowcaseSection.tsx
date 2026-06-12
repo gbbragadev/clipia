@@ -1,46 +1,13 @@
 'use client'
 
-import { useRef, useCallback, useEffect } from 'react'
-import ShowcasePretextOverlay from '@/components/ShowcasePretextOverlay'
+import { useRef, useCallback, useEffect, useState } from 'react'
 import { CinematicSection } from './ui/CinematicSection'
 import { GlowCard } from './ui/GlowCard'
 import { PretextHeading } from './ui/PretextHeading'
 import Link from 'next/link'
+import { loadShowcase, type ShowcaseManifest, type ShowcaseVideo } from '@/lib/showcase'
 
-const SHOWCASE_ITEMS = [
-  {
-    title: '5 curiosidades sobre o oceano profundo',
-    template: 'Narração + Stock',
-    gradient: 'from-blue-900/60 to-cyan-900/60',
-    icon: '🌊',
-    video: '/showcase/ocean-curiosidades.mp4',
-    phrase: 'O oceano cobre mais de 70% da superficie da Terra',
-    captionStyle: 'tiktok' as const,
-    captionAccent: '#22d3ee',
-  },
-  {
-    title: 'Como a IA está mudando o mundo',
-    template: 'Narração + Stock',
-    gradient: 'from-purple-900/60 to-indigo-900/60',
-    icon: '🤖',
-    video: '/showcase/ia-revolucao.mp4',
-    phrase: 'Inteligencia artificial ja supera humanos em tarefas complexas',
-    captionStyle: 'impact' as const,
-    captionAccent: '#c084fc',
-  },
-  {
-    title: 'Fatos surpreendentes sobre o cérebro',
-    template: 'Narração + Stock',
-    gradient: 'from-amber-900/60 to-orange-900/60',
-    icon: '🧠',
-    video: '/showcase/cerebro-fatos.mp4',
-    phrase: 'Seu cerebro processa 60 mil pensamentos por dia',
-    captionStyle: 'karaoke' as const,
-    captionAccent: '#fb923c',
-  },
-]
-
-function ShowcaseCard({ item, featured = false }: { item: (typeof SHOWCASE_ITEMS)[number], featured?: boolean }) {
+function ShowcaseCard({ item, featured = false }: { item: ShowcaseVideo; featured?: boolean }) {
   const videoRef = useRef<HTMLVideoElement>(null)
   const cardRef = useRef<HTMLDivElement>(null)
 
@@ -48,13 +15,8 @@ function ShowcaseCard({ item, featured = false }: { item: (typeof SHOWCASE_ITEMS
     const card = cardRef.current
     const video = videoRef.current
     if (!card || !video) return
-
     const observer = new IntersectionObserver(
-      ([entry]) => {
-        if (entry.isIntersecting) {
-          video.play().catch(() => {})
-        }
-      },
+      ([entry]) => { if (entry.isIntersecting) video.play().catch(() => {}) },
       { threshold: 0.3 },
     )
     observer.observe(card)
@@ -63,62 +25,41 @@ function ShowcaseCard({ item, featured = false }: { item: (typeof SHOWCASE_ITEMS
 
   const handleEnter = useCallback(() => {
     const v = videoRef.current
-    if (v) {
-      v.muted = false
-      v.volume = 0.6
-      v.play().catch(() => {})
-    }
+    if (v) { v.muted = false; v.volume = 0.6; v.play().catch(() => {}) }
   }, [])
-
-  const handleLeave = useCallback(() => {
-    const v = videoRef.current
-    if (v) {
-      v.muted = true
-    }
-  }, [])
+  const handleLeave = useCallback(() => { const v = videoRef.current; if (v) v.muted = true }, [])
 
   return (
     <GlowCard className={`h-full ${featured ? 'md:col-span-2' : ''}`}>
       <div
         ref={cardRef}
-        className="w-full h-full relative cursor-pointer"
+        className="w-full h-full relative cursor-pointer snap-center shrink-0"
         onMouseEnter={handleEnter}
         onMouseLeave={handleLeave}
         onTouchStart={handleEnter}
         onTouchEnd={handleLeave}
       >
         <div className="relative w-full h-full aspect-[9/16] md:aspect-auto md:min-h-[500px] overflow-hidden">
-          {item.video ? (
-            <video
-              ref={videoRef}
-              autoPlay
-              muted
-              loop
-              playsInline
-              preload="auto"
-              className="w-full h-full object-cover"
-              src={item.video}
-            />
-          ) : (
-            <div className={`w-full h-full bg-gradient-to-br ${item.gradient} flex flex-col items-center justify-center relative`}>
-              <span className="text-6xl opacity-30 group-hover:opacity-50 transition">{item.icon}</span>
-              <ShowcasePretextOverlay phrase={item.phrase} style={item.captionStyle} accent={item.captionAccent} />
-            </div>
-          )}
-
-          {item.video && (
-            <div className="absolute top-4 right-4 z-10 opacity-0 group-hover:opacity-100 transition">
-              <div className="w-10 h-10 rounded-full bg-black/50 backdrop-blur-md flex items-center justify-center border border-white/10">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="white">
-                  <polygon points="11,5 6,9 2,9 2,15 6,15 11,19" />
-                  <path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" />
-                </svg>
-              </div>
-            </div>
-          )}
-
+          <video
+            ref={videoRef}
+            autoPlay muted loop playsInline preload="metadata"
+            className="w-full h-full object-cover"
+            src={item.video}
+          />
+          {/* Badge: estilo de legenda */}
+          <div className="absolute top-4 left-4 z-10">
+            <span
+              className="text-[10px] uppercase tracking-wider font-bold px-2 py-1 rounded-md bg-black/50 backdrop-blur-md border border-white/10"
+              style={{ color: item.captionAccent }}
+            >
+              legenda: {item.captionStyle}
+            </span>
+          </div>
           <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-[#0f0b1a] via-[#0f0b1a]/80 to-transparent p-6 pt-24">
             <h3 className={`font-bold text-white leading-tight ${featured ? 'text-2xl' : 'text-lg'}`}>{item.title}</h3>
+            {item.beforeScript && (
+              <p className="mt-2 text-xs text-white/50 italic">Prompt: &ldquo;{item.beforeScript}&rdquo;</p>
+            )}
             <span className="inline-block mt-3 text-xs px-3 py-1 rounded-full bg-white/10 text-white/80 backdrop-blur-md border border-white/5">
               {item.template}
             </span>
@@ -130,22 +71,48 @@ function ShowcaseCard({ item, featured = false }: { item: (typeof SHOWCASE_ITEMS
 }
 
 export default function ShowcaseSection() {
+  const [manifest, setManifest] = useState<ShowcaseManifest | null>(null)
+  const [niche, setNiche] = useState<string>('all')
+
+  useEffect(() => { loadShowcase().then(setManifest).catch(() => {}) }, [])
+
+  if (!manifest) return null
+  const videos = niche === 'all' ? manifest.videos : manifest.videos.filter((v) => v.niche === niche)
+
   return (
     <CinematicSection background="none" spacing="xl" reveal="fade-up" className="border-b border-white/5">
-      <div className="text-center mb-16 max-w-3xl mx-auto">
-        <PretextHeading text="O que a IA cria em 2 minutos" animation="blur-focus" color="#ffffff" className="mb-6" />
+      <div className="text-center mb-10 max-w-3xl mx-auto">
+        <PretextHeading text="O que a IA cria em minutos" animation="blur-focus" color="#ffffff" className="mb-6" />
         <p className="text-xl text-slate-400">
-          Você digita a ideia. A IA escreve, narra e edita com legendas dinâmicas.
+          Vídeos reais gerados e editados no ClipIA. Passe o mouse para ouvir.
         </p>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 max-w-6xl mx-auto">
-        {SHOWCASE_ITEMS.map((item, i) => (
-          <ShowcaseCard key={item.title} item={item} featured={i === 0} />
+      {/* Filtro por nicho — scroll horizontal no mobile */}
+      <div className="flex gap-2 justify-start md:justify-center mb-10 overflow-x-auto px-4 snap-x [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+        {[{ id: 'all', label: 'Todos', icon: '✦' }, ...manifest.niches].map((n) => (
+          <button
+            key={n.id}
+            onClick={() => setNiche(n.id)}
+            className={`shrink-0 snap-start text-sm px-4 py-2 rounded-full border transition-all ${
+              niche === n.id
+                ? 'bg-purple-600/30 text-purple-200 border-purple-500/40'
+                : 'bg-white/5 text-white/60 border-white/10 hover:bg-white/10'
+            }`}
+          >
+            {n.icon} {n.label}
+          </button>
         ))}
       </div>
 
-      {process.env.NEXT_PUBLIC_PUBLIC_SIGNUP === "true" && (
+      {/* Mobile: carrossel snap; Desktop: grid */}
+      <div className="flex md:grid md:grid-cols-2 lg:grid-cols-3 gap-6 max-w-6xl mx-auto overflow-x-auto md:overflow-visible snap-x snap-mandatory px-4 md:px-0 [&>*]:w-[80vw] md:[&>*]:w-auto">
+        {videos.map((item, i) => (
+          <ShowcaseCard key={item.id} item={item} featured={i === 0 && niche === 'all'} />
+        ))}
+      </div>
+
+      {process.env.NEXT_PUBLIC_PUBLIC_SIGNUP === 'true' && (
         <div className="text-center mt-16">
           <Link
             href="/auth/register"
