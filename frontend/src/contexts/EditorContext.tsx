@@ -259,6 +259,7 @@ export function EditorProvider({ jobId, children }: { jobId: string; children: R
     historyIndexRef.current = newIndex
     setHistoryIndex(newIndex)
     setComposition(history[newIndex])
+    setNarrationStale(history[newIndex].scenes.some((s, i) => s.text !== baselineTextsRef.current[i]))
     setDirty(true)
   }, [canUndo, historyIndex, history])
 
@@ -268,6 +269,7 @@ export function EditorProvider({ jobId, children }: { jobId: string; children: R
     historyIndexRef.current = newIndex
     setHistoryIndex(newIndex)
     setComposition(history[newIndex])
+    setNarrationStale(history[newIndex].scenes.some((s, i) => s.text !== baselineTextsRef.current[i]))
     setDirty(true)
   }, [canRedo, historyIndex, history])
 

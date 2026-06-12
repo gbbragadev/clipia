@@ -32,6 +32,7 @@ from app.observability import record_credit_metric
 from app.pricing import get_generation_credit_cost
 from app.redis_pool import get_redis
 from app.services.llm import complete_text, strip_code_fences
+from app.services.remotion import scene_sort_key
 from app.utils.files import bytes_to_gb, path_size_bytes
 from app.utils.locks import get_lock
 from app.worker.tasks import dispatch_pipeline
@@ -570,7 +571,7 @@ async def get_composition(
     if not media_urls:
         images_dir = job_dir / "images"
         if images_dir.exists():
-            for p in sorted(images_dir.glob("scene_*.png"), key=lambda x: int(x.stem.split("_")[1])):
+            for p in sorted(images_dir.glob("scene_*.png"), key=scene_sort_key):
                 media_urls.append(f"/storage/jobs/{job_id}/images/{p.name}")
 
     audio_url = f"/storage/jobs/{job_id}/narration.wav" if (job_dir / "narration.wav").exists() else ""

@@ -59,6 +59,14 @@ def _backend_url(explicit: str | None = None) -> str:
     return explicit or settings.BACKEND_URL or "http://127.0.0.1:8005"
 
 
+def scene_sort_key(p: Path) -> int:
+    """Sort key para scene_N.* tolerante a nomes fora do padrao (vao para o fim)."""
+    try:
+        return int(p.stem.split("_")[1])
+    except (ValueError, IndexError):
+        return 10**9
+
+
 def build_composition_props(job_id: str, backend_url: str | None = None) -> dict:
     """Build the Remotion CompositionData for a job.
 
@@ -78,10 +86,10 @@ def build_composition_props(job_id: str, backend_url: str | None = None) -> dict
     if bg.exists():
         media_files = [bg]
     else:
-        media_files = sorted(media_dir.glob("scene_*.mp4"), key=lambda p: int(p.stem.split("_")[1]))
+        media_files = sorted(media_dir.glob("scene_*.mp4"), key=scene_sort_key)
         if not media_files and images_dir.exists():
             # Jobs ai_image (novelinha): cenas sao PNGs 1-based gerados pelo worker
-            media_files = sorted(images_dir.glob("scene_*.png"), key=lambda p: int(p.stem.split("_")[1]))
+            media_files = sorted(images_dir.glob("scene_*.png"), key=scene_sort_key)
 
     def url(rel: str) -> str:
         return f"{backend}/storage/jobs/{job_id}/{rel}"
