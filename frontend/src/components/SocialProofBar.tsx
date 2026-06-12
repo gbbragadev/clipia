@@ -22,8 +22,8 @@ export default function SocialProofBar() {
     <CinematicSection background="none" spacing="md" className="border-b border-white/5">
       <div className="grid grid-cols-1 md:grid-cols-3 gap-12 md:gap-8 divide-y md:divide-y-0 md:divide-x divide-white/10">
         <AnimatedCounter value={totalVideos} suffix="+" label="Vídeos criados" />
-        <AnimatedCounter value={2} suffix="min" label="Tempo médio" />
-        <AnimatedCounter value={3} suffix="" label="Vozes pt-BR" />
+        <AnimatedCounter value={5} suffix="" label="Estilos de legenda animada" />
+        <AnimatedCounter value={4} suffix="" label="Vozes pt-BR (IA)" />
       </div>
     </CinematicSection>
   )
