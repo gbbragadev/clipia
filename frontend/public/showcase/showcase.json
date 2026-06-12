@@ -1,0 +1,52 @@
+{
+  "niches": [
+    { "id": "educational", "label": "Educativo", "icon": "🧠" },
+    { "id": "entertainment", "label": "Entretenimento", "icon": "🎬" },
+    { "id": "tips", "label": "Dicas", "icon": "💡" },
+    { "id": "story", "label": "Histórias", "icon": "📖" }
+  ],
+  "videos": [
+    {
+      "id": "ocean",
+      "title": "5 curiosidades sobre o oceano profundo",
+      "template": "Narração + Stock",
+      "niche": "educational",
+      "video": "/showcase/ocean-curiosidades.mp4",
+      "phrase": "O oceano cobre mais de 70% da superficie da Terra",
+      "captionStyle": "tiktok",
+      "captionAccent": "#22d3ee",
+      "gradient": "from-blue-900/60 to-cyan-900/60",
+      "icon": "🌊",
+      "hero": true,
+      "beforeScript": "Você sabia que conhecemos menos de 5% dos oceanos?"
+    },
+    {
+      "id": "ia",
+      "title": "Como a IA está mudando o mundo",
+      "template": "Narração + Stock",
+      "niche": "educational",
+      "video": "/showcase/ia-revolucao.mp4",
+      "phrase": "Inteligencia artificial ja supera humanos em tarefas complexas",
+      "captionStyle": "impact",
+      "captionAccent": "#c084fc",
+      "gradient": "from-purple-900/60 to-indigo-900/60",
+      "icon": "🤖",
+      "hero": true,
+      "beforeScript": "A IA não vai te substituir. Mas quem usa IA, vai."
+    },
+    {
+      "id": "cerebro",
+      "title": "Fatos surpreendentes sobre o cérebro",
+      "template": "Narração + Stock",
+      "niche": "educational",
+      "video": "/showcase/cerebro-fatos.mp4",
+      "phrase": "Seu cerebro processa 60 mil pensamentos por dia",
+      "captionStyle": "karaoke",
+      "captionAccent": "#fb923c",
+      "gradient": "from-amber-900/60 to-orange-900/60",
+      "icon": "🧠",
+      "hero": true,
+      "beforeScript": "Seu cérebro mente para você o dia inteiro."
+    }
+  ]
+}
