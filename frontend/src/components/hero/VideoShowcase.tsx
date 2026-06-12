@@ -136,8 +136,6 @@ export default function VideoShowcase() {
       .catch(() => {})
   }, [])
 
-  if (reels.length === 0) return null
-
   useEffect(() => {
     const el = scrollRef.current
     if (!el) return
@@ -151,6 +149,7 @@ export default function VideoShowcase() {
   }, [reels.length])
 
   useEffect(() => {
+    if (reels.length === 0) return
     const id = setInterval(() => {
       if (userScrolled.current) { userScrolled.current = false; return }
       const el = scrollRef.current
@@ -160,6 +159,9 @@ export default function VideoShowcase() {
     }, 5500)
     return () => clearInterval(id)
   }, [activeIdx, reels.length])
+
+  // Early-return SO depois de todos os hooks (Rules of Hooks — React #310)
+  if (reels.length === 0) return null
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', position: 'relative' }}>
