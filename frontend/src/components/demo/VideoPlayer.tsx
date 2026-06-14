@@ -8,7 +8,7 @@ export default function VideoPlayer({ downloadUrl }: Props) {
   return (
     <div className="mt-6 space-y-4">
       {/* Phone frame wrapper */}
-      <div className="mx-auto w-full max-w-[280px] rounded-[2rem] border-4 border-gray-700/50 bg-black overflow-hidden shadow-2xl shadow-purple-500/10">
+      <div className="w-full max-w-[280px] mx-auto rounded-[2rem] border-4 border-gray-700/50 bg-black overflow-hidden shadow-2xl shadow-purple-500/10">
         <video
           src={downloadUrl}
           controls

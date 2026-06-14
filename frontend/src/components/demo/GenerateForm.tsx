@@ -95,7 +95,7 @@ export default function GenerateForm({ onGenerate, isGenerating }: Props) {
         required
         className="w-full px-4 py-3 rounded-lg bg-white/5 border border-gray-700 text-white placeholder-gray-500 focus:border-purple-500 focus:outline-none transition"
       />
-      <div className="flex gap-4">
+      <div className="flex flex-col sm:flex-row gap-2 sm:gap-4">
         <CustomSelect value={style} onChange={setStyle} />
         <div className="flex-1 flex items-center gap-3">
           <input
