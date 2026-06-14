@@ -38,6 +38,15 @@ class Settings(BaseSettings):
     WATERMARK_ENABLED: bool = True
     WATERMARK_TEXT: str = "clipia.com.br"
 
+    # Outro sting de marca (selo de ~1.5s no final de cada video)
+    OUTRO_ENABLED: bool = True
+    OUTRO_DURATION: float = 1.5  # piso em segundos; cresce se o whisper for maior
+    OUTRO_BLUR_SIGMA: float = 16.0
+    OUTRO_DARKEN: float = 0.30  # delta de brightness aplicado ao frame congelado
+    OUTRO_LOGO_WIDTH: int = 520  # largura do logo no selo (px)
+    OUTRO_AUDIO_PATH: Path = BASE_DIR / "app" / "assets" / "outro" / "whisper.wav"
+    OUTRO_LOGO_PATH: Path = BASE_DIR / "app" / "assets" / "outro" / "logo.png"
+
     # Render engine para o export editado (hibrido: FFmpeg na geracao inicial, Remotion no export)
     RENDER_ENGINE: str = "remotion"  # "remotion" | "ffmpeg"
     REMOTION_RENDER_TIMEOUT: int = 300
