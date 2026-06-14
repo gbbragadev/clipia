@@ -4,7 +4,18 @@ import { useState, useRef, useEffect } from 'react'
 import ReelSubtitleCanvas from './ReelSubtitleCanvas'
 import { loadShowcase } from '@/lib/showcase'
 
-const PHONE_HEIGHT = 497
+const PHONE_RATIO = 497 / 280 // ~1.775
+
+function usePhoneSize(maxW = 280) {
+  const [w, setW] = useState(maxW)
+  useEffect(() => {
+    const calc = () => setW(Math.min(maxW, Math.round(window.innerWidth * 0.82)))
+    calc()
+    window.addEventListener('resize', calc)
+    return () => window.removeEventListener('resize', calc)
+  }, [maxW])
+  return { phoneW: w, phoneH: Math.round(w * PHONE_RATIO) }
+}
 
 interface ReelData {
   title: string
@@ -13,7 +24,7 @@ interface ReelData {
   words: string[]
 }
 
-function Reel({ reel, isActive, index, muted }: { reel: ReelData; isActive: boolean; index: number; muted: boolean }) {
+function Reel({ reel, isActive, index, muted, height }: { reel: ReelData; isActive: boolean; index: number; muted: boolean; height: number }) {
   const [wordIdx, setWordIdx] = useState(0)
   const videoRef = useRef<HTMLVideoElement>(null)
 
@@ -41,7 +52,7 @@ function Reel({ reel, isActive, index, muted }: { reel: ReelData; isActive: bool
 
   return (
     <div style={{
-      width: '100%', height: PHONE_HEIGHT, flexShrink: 0, scrollSnapAlign: 'start',
+      width: '100%', height, flexShrink: 0, scrollSnapAlign: 'start',
       position: 'relative', overflow: 'hidden', background: '#000',
     }}>
       {/* Real Pexels video background */}
@@ -117,6 +128,7 @@ export default function VideoShowcase() {
   const [muted, setMuted] = useState(true)
   const scrollRef = useRef<HTMLDivElement>(null)
   const userScrolled = useRef(false)
+  const { phoneW, phoneH } = usePhoneSize()
 
   useEffect(() => {
     loadShowcase()
@@ -141,12 +153,12 @@ export default function VideoShowcase() {
     if (!el) return
     const onScroll = () => {
       userScrolled.current = true
-      const idx = Math.round(el.scrollTop / PHONE_HEIGHT)
+      const idx = Math.round(el.scrollTop / phoneH)
       setActiveIdx(Math.min(idx, reels.length - 1))
     }
     el.addEventListener('scroll', onScroll, { passive: true })
     return () => el.removeEventListener('scroll', onScroll)
-  }, [reels.length])
+  }, [reels.length, phoneH])
 
   useEffect(() => {
     if (reels.length === 0) return
@@ -155,10 +167,10 @@ export default function VideoShowcase() {
       const el = scrollRef.current
       if (!el) return
       const next = (activeIdx + 1) % reels.length
-      el.scrollTo({ top: next * PHONE_HEIGHT, behavior: 'smooth' })
+      el.scrollTo({ top: next * phoneH, behavior: 'smooth' })
     }, 5500)
     return () => clearInterval(id)
-  }, [activeIdx, reels.length])
+  }, [activeIdx, reels.length, phoneH])
 
   // Early-return SO depois de todos os hooks (Rules of Hooks — React #310)
   if (reels.length === 0) return null
@@ -166,7 +178,7 @@ export default function VideoShowcase() {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', position: 'relative' }}>
       <div style={{
-        width: 280, height: PHONE_HEIGHT, borderRadius: '2.5rem',
+        width: phoneW, height: phoneH, borderRadius: '2.5rem',
         border: '4px solid rgba(255,255,255,0.12)',
         overflow: 'hidden', position: 'relative',
         boxShadow: `0 0 100px ${reels[activeIdx].accent}30, 0 30px 60px rgba(0,0,0,0.5)`,
@@ -184,7 +196,7 @@ export default function VideoShowcase() {
           WebkitOverflowScrolling: 'touch', msOverflowStyle: 'none', scrollbarWidth: 'none',
         }}>
           {reels.map((reel, i) => (
-            <Reel key={i} reel={reel} isActive={i === activeIdx} index={i} muted={muted} />
+            <Reel key={i} reel={reel} isActive={i === activeIdx} index={i} muted={muted} height={phoneH} />
           ))}
         </div>
 
