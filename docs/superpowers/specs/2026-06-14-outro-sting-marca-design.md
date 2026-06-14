@@ -32,7 +32,7 @@ cobre os dois caminhos.
 | Decisão | Escolha |
 |---|---|
 | Visual do card | **A — Freeze + blur** (congela o último frame do próprio conteúdo) |
-| Voz do sussurro | Pré-gravo **2-3 takes** (ElevenLabs), usuário ouve e escolhe; vira asset fixo |
+| Voz do sussurro | **TRAVADO:** Fernanda (PT-BR nativa, `voice_id KHmfNHtEjHhLK9eER20w`), modelo `eleven_v3` com tag `[whispers]`, texto "clipia.com.br" (direto), **acelerado `atempo 1.60x`** (~1.66s). Validado por WhatsApp em 2026-06-14. |
 | Marca d'água de canto | **Mantida** (selo discreto durante o vídeo + outro no final) |
 | Preview no editor | **Não** aparece no editor; só no export final (selo fixo, não-editável) |
 | Liga/desliga | **Sempre ligado** via env flag (`OUTRO_ENABLED=True`); sem toggle por usuário (YAGNI) |
@@ -50,16 +50,19 @@ por isso vive em pós-processo, fora do estado do editor.
 
 #### 1. Asset de áudio pré-gravado — `app/assets/outro/whisper.wav`
 - Texto **fixo** "clipia.com.br" → gerado **1x** e versionado no repo. Custo zero por vídeo.
-- WAV mono, mesma família de formato do resto do pipeline (`pcm_s16le`), curto (~1.0–1.3s).
+- WAV mono `pcm_s16le`, mesma família de formato do resto do pipeline.
+- **Receita travada** (validada por WhatsApp):
+  1. ElevenLabs `text_to_speech.convert(voice_id="KHmfNHtEjHhLK9eER20w",
+     text="[whispers] clipia.com.br", model_id="eleven_v3", output_format="mp3_44100_128")`.
+  2. Acelera `atempo=1.60` + converte pra WAV via FFmpeg → `whisper.wav` (~1.66s).
 
 #### 2. Script gerador da voz — `scripts/generate_outro_whisper.py`
-- Gera **2-3 takes** em `storage/outro_takes/take_{n}.wav` variando voz e settings
-  (ex.: `stability` baixa + `style`/exaggeration alto pra ficar breathy/sussurrado;
-  opcionalmente pós-processo FFmpeg leve — highpass + de-ess — se precisar reforçar o
-  caráter de sussurro).
-- Usa o `ElevenLabsProvider.synthesize()` existente (`app/services/elevenlabs_provider.py`).
-- Modo **promote**: ao escolher o take vencedor, copia pra `app/assets/outro/whisper.wav`.
-- Reexecutável quando quisermos trocar a voz no futuro.
+- Implementa a **receita travada** acima como defaults (voz Fernanda, `eleven_v3`
+  `[whispers]`, `atempo 1.60x`), com flags pra sobrescrever voz/velocidade/texto no futuro.
+- Gera em `storage/outro_takes/`, aplica `atempo` + converte pra WAV, e (modo `--promote`)
+  copia o resultado pra `app/assets/outro/whisper.wav`.
+- Reexecutável quando quisermos trocar a voz. Substitui os spikes temporários
+  `scripts/_outro_whisper_*.py` (que devem ser removidos).
 
 #### 3. Asset visual do logo — `app/assets/outro/logo.png`
 - PNG **transparente** do logo (mark + wordmark "ClipIA"), gerado a partir do SVG
