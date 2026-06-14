@@ -17,6 +17,7 @@ const Player = dynamic(
   }
 ) as any
 import { useEditor } from '@/contexts/EditorContext'
+import { useIsMobile } from '@/hooks/useIsMobile'
 import { PretextSubtitlePreview } from './PretextSubtitlePreview'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -24,6 +25,7 @@ const VideoComponent = ShortVideoComposition as any
 
 export function VideoPlayer() {
   const { composition, playerRef, totalFrames, playerFrame } = useEditor()
+  const isMobile = useIsMobile()
   const [version, setVersion] = useState(0)
   const lastCompositionRef = useRef<string>('')
   const seekAfterMountRef = useRef<number | null>(null)
@@ -88,7 +90,7 @@ export function VideoPlayer() {
           compositionHeight={composition.height}
           fps={composition.fps}
           style={{ width: '100%', height: '100%' }}
-          controls={false}
+          controls={isMobile}
           loop
           acknowledgeRemotionLicense
         />
