@@ -49,13 +49,13 @@ export default function RegisterPage() {
   return (
     <div className="min-h-screen flex items-center justify-center px-4 relative overflow-hidden bg-[#0f0b1a]">
       <FilmstripBackground speed={35} opacity={0.05} />
-      <div className="absolute top-1/3 right-1/4 w-[500px] h-[500px] bg-purple-600/20 blur-[150px] rounded-full pointer-events-none"></div>
+      <div className="absolute top-1/3 right-1/4 w-72 h-72 sm:w-[500px] sm:h-[500px] bg-purple-600/20 blur-[150px] rounded-full pointer-events-none"></div>
 
       <div className="card w-full max-w-md p-8 relative z-10 bg-[#1a1425]/80 backdrop-blur-xl border border-white/10 shadow-2xl">
         <div className="flex justify-center mb-6">
           <Logo size="lg" />
         </div>
-        <h1 className="text-2xl font-bold text-center mb-2 text-white tracking-tight">
+        <h1 className="text-xl sm:text-2xl font-bold text-center mb-2 text-white tracking-tight">
           {strings.auth.register.title}
         </h1>
         <p className="text-slate-400 text-center text-sm mb-8">

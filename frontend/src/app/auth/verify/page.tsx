@@ -108,7 +108,7 @@ function VerifyForm() {
         </h1>
         <p className="text-slate-400 text-center text-sm mb-8">
           Enviamos um codigo de 6 digitos para{" "}
-          <span className="text-white">{email}</span>
+          <span className="text-white break-words">{email}</span>
         </p>
 
         <form onSubmit={handleSubmit} className="space-y-6">
@@ -118,7 +118,7 @@ function VerifyForm() {
             </div>
           )}
 
-          <div className="flex gap-2 justify-center" onPaste={handlePaste}>
+          <div className="flex gap-1.5 sm:gap-2 justify-center" onPaste={handlePaste}>
             {code.map((digit, i) => (
               <input
                 key={i}
@@ -131,7 +131,7 @@ function VerifyForm() {
                 value={digit}
                 onChange={(e) => handleChange(i, e.target.value)}
                 onKeyDown={(e) => handleKeyDown(i, e)}
-                className="w-12 h-14 text-center text-2xl font-bold rounded-lg bg-white/5 border border-white/10 text-white focus:outline-none focus:border-purple-500/50"
+                className="w-10 h-12 sm:w-12 sm:h-14 text-center text-2xl font-bold rounded-lg bg-white/5 border border-white/10 text-white focus:outline-none focus:border-purple-500/50"
               />
             ))}
           </div>
