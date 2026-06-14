@@ -106,7 +106,7 @@ export default function ShowcaseSection() {
       </div>
 
       {/* Mobile: carrossel snap; Desktop: grid */}
-      <div className="flex md:grid md:grid-cols-2 lg:grid-cols-3 gap-6 max-w-6xl mx-auto overflow-x-auto md:overflow-visible snap-x snap-mandatory px-4 md:px-0 [&>*]:w-[80vw] md:[&>*]:w-auto">
+      <div className="flex md:grid md:grid-cols-2 lg:grid-cols-3 gap-6 max-w-6xl mx-auto overflow-x-auto md:overflow-visible snap-x snap-mandatory px-4 md:px-0 [&>*]:w-[80vw] md:[&>*]:w-auto overscroll-x-contain scroll-px-4">
         {videos.map((item, i) => (
           <ShowcaseCard key={item.id} item={item} featured={i === 0 && niche === 'all'} />
         ))}

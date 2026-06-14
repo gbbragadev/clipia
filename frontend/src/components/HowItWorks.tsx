@@ -65,13 +65,13 @@ export default function HowItWorks() {
           <PretextHeading text="Do tema ao vídeo pronto" animation="typewriter" color="#ffffff" className="mb-6" />
         </div>
 
-        <div className="space-y-24">
+        <div className="space-y-12 sm:space-y-16 md:space-y-24">
           {steps.map((step, i) => {
             const isEven = i % 2 !== 0
             return (
-              <div key={step.number} className={`flex flex-col lg:flex-row items-center gap-12 lg:gap-24 ${isEven ? 'lg:flex-row-reverse' : ''}`}>
+              <div key={step.number} className={`flex flex-col lg:flex-row items-center gap-6 sm:gap-8 lg:gap-12 ${isEven ? 'lg:flex-row-reverse' : ''}`}>
                 <div className={`flex-1 w-full text-center lg:text-left ${isEven ? 'lg:text-right' : ''}`}>
-                  <span className="text-6xl md:text-8xl font-black text-transparent bg-clip-text bg-gradient-to-b from-white/10 to-transparent block mb-4">
+                  <span className="text-4xl sm:text-5xl md:text-6xl lg:text-8xl font-black text-transparent bg-clip-text bg-gradient-to-b from-white/10 to-transparent block mb-4">
                     {step.number}
                   </span>
                   <h3 className="text-2xl md:text-3xl font-bold text-white mb-4">{step.title}</h3>

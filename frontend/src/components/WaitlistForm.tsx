@@ -9,13 +9,13 @@ export default function WaitlistForm() {
         <div className="relative border-dashed border-l-2 border-r-2 border-purple-500/30 rounded-2xl bg-[var(--bg-card)] overflow-hidden shadow-2xl shadow-purple-900/20">
           <div className="filmstrip-border w-full opacity-40" />
 
-          <div className="absolute top-6 -left-3 w-6 h-6 rounded-full bg-[var(--background)]" />
-          <div className="absolute bottom-6 -left-3 w-6 h-6 rounded-full bg-[var(--background)]" />
-          <div className="absolute top-6 -right-3 w-6 h-6 rounded-full bg-[var(--background)]" />
-          <div className="absolute bottom-6 -right-3 w-6 h-6 rounded-full bg-[var(--background)]" />
+          <div className="absolute top-6 -left-3 w-6 h-6 rounded-full bg-[var(--background)] hidden sm:block" />
+          <div className="absolute bottom-6 -left-3 w-6 h-6 rounded-full bg-[var(--background)] hidden sm:block" />
+          <div className="absolute top-6 -right-3 w-6 h-6 rounded-full bg-[var(--background)] hidden sm:block" />
+          <div className="absolute bottom-6 -right-3 w-6 h-6 rounded-full bg-[var(--background)] hidden sm:block" />
 
-          <div className="p-10 text-center">
-            <h2 className="text-3xl md:text-4xl font-bold mb-4">Comece a criar vídeos hoje</h2>
+          <div className="p-6 sm:p-10 text-center">
+            <h2 className="text-2xl sm:text-3xl md:text-4xl font-bold mb-4">Comece a criar vídeos hoje</h2>
             <p className="text-gray-400 mb-8 max-w-md mx-auto text-lg">
               2 vídeos grátis para você experimentar. Sem necessidade de cartão de crédito.
             </p>
