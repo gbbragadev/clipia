@@ -45,7 +45,8 @@ export default function PretextCanvas() {
     const ctx = canvas.getContext('2d')!
     ctx.scale(dpr, dpr)
 
-    const font = '600 15px Inter, system-ui, sans-serif'
+    const fontPx = rect.width < 640 ? 12 : rect.width < 768 ? 14 : 15
+    const font = `600 ${fontPx}px Inter, system-ui, sans-serif`
     const labelFont = '500 9px Inter, system-ui, sans-serif'
     let startTime = Date.now()
     let phraseIdx = 0
@@ -61,7 +62,7 @@ export default function PretextCanvas() {
       const phrase = PHRASES[phraseIdx]
       const mode = MODES[phraseIdx % MODES.length]
       const prepared = prepareWithSegments(phrase, font)
-      const result = layoutWithLines(prepared, w - 24, 22)
+      const result = layoutWithLines(prepared, Math.max(100, w - 24), 22)
 
       const words = phrase.split(' ')
       const progress = Math.min(1, elapsed / PHRASE_DURATION)

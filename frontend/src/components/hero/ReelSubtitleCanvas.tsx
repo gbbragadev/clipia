@@ -9,7 +9,6 @@ interface ReelSubtitleCanvasProps {
   accent: string          // e.g. '#22d3ee'
 }
 
-const FONT = '700 15px Inter, system-ui, sans-serif'
 const LINE_HEIGHT = 20
 const PADDING_X = 18
 const FONT_SIZE = 15
@@ -26,12 +25,14 @@ export default function ReelSubtitleCanvas({ words, activeWordIndex, accent }: R
     if (!parent) return
 
     const dpr = window.devicePixelRatio || 1
-    const w = parent.clientWidth - 48
+    const w = Math.max(120, parent.clientWidth - 48)
+    const fontPx = w < 150 ? 13 : FONT_SIZE
+    const font = `700 ${fontPx}px Inter, system-ui, sans-serif`
     const text = words.join(' ')
     const maxWidth = w - PADDING_X * 2
 
     // Pre-compute layout to determine needed height
-    const prepared = prepareWithSegments(text, FONT)
+    const prepared = prepareWithSegments(text, font)
     const layout = layoutWithLines(prepared, maxWidth, LINE_HEIGHT)
     const totalLines = layout.lines.length
     const neededHeight = Math.max(50, totalLines * LINE_HEIGHT + 16) // 8px padding top+bottom
@@ -58,7 +59,7 @@ export default function ReelSubtitleCanvas({ words, activeWordIndex, accent }: R
     const startY = (h - blockHeight) / 2
 
     ctx.textBaseline = 'top'
-    ctx.font = FONT
+    ctx.font = font
 
     let globalWordIdx = 0
 
@@ -114,7 +115,7 @@ export default function ReelSubtitleCanvas({ words, activeWordIndex, accent }: R
           ctx.shadowColor = 'transparent'
           ctx.shadowBlur = 0
           ctx.fillStyle = accent
-          ctx.fillRect(x, lineY + FONT_SIZE + 2, wordWidth, 2)
+          ctx.fillRect(x, lineY + fontPx + 2, wordWidth, 2)
         }
 
         ctx.shadowColor = 'transparent'

@@ -55,7 +55,7 @@ export function PretextHeading({
 
       const { width } = container.getBoundingClientRect()
       
-      let fontSize = width < 768 ? 48 : 72
+      let fontSize = width < 400 ? 30 : width < 640 ? 38 : width < 768 ? 48 : 72
       const font = `900 ${fontSize}px Inter, sans-serif`
       const lineHeight = fontSize * 1.1
 
