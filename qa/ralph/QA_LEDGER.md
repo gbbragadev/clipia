@@ -16,6 +16,7 @@ Estado mutável lido e gravado a cada iteração. **Não editar à mão durante 
 
 | ID | Fluxo | run_count | last_result | recent (3 últimos) | last_run |
 |----|-------|-----------|-------------|--------------------|----------|
+| E01 | **Jornada E2E completa** (login→gerar→pipeline→editar abas→render→baixar) | 0 | — | — | — |
 | F01 | Landing `/` | 2 | PASS | FAIL PASS | 20260613-2234 (BUG-R001 resolvido: main visível, console limpo) |
 | F02 | Login | 2 | PASS | FAIL PASS | 20260613-2235 (BUG-R001 resolvido: LOGGED local+prod) |
 | F03 | Register (validação) | 0 | — | — | — |
@@ -29,6 +30,8 @@ Estado mutável lido e gravado a cada iteração. **Não editar à mão durante 
 | F11 | Logout | 0 | — | — | — |
 | F12 | Estáticas/Blog | 0 | — | — | — |
 | F13 | Admin | 0 | — | — | — |
+| F14 | Mídia avançada (clone voz, upload áudio, cancel/reset) | 0 | — | — | — |
+| F15 | Conta, créditos & público (senha, export, waitlist, checkout) | 0 | — | — | — |
 | S01 | Rotas protegidas não vazam (deslogado) | 0 | — | — | — |
 | S02 | Security headers | 1 | PASS | PASS | 20260613-2235 (SEC-01 resolvido: 6 headers local+prod) |
 | S03 | Token/secrets não vazam no client | 0 | — | — | — |

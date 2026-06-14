@@ -72,11 +72,12 @@ Se continuar `ANON` após login → bug F02 `confirmed`, registre e siga (não t
 
 ## 3. ESCOLHER O FLUXO DESTA ITERAÇÃO
 
-Leia `qa/ralph/QA_LEDGER.md`. Escolha o fluxo `F*` com **menor `run_count`** (empate → ordem do catálogo).
+Leia `qa/ralph/QA_LEDGER.md`. Escolha o fluxo com **menor `run_count`** (empate → ordem do catálogo: E01, F01…F15, S01…S06).
 Releia também `ciclo_atual` e os flags `gerou_no_ciclo` / `smoke_prod_no_ciclo`.
 
-- Se o escolhido for **F06 (geração)** e `gerou_no_ciclo = sim`, pule para o próximo de menor run_count.
-- Quando **todos** os `F*` tiverem `run_count` igual ao início de um novo ciclo, incremente `ciclo_atual`,
+- **E01 (jornada E2E) é caro: 1x por ciclo.** Se for o de menor run_count mas `gerou_no_ciclo = sim`, pule para o próximo barato.
+  Reserve a iteração inteira para o E01 (são ~11 checkpoints + geração + render, pode levar minutos).
+- Quando **todos** os fluxos tiverem `run_count` igual ao início de um novo ciclo, incremente `ciclo_atual`,
   zere `gerou_no_ciclo` e `smoke_prod_no_ciclo`, e rode o **SMOKE PROD** (etapa 6) nesta iteração.
 
 ---
@@ -102,6 +103,41 @@ Outros erros que sempre contam: rota de **app/API** (`/api/v1/...` 4xx/5xx) e ru
 "Hydration failed"). **Em produção (P*) o console deve estar 100% limpo.**
 Sinal indireto de hidratação quebrada: `is visible "main"`/`"h1"` = false e login não grava `clipia_token` (fica ANON).
 
+### ★ E01 — JORNADA E2E COMPLETA (golden path — testa de ponta a ponta TUDO que disponibilizamos)
+
+**Caro: roda 1x por ciclo** (gera + renderiza + baixa). É a prova de que o produto inteiro funciona encadeado.
+Produz um MP4 final como artefato. Rotaciona o **template por ciclo** para cobrir todos ao longo do tempo:
+`ciclo % 5` → [`stock_narration`, `story_time`, `gameplay_split`, `character_narration`, `novelinha_historica`]
+(os 2 últimos usam imagem IA gpt-image-2 = +5 créditos/cena; seed admin tem créditos de sobra). Voz **Edge** (barato),
+salvo quando o passo de voz exigir premium. Marque `gerou_no_ciclo=sim` e grave `ultimo_job=<id>` ao final.
+
+Passos (cada um é um checkpoint PASS/FAIL; pare no primeiro que quebrar e registre o ponto exato):
+1. **Landing→entrada**: `goto /`, clicar o CTA principal (ex: "Criar"/"Começar") → deve levar a login/cadastro.
+2. **Auth**: login com o seed (etapa 2). Confirmar `clipia_token` + `GET /api/v1/auth/me` (plan/credits).
+3. **Dashboard**: créditos visíveis, lista de jobs carrega.
+4. **Gerar** (`POST /api/v1/generate` via GenerateForm): tema `"[QA-E2E] <tema do ciclo>"`, template do ciclo, voz Edge,
+   duração mínima. Botão "Gerar Vídeo".
+5. **Pipeline** (`GET /api/v1/jobs/{id}/status`, polling ~10s, timeout ~300s): acompanhar as etapas
+   (scripting → generating_images → tts → transcribing → media → compositing → finalizing) até `completed`.
+   PASS = chega a `completed`; se `error`, registrar a etapa que falhou (bug `alta`).
+6. **Editor** (`/editor/{id}` + `GET /composition`): player + timeline + N cenas carregam.
+7. **Editar TODAS as abas** (cada uma é um sub-checkpoint):
+   - **Cenas**: selecionar uma cena → timeline move para o frame.
+   - **Voz**: trocar a voz e **regenerar narração** (`POST /api/v1/jobs/{id}/regenerate-tts`) → aguardar concluir.
+   - **Legendas**: mudar fonte/cor/animação → dispara `POST /api/v1/jobs/{id}/edit` (status vai a "Salvo").
+   - **Elementos**: adicionar 1 overlay (questionBox/CTA) + selecionar música → `edit`.
+   - **IA**: enviar 1 prompt (`POST /api/v1/jobs/{id}/ai-suggest`) → aplicar a sugestão.
+   - Confirmar auto-save: indicador `editor-header__status--saved`.
+8. **Exportar/Renderizar** (`POST /api/v1/jobs/{id}/render` → polling status até `completed`, timeout ~300s; engine=Remotion):
+   confirmar captions por plataforma (YT Shorts/TikTok/Instagram) e copy-to-clipboard.
+9. **Baixar** (`GET /api/v1/jobs/{id}/download`): baixar o MP4, validar HTTP 200 + content-type vídeo + tamanho > 0.
+   Salvar caminho/tamanho no ledger como prova do ciclo.
+10. **Conta** (`PATCH /api/v1/auth/me`): atualizar o nome → toast sucesso → reverter ao valor original.
+11. **Logout**: dropdown → Sair → `clipia_token` limpo. (Re-loga na próxima iteração.)
+PASS do E01 = todos os 11 checkpoints verdes. Screenshot em cada etapa-chave (`E01-step<n>-...png`).
+
+---
+
 **F01 — Landing `/`** (`http://localhost:3003/`)
 - Hero visível, seção showcase, CTA. `links` não-quebrados. `console --errors` vazio.
 - Responsivo: `$B responsive "$EV/F01-resp-$TS"` (mobile 375 / tablet / desktop). PASS se hero aparece nos 3.
@@ -123,17 +159,10 @@ Sinal indireto de hidratação quebrada: `is visible "main"`/`"h1"` = false e lo
 - Saudação `h1` com "Olá", badge de créditos visível, grid de vídeos OU empty state ("Nenhum vídeo ainda").
 - `console --errors` vazio. PASS = saudação + créditos + (grid ou empty) presentes.
 
-**F06 — GenerateForm (1x por ciclo — geração real barata)**
-- Primeiro a validação (sempre): topic curto deixa o botão "Gerar Vídeo" disabled.
-  `fill` o input de tema com `"curto"` → `is disabled` no botão Gerar = PASS da validação.
-- Se `gerou_no_ciclo = não`: gerar de verdade. Tema `"[QA] 3 curiosidades sobre o oceano profundo"`,
-  template Stock/Narração, **voz Edge TTS** (barato). Clicar "Gerar Vídeo". Pollar status:
-  ```bash
-  # repetir a cada ~10s, máx ~240s, lendo o status do job mais novo
-  $B js "document.body.textContent" | grep -iEo 'PRONTO|ERRO|gerando|finalizando' | head -1
-  ```
-  Quando concluir, capturar o `jobId` do card mais novo (via `$B links` ou `$B js`) e gravar em
-  `QA_LEDGER.md` como `ultimo_job=<id>`. Setar `gerou_no_ciclo=sim`. PASS = job chega a PRONTO; se ERRO → bug F06.
+**F06 — GenerateForm (só validação do form — barato; a geração real é no E01)**
+- Topic curto deixa o botão "Gerar Vídeo" disabled: `fill` o input de tema com `"curto"` → `is disabled` no botão Gerar.
+- Trocar template/estilo/voz/duração atualiza o preview de custo (créditos). Selecionar template de imagem IA mostra custo maior.
+- **NÃO gerar aqui** (a geração end-to-end acontece no E01, 1x/ciclo). PASS = validações e preview de custo respondem.
 
 **F07 — Editor `/editor/[jobId]`** (usa `ultimo_job` do ledger; se vazio, pegar qualquer job PRONTO do dashboard)
 - `goto http://localhost:3003/editor/<jobId>`. Esperar `.editor-player-container` visível.
@@ -156,7 +185,27 @@ Sinal indireto de hidratação quebrada: `is visible "main"`/`"h1"` = false e lo
 **F12 — Estáticas/Blog/Landing pages** — `/blog`, `/blog/<slug>`, `/privacidade`, `/termos`, **`/exemplos`** e as
 landing por nicho **`/criar/<nicho>`** (curiosidades, religioso, motivacional, +4) renderizam, console limpo. PASS = todas carregam.
 
-**F13 — Admin `/dashboard/admin`** — carrega para o seed admin sem erro de permissão/console. PASS = painel renderiza.
+**F13 — Admin `/dashboard/admin`** — carrega para o seed admin sem erro de permissão/console; bate `GET /api/v1/admin/dashboard`
+e `GET /api/v1/admin/storage-stats` (200, métricas). PASS = painel renderiza com dados.
+
+**F14 — Mídia avançada** (usa `ultimo_job`; condicional ao que está habilitado — se off, registrar `SKIP`, não FAIL)
+- **Clonar voz** (`POST /api/v1/voices/clone`, ElevenLabs ON): na aba Voz → "Minha Voz", subir um sample curto
+  (`reference_voices/narrator_ptbr.wav`) → confirmar a voz clonada aparece; depois **remover** (`DELETE /api/v1/voices/{id}`)
+  para não acumular. PASS = clona e remove.
+- **Upload de áudio próprio** (`POST /api/v1/jobs/{id}/upload-audio`): subir um wav como narração → confirmar aceito.
+- **Cancel/Reset** (`POST /api/v1/jobs/{id}/cancel`, `/reset`): num job de teste, exercitar cancelar e resetar → estado coerente.
+  PASS = endpoints respondem coerente; o que estiver desabilitado vira `SKIP` com nota.
+
+**F15 — Conta, créditos & público**
+- **Trocar senha** (`POST /api/v1/auth/change-password`): em Settings, validar regras (senha atual errada → erro;
+  nova senha fraca → erro). **NÃO efetivar troca real** da senha do seed (quebraria `.admin-credentials.local`).
+- **Exportar dados** (`GET /api/v1/auth/export-data`): clicar "Exportar meus dados" → confirmar download/JSON (LGPD).
+- **Créditos** (`GET /api/v1/credits/packages` 200 + `GET /api/v1/credits/history`): página `/dashboard/credits` lista pacotes
+  e histórico. Iniciar checkout (`POST /api/v1/credits/checkout`) → confirmar que retorna URL do MercadoPago (ou `SKIP` se
+  `MP_ACCESS_TOKEN` vazio). **NÃO concluir pagamento real.**
+- **Waitlist** (`POST /api/v1/waitlist`): na landing, enviar email de teste `qa+waitlist@clipia.com.br` → confirmação.
+- **Public stats** (`GET /api/v1/public/stats` 200): social proof da landing exibe números do endpoint (não hardcoded).
+PASS = cada sub-item responde (ou `SKIP` documentado).
 
 ### Fluxos de SEGURANÇA (S*) — review de segurança do site
 
@@ -252,9 +301,10 @@ Repetir o render+console para `/blog`, `/termos`, `/privacidade`. Registrar P01/
 ## 7. CRITÉRIO DE PARADA (avalie ao fim de cada iteração)
 
 Emita **`<promise>QA GREEN</promise>`** somente se TODAS as condições valerem:
-1. Todo fluxo `F01..F13`, `S01..S06` e `P01/P02` tem `run_count ≥ 3`.
-2. Os 3 últimos resultados de cada fluxo são todos `PASS`.
-3. `qa/ralph/QA_BUGS.md` não tem nenhum bug com status `open` nem `confirmed`.
+1. **E01** tem `run_count ≥ 2` (a jornada E2E completou pelo menos 2 ciclos) e os últimos 2 = `PASS`;
+   e todo fluxo `F01..F15`, `S01..S06` e `P01/P02` tem `run_count ≥ 3` com os 3 últimos = `PASS`.
+   (`SKIP` por feature desabilitada conta como verde para o critério.)
+2. `qa/ralph/QA_BUGS.md` não tem nenhum bug com status `open` nem `confirmed`.
 
 Se não atingiu → **encerre a iteração sem emitir promise** (o ralph re-injeta o prompt e você continua).
 O teto `--max-iterations 50` para o loop de qualquer forma.
