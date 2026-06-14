@@ -17,7 +17,7 @@ export default function DashboardNavbar() {
           </a>
 
           {user && (
-            <div className="flex items-center gap-3">
+            <div className="flex items-center gap-1.5 sm:gap-3">
               {user.plan === 'admin' && (
                 <a
                   href="/dashboard/admin"

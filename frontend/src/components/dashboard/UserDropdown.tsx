@@ -31,9 +31,11 @@ export default function UserDropdown({ name, plan, onLogout }: UserDropdownProps
     <div className="relative" ref={ref}>
       <button
         onClick={() => setOpen(!open)}
-        className="w-8 h-8 rounded-full bg-gradient-to-br from-purple-600 to-blue-600 flex items-center justify-center text-white text-sm font-semibold hover:opacity-90 transition cursor-pointer"
+        className="h-11 w-11 rounded-full flex items-center justify-center hover:opacity-90 transition cursor-pointer"
       >
-        {initial}
+        <div className="w-9 h-9 rounded-full bg-gradient-to-br from-purple-600 to-blue-600 flex items-center justify-center text-white text-sm font-semibold">
+          {initial}
+        </div>
       </button>
 
       {open && (
