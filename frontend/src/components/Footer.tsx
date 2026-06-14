@@ -1,13 +1,14 @@
 import { strings } from '@/lib/strings';
 import Link from 'next/link'
 import { FilmstripBackground } from './ui/FilmstripBackground'
+import { NICHES } from '@/lib/niches'
 
 export default function Footer() {
   return (
     <footer className="relative bg-[#0f0b1a] border-t border-white/5 overflow-hidden">
       <FilmstripBackground speed={30} opacity={0.05} />
       <div className="py-16 px-4 relative z-10">
-        <div className="max-w-7xl mx-auto grid grid-cols-1 md:grid-cols-4 gap-12 text-sm text-slate-500">
+        <div className="max-w-7xl mx-auto grid grid-cols-1 md:grid-cols-5 gap-12 text-sm text-slate-500">
           <div className="md:col-span-2 space-y-4">
             <span className="text-xl font-bold text-white tracking-tight">
               Clip<span className="text-purple-400">{strings.editor.ai}</span>
@@ -20,11 +21,22 @@ export default function Footer() {
           <div className="space-y-4">
             <h4 className="text-white font-semibold mb-4 uppercase tracking-wider text-xs">Produto</h4>
             <ul className="space-y-3">
-              <li><Link href="#showcase" className="hover:text-purple-400 transition">Showcase</Link></li>
-              <li><Link href="#demo" className="hover:text-purple-400 transition">Como Funciona</Link></li>
+              <li><Link href="/exemplos" className="hover:text-purple-400 transition">Exemplos</Link></li>
+              <li><Link href="/#demo" className="hover:text-purple-400 transition">Como Funciona</Link></li>
               {process.env.NEXT_PUBLIC_PUBLIC_SIGNUP === "true" && (
                 <li><Link href="/auth/register" className="hover:text-purple-400 transition">Criar Conta</Link></li>
               )}
+            </ul>
+          </div>
+
+          <div className="space-y-4">
+            <h4 className="text-white font-semibold mb-4 uppercase tracking-wider text-xs">Nichos</h4>
+            <ul className="space-y-3">
+              {NICHES.map((n) => (
+                <li key={n.slug}>
+                  <Link href={`/criar/${n.slug}`} className="hover:text-purple-400 transition">{n.label}</Link>
+                </li>
+              ))}
             </ul>
           </div>
 

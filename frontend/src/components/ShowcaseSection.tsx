@@ -7,7 +7,7 @@ import { PretextHeading } from './ui/PretextHeading'
 import Link from 'next/link'
 import { loadShowcase, type ShowcaseManifest, type ShowcaseVideo } from '@/lib/showcase'
 
-function ShowcaseCard({ item, featured = false }: { item: ShowcaseVideo; featured?: boolean }) {
+export function ShowcaseCard({ item, featured = false }: { item: ShowcaseVideo; featured?: boolean }) {
   const videoRef = useRef<HTMLVideoElement>(null)
   const cardRef = useRef<HTMLDivElement>(null)
 
@@ -90,7 +90,7 @@ export default function ShowcaseSection() {
 
       {/* Filtro por nicho — scroll horizontal no mobile */}
       <div className="flex gap-2 justify-start md:justify-center mb-10 overflow-x-auto px-4 snap-x [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-        {[{ id: 'all', label: 'Todos', icon: '✦' }, ...manifest.niches].map((n) => (
+        {[{ id: 'all', label: 'Todos', icon: '✦' }, ...manifest.niches.filter((n) => manifest.videos.some((v) => v.niche === n.id))].map((n) => (
           <button
             key={n.id}
             onClick={() => setNiche(n.id)}

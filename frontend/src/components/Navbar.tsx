@@ -1,5 +1,6 @@
 'use client'
 
+import Link from 'next/link'
 import { strings } from '@/lib/strings';
 import ScrollProgress from './ScrollProgress'
 import Logo from './brand/Logo'
@@ -17,8 +18,8 @@ export default function Navbar() {
             <Logo size="md" />
           </a>
           <div className="hidden md:flex items-center gap-5 text-sm" style={{ color: 'var(--text-secondary)' }}>
-            <a href="#showcase" className="hover:opacity-80 transition" style={{ color: 'var(--text-secondary)' }}>Exemplos</a>
-            <a href="#como-funciona" className="hover:opacity-80 transition" style={{ color: 'var(--text-secondary)' }}>Como funciona</a>
+            <Link href="/exemplos" className="hover:opacity-80 transition" style={{ color: 'var(--text-secondary)' }}>Exemplos</Link>
+            <Link href="/#como-funciona" className="hover:opacity-80 transition" style={{ color: 'var(--text-secondary)' }}>Como funciona</Link>
             <ThemeToggle />
             {user ? (
               <div className="flex items-center gap-3">

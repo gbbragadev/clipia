@@ -1,16 +1,107 @@
 {
   "niches": [
-    { "id": "educational", "label": "Educativo", "icon": "🧠" },
-    { "id": "entertainment", "label": "Entretenimento", "icon": "🎬" },
-    { "id": "tips", "label": "Dicas", "icon": "💡" },
-    { "id": "story", "label": "Histórias", "icon": "📖" }
+    {
+      "id": "curiosidades",
+      "label": "Curiosidades",
+      "icon": "🧠"
+    },
+    {
+      "id": "religioso",
+      "label": "Conteúdo Religioso",
+      "icon": "🙏"
+    },
+    {
+      "id": "motivacional",
+      "label": "Motivacional",
+      "icon": "🔥"
+    },
+    {
+      "id": "financas",
+      "label": "Finanças",
+      "icon": "💰"
+    },
+    {
+      "id": "historias",
+      "label": "Histórias & Mistério",
+      "icon": "📖"
+    },
+    {
+      "id": "humor",
+      "label": "Humor",
+      "icon": "😂"
+    },
+    {
+      "id": "drama",
+      "label": "Drama Histórico",
+      "icon": "🎭"
+    }
   ],
   "videos": [
+    {
+      "id": "o-fato-historico-que-quase-ninguem-conhece",
+      "title": "O fato histórico que quase ninguém conhece",
+      "template": "Drama Histórico",
+      "niche": "drama",
+      "video": "/storage/showcase/o-fato-historico-que-quase-ninguem-conhece.mp4",
+      "phrase": "Um capítulo macabro da história",
+      "captionStyle": "tiktok",
+      "captionAccent": "#f87171",
+      "gradient": "from-red-900/60 to-rose-950/60",
+      "icon": "🎭"
+    },
+    {
+      "id": "3-formas-de-economizar-sem-perceber",
+      "title": "3 formas de economizar sem perceber",
+      "template": "Narração + Stock",
+      "niche": "financas",
+      "video": "/storage/showcase/3-formas-de-economizar-sem-perceber.mp4",
+      "phrase": "Economize sem perceber",
+      "captionStyle": "tiktok",
+      "captionAccent": "#34d399",
+      "gradient": "from-emerald-900/60 to-green-900/50",
+      "icon": "💰"
+    },
+    {
+      "id": "a-disciplina-vence-a-motivacao",
+      "title": "A disciplina vence a motivação",
+      "template": "Narração + Stock",
+      "niche": "motivacional",
+      "video": "/storage/showcase/a-disciplina-vence-a-motivacao.mp4",
+      "phrase": "Disciplina todos os dias",
+      "captionStyle": "tiktok",
+      "captionAccent": "#fb923c",
+      "gradient": "from-orange-900/60 to-red-900/50",
+      "icon": "🔥"
+    },
+    {
+      "id": "mensagem-de-fe-para-o-seu-dia",
+      "title": "Mensagem de fé para o seu dia",
+      "template": "Narração + Stock",
+      "niche": "religioso",
+      "video": "/storage/showcase/mensagem-de-fe-para-o-seu-dia.mp4",
+      "phrase": "Comece o dia com esperança",
+      "captionStyle": "tiktok",
+      "captionAccent": "#fbbf24",
+      "gradient": "from-amber-900/60 to-yellow-900/50",
+      "icon": "🙏"
+    },
+    {
+      "id": "segredos-do-oceano-profundo",
+      "title": "Segredos do oceano profundo",
+      "template": "Narração + Stock",
+      "niche": "curiosidades",
+      "video": "/storage/showcase/segredos-do-oceano-profundo.mp4",
+      "phrase": "O que existe no fundo do mar?",
+      "captionStyle": "tiktok",
+      "captionAccent": "#22d3ee",
+      "gradient": "from-blue-900/60 to-cyan-900/60",
+      "icon": "🧠"
+    },
     {
       "id": "ocean",
       "title": "5 curiosidades sobre o oceano profundo",
       "template": "Narração + Stock",
-      "niche": "educational",
+      "niche": "curiosidades",
       "video": "/showcase/ocean-curiosidades.mp4",
       "phrase": "O oceano cobre mais de 70% da superficie da Terra",
       "captionStyle": "tiktok",
@@ -24,7 +115,7 @@
       "id": "ia",
       "title": "Como a IA está mudando o mundo",
       "template": "Narração + Stock",
-      "niche": "educational",
+      "niche": "curiosidades",
       "video": "/showcase/ia-revolucao.mp4",
       "phrase": "Inteligencia artificial ja supera humanos em tarefas complexas",
       "captionStyle": "impact",
@@ -38,7 +129,7 @@
       "id": "cerebro",
       "title": "Fatos surpreendentes sobre o cérebro",
       "template": "Narração + Stock",
-      "niche": "educational",
+      "niche": "curiosidades",
       "video": "/showcase/cerebro-fatos.mp4",
       "phrase": "Seu cerebro processa 60 mil pensamentos por dia",
       "captionStyle": "karaoke",
