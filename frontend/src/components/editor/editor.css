@@ -259,3 +259,119 @@
   .editor-panel-toggle { right: 280px; }
   .editor-panel-toggle--collapsed { right: 0; }
 }
+
+/* ── Mobile reflow (<=768px) ───────────────── */
+@media (max-width: 768px) {
+  .editor {
+    display: flex;
+    flex-direction: column;
+    height: 100dvh; /* dvh evita o "pulo" da barra de URL no mobile */
+  }
+
+  .editor-header { height: 44px; flex-shrink: 0; padding: 0 12px; }
+  .editor-header__title { display: none; }
+  .editor-header__export { padding: 6px 12px; }
+
+  /* Workspace empilha: player em cima, painel embaixo */
+  .editor-workspace { flex: 1; flex-direction: column; min-height: 0; }
+
+  .editor-player-zone {
+    flex: 0 0 auto;
+    max-height: 40vh;
+    padding: 8px;
+  }
+  /* Player vira width-driven dentro da zona limitada */
+  .editor-player-container { height: 100%; max-height: 40vh; }
+
+  /* Painel ocupa o resto da largura/altura; nunca colapsa no mobile */
+  .editor-tools-panel,
+  .editor-tools-panel--collapsed {
+    flex: 1 1 auto;
+    flex-basis: auto;
+    border-left: none;
+    border-top: 1px solid rgba(255,255,255,0.08);
+    min-height: 0;
+    opacity: 1;
+    pointer-events: auto;
+  }
+
+  /* Conteúdo da aba acima; abas viram barra inferior (order) */
+  .editor-panel-content {
+    order: 1;
+    flex: 1;
+    min-height: 0;
+    padding: 12px;
+    padding-bottom: calc(12px + env(safe-area-inset-bottom));
+  }
+  .editor-tabs {
+    order: 2;
+    flex-shrink: 0;
+    border-bottom: none;
+    border-top: 1px solid rgba(255,255,255,0.08);
+    background: #1A1A1A;
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+  .editor-tab { min-height: 52px; padding: 8px 0; }
+  .editor-tab__icon { font-size: 17px; }
+  .editor-tab__label { font-size: 9px; }
+
+  /* O toggle de colapso lateral não faz sentido no stack vertical */
+  .editor-panel-toggle { display: none; }
+
+  /* Botão flutuante p/ abrir a gaveta da timeline */
+  .editor-timeline-fab {
+    position: absolute;
+    left: 50%;
+    transform: translateX(-50%);
+    top: calc(40vh + 50px);
+    z-index: 15;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 14px;
+    border-radius: 999px;
+    background: rgba(108,92,231,0.9);
+    color: #fff;
+    border: none;
+    font-size: 12px;
+    font-weight: 600;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.4);
+    cursor: pointer;
+  }
+
+  /* Gaveta da timeline (bottom sheet) */
+  .editor-timeline-drawer {
+    position: fixed;
+    left: 0; right: 0; bottom: 0;
+    z-index: 60;
+    background: #1E1E1E;
+    border-top: 1px solid rgba(255,255,255,0.12);
+    border-radius: 14px 14px 0 0;
+    box-shadow: 0 -8px 32px rgba(0,0,0,0.5);
+    padding-bottom: env(safe-area-inset-bottom);
+    animation: drawer-up 0.22s ease;
+  }
+  .editor-timeline-drawer__handle {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 8px 14px; color: #999; font-size: 12px;
+    border-bottom: 1px solid rgba(255,255,255,0.06);
+  }
+  .editor-timeline-drawer__close {
+    background: none; border: none; color: #ccc; font-size: 13px; cursor: pointer; padding: 4px 8px;
+  }
+  .editor-timeline-backdrop {
+    position: fixed; inset: 0; z-index: 55; background: rgba(0,0,0,0.4);
+  }
+  /* Dentro da gaveta a timeline tem altura própria (não está mais no grid) */
+  .editor-timeline-drawer .editor-timeline { padding-bottom: 8px; }
+}
+
+@keyframes drawer-up {
+  from { transform: translateY(100%); }
+  to { transform: translateY(0); }
+}
+
+/* Em telas muito estreitas, abas icon-only para caber as 5 */
+@media (max-width: 380px) {
+  .editor-tab__label { display: none; }
+}
