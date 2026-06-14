@@ -115,11 +115,14 @@ Passos (cada um é um checkpoint PASS/FAIL; pare no primeiro que quebrar e regis
 1. **Landing→entrada**: `goto /`, clicar o CTA principal (ex: "Criar"/"Começar") → deve levar a login/cadastro.
 2. **Auth**: login com o seed (etapa 2). Confirmar `clipia_token` + `GET /api/v1/auth/me` (plan/credits).
 3. **Dashboard**: créditos visíveis, lista de jobs carrega.
-4. **Gerar** (`POST /api/v1/generate` via GenerateForm): tema `"[QA-E2E] <tema do ciclo>"`, template do ciclo, voz Edge,
-   duração mínima. Botão "Gerar Vídeo".
-5. **Pipeline** (`GET /api/v1/jobs/{id}/status`, polling ~10s, timeout ~300s): acompanhar as etapas
-   (scripting → generating_images → tts → transcribing → media → compositing → finalizing) até `completed`.
-   PASS = chega a `completed`; se `error`, registrar a etapa que falhou (bug `alta`).
+4. **Gerar** (`POST /api/v1/generate` via GenerateForm): o input de tema é `input[placeholder*="curiosidades"]`
+   (sem id) → `fill` com `"[QA-E2E] <tema do ciclo>"`; template do ciclo (botão "Narração + Stock" etc.); voz **Edge TTS**
+   (`@e` do botão "Edge TTS · 1 credito"); duração no slider. Clicar "Gerar Vídeo" (fica enabled só com tema ≥10 chars).
+   Confirmar `POST /api/v1/generate → 200`.
+5. **Pipeline**: capturar o job via `GET /api/v1/jobs` (campo **`job_id`**, NÃO `id`; pegar o mais recente por `created_at`).
+   Pollar `GET /api/v1/jobs/{job_id}/status` (~10s, **timeout ≥300s**) — só retorna `status`+`progress` (0→1, sem step granular).
+   Status final = `completed` (no /status) / `editable` (na lista /jobs). PASS = chega a `completed`; `error`/`failed` → bug `alta`.
+   Gravar `ultimo_job=<job_id>`. (Geração stock+edge medida: ~240s.)
 6. **Editor** (`/editor/{id}` + `GET /composition`): player + timeline + N cenas carregam.
 7. **Editar TODAS as abas** (cada uma é um sub-checkpoint):
    - **Cenas**: selecionar uma cena → timeline move para o frame.
@@ -128,9 +131,10 @@ Passos (cada um é um checkpoint PASS/FAIL; pare no primeiro que quebrar e regis
    - **Elementos**: adicionar 1 overlay (questionBox/CTA) + selecionar música → `edit`.
    - **IA**: enviar 1 prompt (`POST /api/v1/jobs/{id}/ai-suggest`) → aplicar a sugestão.
    - Confirmar auto-save: indicador `editor-header__status--saved`.
-8. **Exportar/Renderizar** (`POST /api/v1/jobs/{id}/render` → polling status até `completed`, timeout ~300s; engine=Remotion):
-   confirmar captions por plataforma (YT Shorts/TikTok/Instagram) e copy-to-clipboard.
-9. **Baixar** (`GET /api/v1/jobs/{id}/download`): baixar o MP4, validar HTTP 200 + content-type vídeo + tamanho > 0.
+8. **Exportar/Renderizar** (`POST /api/v1/jobs/{id}/render` → retorna `{status:"rendering"}`; pollar `/status` até `completed`,
+   engine=Remotion). **No hardware atual (GTX 1660) leva ~5-6 min — use timeout ≥600s** (o `progress` sobe não-linear,
+   pode parecer travado em ~48% e então saltar p/ 1.0). Confirmar captions por plataforma (YT Shorts/TikTok/Instagram) + copy.
+9. **Baixar** (`GET /api/v1/jobs/{id}/download`): HTTP 200 + tamanho > 0 (medido ~36.8 MB num clipe de 45s).
    Salvar caminho/tamanho no ledger como prova do ciclo.
 10. **Conta** (`PATCH /api/v1/auth/me`): atualizar o nome → toast sucesso → reverter ao valor original.
 11. **Logout**: dropdown → Sair → `clipia_token` limpo. (Re-loga na próxima iteração.)
@@ -318,3 +322,7 @@ O teto `--max-iterations 50` para o loop de qualquer forma.
 - Sempre `localhost`, nunca `127.0.0.1`.
 - Evidência obrigatória por fluxo testado: `console --errors` + screenshot. HTTP 200 sozinho não fecha um fluxo como PASS.
 - Uma iteração testa **um** fluxo (mais o smoke prod quando o ciclo virou). Não tente varrer tudo numa iteração só.
+- **Monitorar a sessão**: em fluxos autenticados, verifique `clipia_token` no início e no fim. Se sumir **sem** o usuário
+  ter clicado em Sair (F11) → **BUG-R003** (deslogamento espúrio por 401 em recurso secundário). Em F05/E01 confira também
+  se os previews de vídeo do dashboard carregam (não devem dar 401 — **BUG-R002**). Esses 2 estão `open`/`confirmed`:
+  enquanto não corrigidos, o E01 pode precisar re-logar no meio (registre, não falhe o ciclo inteiro por isso).

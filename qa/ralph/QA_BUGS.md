@@ -46,6 +46,27 @@ Status possíveis: `open` · `confirmed` (falhou 3x igual) · `intermittent` · 
   (evitar turbopack no `next build`) ou pinar versão do Next. **Não auto-corrigir sem o Gui pedir.**
 - Evidência: medições inline (local + prod, 500 nos 2 chunks; ausentes no disco).
 
+### BUG-R002: Preview de vídeo no dashboard usa endpoint protegido como `<video src>` → 401  [achado do E01]
+- Assinatura: F05/E01 + preview 401
+- Severidade: média (previews de vídeo não carregam no VideoCard)
+- Status: confirmed (código + network, 2026-06-14)
+- Observado: `VideoCard.tsx:70` renderiza `<video src={job.download_url}>` com `download_url = /api/v1/jobs/{id}/download`,
+  que exige `Authorization: Bearer`. Tags HTML não enviam header → cada preview faz `GET /download → 401` e não renderiza.
+- Correção sugerida: endpoint de preview público/assinado (token na query/URL temporária) ou servir thumbnail separado;
+  não referenciar um endpoint Bearer-only direto em `<video src>`. O `protected-download.spec.js` (skipped) já mira isso.
+
+### BUG-R003: Qualquer 401 desloga o usuário (logout global) → deslogamento espúrio  [achado do E01 — o mais sério]
+- Assinatura: sessão + 401 derruba token
+- Severidade: alta (perda de sessão no meio do uso; combinado com BUG-R002, navegar no dashboard/editor pode deslogar)
+- Status: confirmed (código + observado: token sumiu sozinho durante a sessão E2E; depois o editor não carregava)
+- Observado: `http.ts:58-60` (fetch genérico), `lib/download.ts:13`, `lib/auth.ts` e os painéis do editor chamam
+  `notifySessionExpired()` para TODO `401`, que faz `localStorage.removeItem('clipia_token')` + evento → AuthContext desloga.
+  Logo um 401 de **recurso secundário** (preview/download de um job específico) derruba a sessão válida inteira.
+- Correção sugerida: só tratar como sessão expirada o 401 do endpoint de **sessão/auth** (ex: `/auth/me`). 401 de um
+  recurso específico deve falhar localmente (toast/retry), não deslogar. Distinguir "token inválido" de "acesso negado a X".
+- Repro QA: logar → navegar dashboard↔editor algumas vezes monitorando `localStorage.getItem('clipia_token')`; se virar
+  null sem o usuário clicar em Sair → bug presente.
+
 ---
 
 _(achados preliminares de segurança/disponibilidade do dry-run abaixo)_
