@@ -63,7 +63,7 @@ export default function CreditsPage() {
         <>
           {/* Header */}
           <div className="text-center mb-8">
-            <h1 className="text-2xl font-bold" style={{ color: 'var(--text-primary)' }}>
+            <h1 className="text-xl sm:text-2xl font-bold" style={{ color: 'var(--text-primary)' }}>
               Meus Créditos
             </h1>
             <div className="mt-3 inline-flex items-center gap-2 px-4 py-2 rounded-full" style={{ background: 'var(--bg-surface)' }}>

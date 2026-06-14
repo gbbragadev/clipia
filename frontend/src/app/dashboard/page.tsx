@@ -39,7 +39,7 @@ export default function DashboardPage() {
   return (
     <div className="max-w-6xl mx-auto px-4 py-12">
       <div className="mb-10">
-        <h1 className="text-3xl md:text-4xl font-bold text-white mb-2 tracking-tight">
+        <h1 className="text-2xl sm:text-3xl md:text-4xl font-bold text-white mb-2 tracking-tight">
           <span className="text-purple-400">{timeGreeting}.</span> {greeting} Pronto para criar?
         </h1>
         <p className="text-slate-400 text-lg">Transforme suas ideias em vídeos com apenas um clique.</p>

@@ -156,7 +156,7 @@ export default function KineticTypographyPreview({ text, speed = 2 }: KineticTyp
   return (
     <div className="flex flex-col items-center gap-2">
       <div
-        className="rounded-xl overflow-hidden border border-[var(--border-subtle)] relative"
+        className="rounded-xl overflow-hidden border border-[var(--border-subtle)] relative w-full max-w-[180px] mx-auto"
         style={{ width: CANVAS_W, height: CANVAS_H }}
       >
         <canvas ref={canvasRef} className="block" />

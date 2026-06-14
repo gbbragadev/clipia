@@ -29,15 +29,15 @@ export default function ReferralCard() {
         </div>
       </div>
 
-      <div className="flex items-center gap-2 mt-4">
+      <div className="flex flex-col sm:flex-row gap-2 mt-4">
         <input
           readOnly
           value={referralLink}
-          className="flex-1 px-4 py-2.5 rounded-xl bg-white/5 border border-white/10 text-slate-300 text-sm font-mono truncate"
+          className="w-full px-4 py-2.5 rounded-xl bg-white/5 border border-white/10 text-slate-300 text-sm font-mono truncate"
         />
         <button
           onClick={handleCopy}
-          className={`shrink-0 px-5 py-2.5 rounded-xl font-semibold text-sm transition-all ${
+          className={`w-full sm:w-auto sm:shrink-0 px-5 py-2.5 rounded-xl font-semibold text-sm transition-all ${
             copied
               ? "bg-green-500/20 text-green-300 border border-green-500/30"
               : "bg-purple-600 text-white hover:bg-purple-500 shadow-lg shadow-purple-500/25"

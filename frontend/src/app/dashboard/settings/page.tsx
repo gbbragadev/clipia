@@ -83,7 +83,7 @@ export default function SettingsPage() {
   return (
     <div className="max-w-3xl mx-auto px-4 py-8 space-y-8">
       <section className="card p-6">
-        <h1 className="text-2xl font-semibold mb-2">Configurações da conta</h1>
+        <h1 className="text-xl sm:text-2xl font-semibold mb-2">Configurações da conta</h1>
         <p className="text-sm text-slate-400 mb-6">
           Atualize seus dados, troque a senha e gerencie sua conta.
         </p>
@@ -119,7 +119,7 @@ export default function SettingsPage() {
       </section>
 
       <section className="card p-6">
-        <h2 className="text-xl font-semibold mb-4">Alterar senha</h2>
+        <h2 className="text-base sm:text-xl font-semibold mb-4">Alterar senha</h2>
         <form onSubmit={handlePasswordSubmit} className="space-y-4">
           <input
             type="password"
@@ -146,7 +146,7 @@ export default function SettingsPage() {
 
       <section className="card p-6 space-y-4 border border-red-500/20">
         <div>
-          <h2 className="text-xl font-semibold text-red-300 mb-2">Zona de perigo</h2>
+          <h2 className="text-base sm:text-xl font-semibold text-red-300 mb-2">Zona de perigo</h2>
           <p className="text-sm text-slate-400">
             Exclua sua conta e exporte seus dados pessoais.
           </p>

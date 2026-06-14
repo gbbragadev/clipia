@@ -67,13 +67,13 @@ export default function TemplateSelector({ selected, onSelect, disabled, templat
             key={t.id}
             onClick={() => onSelect(t.id)}
             disabled={disabled}
-            className={`flex items-start gap-3 p-4 rounded-xl border text-left transition cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed ${
+            className={`flex items-start gap-3 p-3 sm:p-4 rounded-xl border text-left transition cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed ${
               selected === t.id
                 ? 'bg-purple-500/10 border-purple-500/60'
                 : 'bg-[var(--bg-surface)] border-[var(--border-default)] hover:border-[var(--border-hover)]'
             }`}
           >
-            <span className="text-3xl flex-shrink-0 mt-0.5">{t.icon}</span>
+            <span className="text-2xl sm:text-3xl flex-shrink-0 mt-0.5">{t.icon}</span>
             <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-2 text-sm font-semibold" style={{ color: selected === t.id ? 'var(--text-primary)' : 'var(--text-secondary)' }}>
                 <span>{t.name}</span>

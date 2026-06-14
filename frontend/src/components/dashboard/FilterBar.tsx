@@ -17,7 +17,7 @@ interface FilterBarProps {
 
 export default function FilterBar({ filters }: FilterBarProps) {
   return (
-    <div className="flex flex-wrap gap-4 mb-4">
+    <div className="flex flex-wrap gap-2 sm:gap-4 mb-4">
       {filters.map((filter) => (
         <div key={filter.label} className="flex items-center gap-1.5">
           <span className="text-xs font-medium mr-1" style={{ color: 'var(--text-tertiary)' }}>
@@ -29,7 +29,7 @@ export default function FilterBar({ filters }: FilterBarProps) {
               <button
                 key={opt.value}
                 onClick={() => filter.onChange(opt.value)}
-                className="px-2.5 py-1 rounded-lg text-xs font-medium transition-all cursor-pointer"
+                className="px-2.5 py-1 rounded-lg text-xs sm:text-sm font-medium transition-all cursor-pointer"
                 style={{
                   background: active ? 'rgba(168, 85, 247, 0.15)' : 'transparent',
                   color: active ? '#c084fc' : 'var(--text-tertiary)',

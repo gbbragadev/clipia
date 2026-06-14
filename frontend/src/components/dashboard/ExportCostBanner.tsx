@@ -12,7 +12,7 @@ export default function ExportCostBanner({ pendingCredits, userCredits }: Export
 
   return (
     <div
-      className="flex items-center justify-between px-4 py-3 rounded-xl text-sm"
+      className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 px-4 py-3 rounded-xl text-sm"
       style={{
         background: canAfford ? 'rgba(168, 85, 247, 0.1)' : 'rgba(239, 68, 68, 0.1)',
         border: `1px solid ${canAfford ? 'rgba(168, 85, 247, 0.25)' : 'rgba(239, 68, 68, 0.25)'}`,

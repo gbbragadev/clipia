@@ -400,7 +400,7 @@ function ActivityTable({
     <div className="card p-6">
       <h2 className="text-xl font-semibold">{title}</h2>
       <div className="mt-4 overflow-x-auto">
-        <table className="w-full min-w-[18rem] text-left">
+        <table className="w-full min-w-[16rem] sm:min-w-[18rem] text-left">
           <thead>
             <tr>
               {columns.map((column) => (
@@ -413,7 +413,7 @@ function ActivityTable({
           <tbody>
             {rows.length === 0 ? (
               <tr>
-                <td colSpan={columns.length} className="py-4 text-sm" style={{ color: 'var(--text-secondary)' }}>
+                <td colSpan={columns.length} className="py-4 text-xs sm:text-sm" style={{ color: 'var(--text-secondary)' }}>
                   Nenhum registro disponivel.
                 </td>
               </tr>
@@ -421,7 +421,7 @@ function ActivityTable({
               rows.map((row, rowIndex) => (
                 <tr key={rowIndex} style={{ borderTop: '1px solid var(--border-subtle)' }}>
                   {row.map((cell, cellIndex) => (
-                    <td key={cellIndex} className="py-3 pr-3 align-top">{cell}</td>
+                    <td key={cellIndex} className="py-3 pr-3 align-top text-xs sm:text-sm">{cell}</td>
                   ))}
                 </tr>
               ))
