@@ -49,7 +49,10 @@ Status possíveis: `open` · `confirmed` (falhou 3x igual) · `intermittent` · 
 ### BUG-R002: Preview de vídeo no dashboard usa endpoint protegido como `<video src>` → 401  [achado do E01]
 - Assinatura: F05/E01 + preview 401
 - Severidade: média (previews de vídeo não carregam no VideoCard)
-- Status: confirmed (código + network, 2026-06-14)
+- Status: **RESOLVED** (corrigido + verificado 2026-06-14)
+- Correção: `VideoCard.tsx` carrega o preview via `fetchAuthenticatedBlobUrl` (Bearer) lazy no hover e usa `<video src={blob}>`;
+  removida a tag `<video src={download_url}>` direta. Verificado: 0 elementos com src `/download`, 0 requests /download
+  e 0 erros 401 no load do dashboard.
 - Observado: `VideoCard.tsx:70` renderiza `<video src={job.download_url}>` com `download_url = /api/v1/jobs/{id}/download`,
   que exige `Authorization: Bearer`. Tags HTML não enviam header → cada preview faz `GET /download → 401` e não renderiza.
 - Correção sugerida: endpoint de preview público/assinado (token na query/URL temporária) ou servir thumbnail separado;
@@ -58,7 +61,11 @@ Status possíveis: `open` · `confirmed` (falhou 3x igual) · `intermittent` · 
 ### BUG-R003: Qualquer 401 desloga o usuário (logout global) → deslogamento espúrio  [achado do E01 — o mais sério]
 - Assinatura: sessão + 401 derruba token
 - Severidade: alta (perda de sessão no meio do uso; combinado com BUG-R002, navegar no dashboard/editor pode deslogar)
-- Status: confirmed (código + observado: token sumiu sozinho durante a sessão E2E; depois o editor não carregava)
+- Status: **RESOLVED** (corrigido + verificado 2026-06-14)
+- Correção: `notifySessionExpired()` removido de `http.ts` (fetchJson), `download.ts` e dos painéis do editor
+  (AIAssistant/ExportPanel/VoiceSelector). Expiração de sessão agora é detectada só por `getMe()` (load + polling
+  5min do AuthContext); um 401 de recurso secundário falha local (toast), não desloga. Verificado: token sobrevive a
+  3 navegações dashboard↔editor (antes sumia sozinho). tsc + build OK; prod 200.
 - Observado: `http.ts:58-60` (fetch genérico), `lib/download.ts:13`, `lib/auth.ts` e os painéis do editor chamam
   `notifySessionExpired()` para TODO `401`, que faz `localStorage.removeItem('clipia_token')` + evento → AuthContext desloga.
   Logo um 401 de **recurso secundário** (preview/download de um job específico) derruba a sessão válida inteira.

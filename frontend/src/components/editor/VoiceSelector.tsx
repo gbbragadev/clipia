@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useEditor } from '@/contexts/EditorContext'
 import { getToken } from '@/lib/auth'
-import { notifySessionExpired, readApiError } from '@/lib/http'
+import { readApiError } from '@/lib/http'
 import { fetchVoices, type VoiceInfo } from '@/lib/editor-api'
 import { useToast } from '@/components/ui/feedback'
 
@@ -93,7 +93,6 @@ export function VoiceSelector() {
           pitch: voiceConfig.pitch,
         }),
       })
-      if (res.status === 401) notifySessionExpired()
       if (!res.ok) throw new Error(await readApiError(res, 'Falha ao regerar narração'))
       const data = await res.json()
       const audioUrl = `${data.audio_url}?t=${Date.now()}`

@@ -1,8 +1,9 @@
 'use client'
 
+import { useState, useRef, useEffect, useCallback } from 'react'
 import { strings } from '@/lib/strings';
 import type { JobSummary } from '@/lib/editor-api'
-import { downloadAuthenticatedFile } from '@/lib/download'
+import { downloadAuthenticatedFile, fetchAuthenticatedBlobUrl } from '@/lib/download'
 import { GlowCard } from '@/components/ui/GlowCard'
 
 const STYLE_GRADIENTS: Record<string, string> = {
@@ -58,21 +59,57 @@ export default function VideoCard({ job, onEdit }: VideoCardProps) {
   const gradient = STYLE_GRADIENTS[job.style] || 'from-gray-900/40 to-gray-800/40'
   const icon = STYLE_ICONS[job.style] || '🎬'
 
+  // Preview do vídeo: /download é Bearer-only, então <video src> direto dava 401 (BUG-R002).
+  // Carrega como blob autenticado, lazy no primeiro hover, e revoga no unmount.
+  const [previewSrc, setPreviewSrc] = useState<string | null>(null)
+  const videoRef = useRef<HTMLVideoElement>(null)
+  const hoveringRef = useRef(false)
+
+  useEffect(() => {
+    return () => { if (previewSrc) URL.revokeObjectURL(previewSrc) }
+  }, [previewSrc])
+
+  const handleEnter = useCallback(async () => {
+    hoveringRef.current = true
+    if (!job.download_url) return
+    if (previewSrc) {
+      videoRef.current?.play().catch(() => {})
+      return
+    }
+    try {
+      const url = await fetchAuthenticatedBlobUrl(job.download_url)
+      setPreviewSrc(url)
+    } catch {
+      /* preview é opcional: se falhar, mantém o ícone (sem deslogar) */
+    }
+  }, [job.download_url, previewSrc])
+
+  const handleLeave = useCallback(() => {
+    hoveringRef.current = false
+    const v = videoRef.current
+    if (v) { v.pause(); v.currentTime = 0 }
+  }, [])
+
   return (
     <GlowCard intensity={0.2} className="h-full">
       <div className="flex flex-col h-full bg-[#110d1a] hover:bg-[#161122] transition-colors rounded-xl overflow-hidden relative">
         {/* Thumbnail - shorter on mobile, taller on desktop */}
-        <div className={`w-full aspect-[3/4] sm:aspect-[9/16] bg-gradient-to-br ${gradient} flex flex-col items-center justify-center relative overflow-hidden group`}>
+        <div
+          className={`w-full aspect-[3/4] sm:aspect-[9/16] bg-gradient-to-br ${gradient} flex flex-col items-center justify-center relative overflow-hidden group`}
+          onMouseEnter={handleEnter}
+          onMouseLeave={handleLeave}
+        >
           <div className="absolute inset-0 bg-[url(/noise.svg)] opacity-20 mix-blend-overlay"></div>
-          
-          {job.download_url && (
+
+          {job.download_url && previewSrc && (
             <video
-              src={job.download_url}
+              ref={videoRef}
+              src={previewSrc}
               className="absolute inset-0 w-full h-full object-cover opacity-60 group-hover:opacity-100 transition-opacity duration-500"
               muted
               loop
-              onMouseEnter={(e) => e.currentTarget.play()}
-              onMouseLeave={(e) => { e.currentTarget.pause(); e.currentTarget.currentTime = 0; }}
+              playsInline
+              onLoadedData={() => { if (hoveringRef.current) videoRef.current?.play().catch(() => {}) }}
             />
           )}
 

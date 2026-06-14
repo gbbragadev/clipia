@@ -5,7 +5,7 @@ import { useEditor } from '@/contexts/EditorContext'
 import { useAuth } from '@/contexts/AuthContext'
 import { downloadAuthenticatedFile } from '@/lib/download'
 import { getToken } from '@/lib/auth'
-import { notifySessionExpired, readApiError } from '@/lib/http'
+import { readApiError } from '@/lib/http'
 import ExportCostBanner from '@/components/dashboard/ExportCostBanner'
 
 type RenderStatus = 'ready' | 'rendering' | 'updated' | 'error'
@@ -67,14 +67,12 @@ export function ExportPanel({ onClose }: { onClose: () => void }) {
       if (token) headers['Authorization'] = `Bearer ${token}`
 
       const res = await fetch(`/api/v1/jobs/${jobId}/render`, { method: 'POST', headers })
-      if (res.status === 401) notifySessionExpired()
       if (!res.ok) throw new Error(await readApiError(res, `Erro ${res.status}`))
 
       // Poll in background
       const poll = async () => {
         try {
           const statusRes = await fetch(`/api/v1/jobs/${jobId}/status`, { headers })
-          if (statusRes.status === 401) notifySessionExpired()
           if (!statusRes.ok) throw new Error(await readApiError(statusRes, 'Erro ao verificar status'))
           const data = await statusRes.json()
 

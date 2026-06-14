@@ -3,7 +3,7 @@
 import { useRef, useState, useEffect } from 'react'
 import { useEditor } from '@/contexts/EditorContext'
 import { getToken } from '@/lib/auth'
-import { notifySessionExpired, readApiError } from '@/lib/http'
+import { readApiError } from '@/lib/http'
 import { useToast } from '@/components/ui/feedback'
 
 const QUICK_PROMPTS = [
@@ -63,7 +63,6 @@ export function AIAssistant() {
           },
         }),
       })
-      if (res.status === 401) notifySessionExpired()
       if (!res.ok) throw new Error(await readApiError(res, 'Erro ao consultar IA'))
       const data = await res.json()
       setMessages(prev => [...prev, {
@@ -112,7 +111,6 @@ export function AIAssistant() {
           pitch: composition.voiceConfig?.pitch ?? 5,
         }),
       })
-      if (res.status === 401) notifySessionExpired()
       if (!res.ok) throw new Error(await readApiError(res, 'Falha ao regerar narração'))
       const data = await res.json()
       const audioUrl = `${data.audio_url}?t=${Date.now()}`

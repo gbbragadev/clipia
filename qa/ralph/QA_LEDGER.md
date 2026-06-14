@@ -16,7 +16,7 @@ Estado mutável lido e gravado a cada iteração. **Não editar à mão durante 
 
 | ID | Fluxo | run_count | last_result | recent (3 últimos) | last_run |
 |----|-------|-----------|-------------|--------------------|----------|
-| E01 | **Jornada E2E completa** (login→gerar→pipeline→editar abas→render→baixar) | 1 | PASS* | PASS* | 20260614-0034 (job b9e32bc3: gerou 242s, editor 5 abas/7 cenas, render ~5-6min, MP4 36.8MB. *núcleo OK mas expôs BUG-R002/R003 de sessão/preview) |
+| E01 | **Jornada E2E completa** (login→gerar→pipeline→editar abas→render→baixar) | 1 | PASS* | PASS* | 20260614-0034 (job b9e32bc3: gerou 242s, editor 5 abas/7 cenas, render ~5-6min, MP4 36.8MB. *expôs e CORRIGIU BUG-R002/R003 de sessão/preview) |
 | F01 | Landing `/` | 2 | PASS | FAIL PASS | 20260613-2234 (BUG-R001 resolvido: main visível, console limpo) |
 | F02 | Login | 2 | PASS | FAIL PASS | 20260613-2235 (BUG-R001 resolvido: LOGGED local+prod) |
 | F03 | Register (validação) | 0 | — | — | — |

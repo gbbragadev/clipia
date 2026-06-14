@@ -55,9 +55,9 @@ export async function fetchJson<T>(
     })
 
     if (!response.ok) {
-      if (response.status === 401) {
-        notifySessionExpired()
-      }
+      // NÃO deslogar aqui: um 401 de um recurso específico (job, download, composition…) não significa
+      // sessão expirada. A expiração real é detectada por getMe() (load + polling 5min do AuthContext).
+      // Deslogar em qualquer 401 derrubava a sessão válida por falhas pontuais (BUG-R003).
       throw new Error(await readApiError(response, fallbackMessage))
     }
 

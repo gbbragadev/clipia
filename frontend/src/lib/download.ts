@@ -1,5 +1,5 @@
 import { getToken } from '@/lib/auth'
-import { notifySessionExpired, readApiError } from '@/lib/http'
+import { readApiError } from '@/lib/http'
 
 function buildHeaders(): HeadersInit {
   const token = getToken()
@@ -9,9 +9,7 @@ function buildHeaders(): HeadersInit {
 
 async function fetchProtectedBlob(url: string): Promise<{ blob: Blob; filename: string | null }> {
   const response = await fetch(url, { headers: buildHeaders() })
-  if (response.status === 401) {
-    notifySessionExpired()
-  }
+  // 401 aqui = este arquivo específico negou; não desloga a sessão (BUG-R003). Apenas falha local.
   if (!response.ok) {
     throw new Error(await readApiError(response, 'Erro ao baixar arquivo'))
   }
