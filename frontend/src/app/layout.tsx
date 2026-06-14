@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import "./globals.css";
 import FilmGrain from "@/components/FilmGrain";
 import AppProviders from "@/components/providers/AppProviders";
@@ -41,6 +41,13 @@ export const metadata: Metadata = {
   metadataBase: new URL(
     process.env.NEXT_PUBLIC_BASE_URL || "https://clipia.com.br"
   ),
+};
+
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  viewportFit: "cover", // habilita env(safe-area-inset-*) p/ notch (editor + barras)
+  themeColor: "#0a0a12",
 };
 
 export default function RootLayout({
