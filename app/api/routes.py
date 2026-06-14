@@ -778,7 +778,7 @@ Regras:
 - Seja especifico no reason (nao generico)
 - Maximo 3 sugestoes por resposta"""
 
-    raw = complete_text(prompt, max_tokens=2048)
+    raw = complete_text(prompt)
     raw = strip_code_fences(raw)
 
     try:

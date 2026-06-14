@@ -30,12 +30,14 @@ def strip_code_fences(raw: str) -> str:
     return raw
 
 
-def complete_text(prompt: str, max_tokens: int = 2048, json_mode: bool = True) -> str:
+def complete_text(prompt: str, max_tokens: int = 16000, json_mode: bool = True) -> str:
     """Faz uma chamada de chat completion e retorna o texto da resposta.
 
     json_mode=True pede response_format JSON (o prompt deve mencionar JSON).
-    max_tokens generoso para acomodar tokens de reasoning do DeepSeek V4 sem
-    truncar a resposta final.
+    max_tokens ALTO de proposito: o DeepSeek V4 Pro e modelo de reasoning e gasta
+    tokens "pensando" antes do output. Com budget baixo (ex. 4096) o reasoning
+    consome tudo (finish_reason=length) e o content volta vazio. O modelo para em
+    finish=stop quando termina, entao o teto alto nao custa tokens extras.
     """
     client = get_client()
     kwargs: dict = {

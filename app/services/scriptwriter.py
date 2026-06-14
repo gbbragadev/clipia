@@ -104,8 +104,11 @@ def generate_script(topic: str, style: str, duration_target: int, template_id: s
 
     prompt_text += template.script.prompt_extra
 
-    raw = complete_text(prompt_text, max_tokens=4096)
+    # max_tokens default de complete_text e alto de proposito (reasoning do DeepSeek V4 Pro).
+    raw = complete_text(prompt_text)
     raw = strip_code_fences(raw)
+    if not raw:
+        raise ScriptValidationError("LLM retornou resposta vazia (reasoning pode ter estourado o max_tokens)")
     script = json.loads(raw)
 
     # Validate and fix duration_hints
