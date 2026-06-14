@@ -24,8 +24,8 @@ export default function FilmGrain() {
   return (
     <canvas
       ref={canvasRef}
-      className="pointer-events-none fixed inset-0 z-50 opacity-[0.04] mix-blend-overlay"
-      style={{ width: '100vw', height: '100vh', imageRendering: 'pixelated' }}
+      className="pointer-events-none fixed inset-0 z-50 h-full w-full opacity-[0.04] mix-blend-overlay"
+      style={{ imageRendering: 'pixelated' }}
     />
   )
 }
