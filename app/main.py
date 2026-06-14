@@ -1,22 +1,19 @@
-from contextlib import asynccontextmanager
-
 import logging
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
-from pydantic import ValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
-from fastapi.responses import PlainTextResponse
+from fastapi.responses import JSONResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
-from slowapi import Limiter, _rate_limit_exceeded_handler
+from pydantic import ValidationError
+from slowapi import Limiter
 from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from app.api.routes import router
 from app.auth.routes import router as auth_router
-from app.payments.routes import router as payments_router
 from app.config import settings
 from app.db.engine import engine
 from app.errors import (
@@ -26,6 +23,7 @@ from app.errors import (
     unhandled_exception_handler,
 )
 from app.observability import access_log_middleware, get_deep_health, render_metrics
+from app.payments.routes import router as payments_router
 
 logger = logging.getLogger(__name__)
 
@@ -43,6 +41,7 @@ limiter = Limiter(key_func=get_remote_address, default_limits=[settings.RATE_LIM
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     from app.config import validate_production_settings
+
     validate_production_settings(settings)
     yield
     await engine.dispose()
@@ -87,12 +86,22 @@ def create_app() -> FastAPI:
     jobs_dir.mkdir(parents=True, exist_ok=True)
     app.mount("/storage/jobs", StaticFiles(directory=str(jobs_dir)), name="job_files")
 
+    # Videos da galeria/showcase servidos via /storage/showcase (rewrite /storage/* do
+    # next.config proxia pro backend). Mantem os mp4 fora do git do frontend; o manifesto
+    # (showcase.json) aponta /storage/showcase/<slug>.mp4 para esses, ou /showcase/<slug>.mp4
+    # para os poucos "hero" commitados em frontend/public/showcase.
+    showcase_dir = settings.STORAGE_DIR / "showcase"
+    showcase_dir.mkdir(parents=True, exist_ok=True)
+    app.mount("/storage/showcase", StaticFiles(directory=str(showcase_dir)), name="showcase_files")
+
     @app.get(
         "/health",
         tags=["system"],
         summary="Check system health",
         description="Returns a simple OK status to indicate the API is running.",
-        responses={200: {"description": "System is healthy", "content": {"application/json": {"example": {"status": "ok"}}}}},
+        responses={
+            200: {"description": "System is healthy", "content": {"application/json": {"example": {"status": "ok"}}}}
+        },
     )
     def health():
         """
@@ -108,7 +117,10 @@ def create_app() -> FastAPI:
         tags=["system"],
         summary="Deep system health check",
         description="Checks all internal dependencies and backing services (DB, Redis, etc.).",
-        responses={200: {"description": "All systems operational"}, 503: {"description": "One or more subsystems failing"}},
+        responses={
+            200: {"description": "All systems operational"},
+            503: {"description": "One or more subsystems failing"},
+        },
     )
     async def health_deep():
         """

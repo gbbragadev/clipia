@@ -1,25 +1,54 @@
-// Valida que todo video do manifesto existe em public/ e nao ha mp4 orfao sem entrada.
+// Valida que todo video do manifesto existe no disco e nao ha mp4 orfao em public/showcase.
+// Suporta dois locais para o campo `video`:
+//   /showcase/<file>.mp4          -> frontend/public/showcase (hero, commitado no git)
+//   /storage/showcase/<file>.mp4  -> <repo>/storage/showcase   (galeria, servida pelo backend)
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
-const showcaseDir = path.join(root, 'public', 'showcase')
-const manifest = JSON.parse(fs.readFileSync(path.join(showcaseDir, 'showcase.json'), 'utf8'))
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..') // frontend/
+const repoRoot = path.resolve(root, '..') // <repo>
+const publicShowcaseDir = path.join(root, 'public', 'showcase')
+const storageShowcaseDir = path.join(repoRoot, 'storage', 'showcase')
+const manifest = JSON.parse(fs.readFileSync(path.join(publicShowcaseDir, 'showcase.json'), 'utf8'))
 
 let errors = 0
 const nicheIds = new Set(manifest.niches.map((n) => n.id))
 
+// Resolve o caminho fisico de um campo `video` do manifesto.
+function resolveVideoPath(video) {
+  if (video.startsWith('/storage/showcase/')) {
+    return path.join(storageShowcaseDir, path.basename(video))
+  }
+  // /showcase/<file> (ou qualquer outro sob public/)
+  return path.join(root, 'public', video.replace(/^\//, ''))
+}
+
 for (const v of manifest.videos) {
-  const file = path.join(root, 'public', v.video.replace(/^\//, ''))
-  if (!fs.existsSync(file)) { console.error(`MISSING FILE: ${v.video} (id=${v.id})`); errors++ }
-  if (!nicheIds.has(v.niche)) { console.error(`UNKNOWN NICHE: ${v.niche} (id=${v.id})`); errors++ }
+  if (!fs.existsSync(resolveVideoPath(v.video))) {
+    console.error(`MISSING FILE: ${v.video} (id=${v.id})`)
+    errors++
+  }
+  if (!nicheIds.has(v.niche)) {
+    console.error(`UNKNOWN NICHE: ${v.niche} (id=${v.id})`)
+    errors++
+  }
 }
 
-const referenced = new Set(manifest.videos.map((v) => path.basename(v.video)))
-for (const f of fs.readdirSync(showcaseDir).filter((f) => f.endsWith('.mp4'))) {
-  if (!referenced.has(f)) { console.error(`ORPHAN MP4 (sem entrada no manifesto): ${f}`); errors++ }
+// Orfaos: so checamos public/showcase (o que vive no git). storage/showcase e gerenciado
+// pelo promote_to_showcase.py e pode conter muitos arquivos / nao existir em dev.
+const referencedInPublic = new Set(
+  manifest.videos.filter((v) => !v.video.startsWith('/storage/showcase/')).map((v) => path.basename(v.video))
+)
+for (const f of fs.readdirSync(publicShowcaseDir).filter((f) => f.endsWith('.mp4'))) {
+  if (!referencedInPublic.has(f)) {
+    console.error(`ORPHAN MP4 (sem entrada no manifesto): ${f}`)
+    errors++
+  }
 }
 
-if (errors) { console.error(`\n${errors} problema(s).`); process.exit(1) }
+if (errors) {
+  console.error(`\n${errors} problema(s).`)
+  process.exit(1)
+}
 console.log(`OK: ${manifest.videos.length} videos, ${manifest.niches.length} nichos, tudo em sincronia.`)
