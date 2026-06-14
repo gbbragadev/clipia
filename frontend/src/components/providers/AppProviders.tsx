@@ -5,9 +5,13 @@ import { AuthProvider } from '@/contexts/AuthContext'
 import { OfflineBanner, ToastProvider, useToast } from '@/components/ui/feedback'
 import { useUTM } from '@/hooks/useUTM'
 
-function UTMCapture({ children }: { children: ReactNode }) {
+// Captura UTM/ref como side-effect puro. NAO deve envolver `children`: useUTM usa
+// useSearchParams, e se a arvore de conteudo ficar dentro do <Suspense fallback={null}>
+// dela, todo o body renderiza `null` no servidor (SSR) e so aparece apos hidratacao —
+// matando o SEO. Por isso fica isolado, sem filhos.
+function UTMCapture() {
   useUTM()
-  return <>{children}</>
+  return null
 }
 
 function NetworkStatusBridge({ children }: { children: ReactNode }) {
@@ -53,11 +57,12 @@ export default function AppProviders({ children }: { children: ReactNode }) {
   return (
     <ToastProvider>
       <NetworkStatusBridge>
+        {/* useSearchParams isolado num Suspense proprio (exigencia do Next), sem envolver
+            o conteudo — assim `children` renderiza no servidor (SSR/SSG) e o Google indexa. */}
         <Suspense fallback={null}>
-          <UTMCapture>
-            <AuthProvider>{children}</AuthProvider>
-          </UTMCapture>
+          <UTMCapture />
         </Suspense>
+        <AuthProvider>{children}</AuthProvider>
       </NetworkStatusBridge>
     </ToastProvider>
   )
