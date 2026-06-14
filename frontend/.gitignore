@@ -39,3 +39,8 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# Windows reserved device name recriado por redirects `> nul` no git bash.
+# Quebra o Turbopack/Tailwind (auto content-detection tenta ler o device e falha).
+nul
+**/nul

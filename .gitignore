@@ -20,3 +20,10 @@ finalTEMP_MPY_wvf_snd.mp4
 .claude/
 evidence/
 excalidraw.log
+
+# Windows reserved device name recriado por redirects `> nul` no git bash (quebra Turbopack/Tailwind)
+nul
+**/nul
+
+# Superpowers brainstorm (visual companion mockups)
+.superpowers/
