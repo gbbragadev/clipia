@@ -14,6 +14,7 @@ import { MusicSelector } from './MusicSelector'
 import { AIAssistant } from './AIAssistant'
 import { ExportPanel } from './ExportPanel'
 import { useKeyboardShortcuts } from '@/hooks/useKeyboardShortcuts'
+import { useIsMobile } from '@/hooks/useIsMobile'
 import { InlineError } from '@/components/ui/feedback'
 
 const VideoPlayer = dynamic(() => import('./VideoPlayer').then((m) => ({ default: m.VideoPlayer })), {
@@ -36,6 +37,8 @@ const PANELS = [
 export function EditorLayout() {
   const { loading, error, saving, dirty, activePanel, setActivePanel, panelCollapsed, togglePanel, composition } = useEditor()
   const [showExport, setShowExport] = useState(false)
+  const isMobile = useIsMobile()
+  const [timelineOpen, setTimelineOpen] = useState(false)
   useKeyboardShortcuts()
 
   if (loading) {
@@ -124,8 +127,33 @@ export function EditorLayout() {
         </button>
       </div>
 
-      {/* Row 3: Timeline (full width) */}
-      <EditorTimeline />
+      {/* Row 3: Timeline — inline no desktop, gaveta no mobile */}
+      {!isMobile && <EditorTimeline />}
+      {isMobile && (
+        <>
+          <button
+            className="editor-timeline-fab"
+            onClick={() => setTimelineOpen(true)}
+            aria-label="Abrir linha do tempo"
+          >
+            ⏱ Linha do tempo
+          </button>
+          {timelineOpen && (
+            <>
+              <div className="editor-timeline-backdrop" onClick={() => setTimelineOpen(false)} />
+              <div className="editor-timeline-drawer" role="dialog" aria-label="Linha do tempo">
+                <div className="editor-timeline-drawer__handle">
+                  <span>Linha do tempo</span>
+                  <button className="editor-timeline-drawer__close" onClick={() => setTimelineOpen(false)}>
+                    Fechar ✕
+                  </button>
+                </div>
+                <EditorTimeline />
+              </div>
+            </>
+          )}
+        </>
+      )}
 
       {showExport && <ExportPanel onClose={() => setShowExport(false)} />}
     </div>
