@@ -40,9 +40,9 @@ export function CinematicSection({
   }, [reveal])
 
   const spacingClasses = {
-    md: 'py-12 md:py-24',
-    lg: 'py-24 md:py-32',
-    xl: 'py-32 md:py-48',
+    md: 'py-10 sm:py-12 md:py-24',
+    lg: 'py-14 sm:py-20 md:py-32',
+    xl: 'py-16 sm:py-24 md:py-48',
   }
 
   const backgroundClasses = {
