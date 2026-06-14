@@ -59,7 +59,7 @@ export default async function NichoPage({
         {/* Hero */}
         <CinematicSection background="mesh" spacing="xl" reveal="fade-up">
           <div className={`mx-auto max-w-3xl text-center rounded-3xl bg-gradient-to-b ${n.gradient} p-8 md:p-12 border border-white/10`}>
-            <div className="text-6xl mb-6" aria-hidden>{n.emoji}</div>
+            <div className="text-5xl sm:text-6xl mb-6" aria-hidden>{n.emoji}</div>
             <h1 className="text-4xl md:text-5xl font-bold text-white leading-tight tracking-tight">
               {n.h1}
             </h1>
