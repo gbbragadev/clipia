@@ -192,18 +192,20 @@ async def generate(
 
     job_id = str(job.id)
 
-    _redis.hset(
-        f"job:{job_id}",
-        mapping={
-            "status": "queued",
-            "progress": "0",
-            "current_step": "",
-            "error": "",
-            "detail": "",
-            "template_id": req.template_id,
-            "created_at": datetime.now(timezone.utc).isoformat(),
-        },
-    )
+    job_meta = {
+        "status": "queued",
+        "progress": "0",
+        "current_step": "",
+        "error": "",
+        "detail": "",
+        "template_id": req.template_id,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    if req.sfx_enabled is not None:
+        job_meta["sfx_enabled"] = "1" if req.sfx_enabled else "0"
+    if req.music_enabled is not None:
+        job_meta["music_enabled"] = "1" if req.music_enabled else "0"
+    _redis.hset(f"job:{job_id}", mapping=job_meta)
 
     dispatch_pipeline(
         job_id,

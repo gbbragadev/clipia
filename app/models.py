@@ -21,6 +21,12 @@ class GenerateRequest(BaseModel):
         max_length=2000,
         description="Dados reais da tendencia (titulo + contexto) para fundamentar o roteiro",
     )
+    sfx_enabled: bool | None = Field(
+        default=None, description="Liga/desliga SFX (whoosh) por video. None = usar settings.SFX_ENABLED"
+    )
+    music_enabled: bool | None = Field(
+        default=None, description="Liga/desliga musica de fundo por video. None = usar settings.AUTO_MUSIC_ENABLED"
+    )
 
     @field_validator("template_id")
     @classmethod
