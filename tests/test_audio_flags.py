@@ -65,3 +65,18 @@ async def test_generate_without_flags_leaves_them_absent(client, app, verified_u
     assert resp.status_code == 200
     job_id = resp.json()["job_id"]
     assert app.state.fake_redis.hget(f"job:{job_id}", "sfx_enabled") is None
+
+
+def test_dialogue_voices_are_not_legacy_en():
+    from app.config import settings
+
+    legacy = {"21m00Tcm4TlvDq8ikWAM", "pNInz6obpgDQGcFmaJgB"}  # Rachel / Adam (EN)
+    assert settings.DIALOGUE_VOICE_A not in legacy
+    assert settings.DIALOGUE_VOICE_B not in legacy
+
+
+def test_dialogue_template_uses_configured_voice():
+    from app.config import settings
+    from app.templates import get_template
+
+    assert get_template("dialogue_duo").voice.voice_id == settings.DIALOGUE_VOICE_A

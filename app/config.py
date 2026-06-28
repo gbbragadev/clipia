@@ -63,10 +63,9 @@ class Settings(BaseSettings):
     AUTO_MUSIC_ENABLED: bool = True
     AUTO_MUSIC_VOLUME: float = 0.12
 
-    # Dialogo multi-locutor (text_to_dialogue): 2 vozes ElevenLabs. Defaults = premade (EN, falam
-    # pt via multilingual_v2 com sotaque); troque por vozes pt-BR da sua conta via env.
-    DIALOGUE_VOICE_A: str = "21m00Tcm4TlvDq8ikWAM"  # Rachel (premade)
-    DIALOGUE_VOICE_B: str = "pNInz6obpgDQGcFmaJgB"  # Adam (premade)
+    # Dialogo multi-locutor (text_to_dialogue): 2 vozes ElevenLabs pt-BR. Troque por env se quiser.
+    DIALOGUE_VOICE_A: str = "KHmfNHtEjHhLK9eER20w"  # Fernanda (pt-BR, feminina)
+    DIALOGUE_VOICE_B: str = "aRsdx5i9kl9PWUbkzxIp"  # Bruno - ClipIA (pt-BR, masculina, Voice Design)
 
     # GPU
     DEVICE: str = "cuda"

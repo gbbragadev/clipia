@@ -2,6 +2,8 @@
 
 from dataclasses import dataclass
 
+from app.config import settings
+
 
 @dataclass(frozen=True)
 class LayoutConfig:
@@ -235,7 +237,7 @@ TEMPLATES: dict[str, VideoTemplate] = {
             word_rate=2.0,
         ),
         # As 2 vozes reais vêm de settings.DIALOGUE_VOICE_A/B na síntese; provider elevenlabs p/ pricing
-        voice=VoicePreset(provider="elevenlabs", voice_id="21m00Tcm4TlvDq8ikWAM"),
+        voice=VoicePreset(provider="elevenlabs", voice_id=settings.DIALOGUE_VOICE_A),
     ),
 }
 
