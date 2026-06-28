@@ -159,6 +159,13 @@ def invoke_remotion_render(
     job_dir = settings.STORAGE_DIR / "jobs" / job_id
 
     props = build_composition_props(job_id, audio_filename=audio_filename, default_music_url=default_music_url)
+    # musicUrl e asset do publicDir do front (/music/*.mp3); o render server-side do Remotion nao
+    # resolve o publicDir local (404). Reescrevemos para URL absoluta servida pelo backend (igual
+    # audio/midia). Fica aqui, e nao no build_composition_props, para o preview/testes manterem o
+    # caminho relativo.
+    music = props.get("musicUrl")
+    if isinstance(music, str) and music.startswith("/"):
+        props["musicUrl"] = f"{_backend_url()}{music}"
     props_path = job_dir / "remotion_props.json"
     props_path.write_text(json.dumps(props, ensure_ascii=False), encoding="utf-8")
 
