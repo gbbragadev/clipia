@@ -19,10 +19,11 @@ export default function HeroSection() {
           </div>
 
           <div className="w-full">
-            <PretextHeading 
-              text="Crie vídeos que ninguém pula" 
-              animation="pop" 
-              color="#ffffff" 
+            <PretextHeading
+              text="Crie vídeos que ninguém pula"
+              animation="pop"
+              color="#ffffff"
+              align="center"
               className="mb-4"
             />
           </div>
