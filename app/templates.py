@@ -13,7 +13,7 @@ class LayoutConfig:
 
 @dataclass(frozen=True)
 class MediaStrategy:
-    source: str  # "pexels" | "local" | "ai_image"
+    source: str  # "pexels" | "local" | "ai_image" | "ai_video"
     library_tag: str | None = None  # e.g. "minecraft_parkour"
     loop_single: bool = False  # True = one clip looped for entire video
     # Campos para source == "ai_image":
@@ -194,6 +194,32 @@ TEMPLATES: dict[str, VideoTemplate] = {
             word_rate=1.9,
         ),
         voice=VoicePreset(),  # Edge default (mais barato que ElevenLabs)
+    ),
+    "ai_video": VideoTemplate(
+        id="ai_video",
+        name="Vídeo IA (premium)",
+        description="Cenas em vídeo geradas por IA (movimento real) para qualquer tema — o formato mais premium",
+        icon="🎞️",
+        layout=LayoutConfig(type="fullscreen"),
+        media=MediaStrategy(
+            source="ai_video",
+            # style_suffix vira sufixo do prompt de cada clipe (modelos de video premiam descricao de movimento/camera)
+            style_suffix=(
+                "movimento de câmera cinematográfico suave, iluminação dramática, "
+                "alta qualidade, foco nítido, vertical 9:16, sem texto na tela, sem marca d'água"
+            ),
+        ),
+        script=ScriptConfig(
+            prompt_extra=(
+                "\n\nEste vídeo usa CENAS GERADAS EM VÍDEO POR IA (uma por cena)."
+                "\nCada cena precisa de um visual_hint concreto, visualmente rico e COM MOVIMENTO"
+                " implícito (ação, câmera, dinâmica) — não uma foto estática."
+            ),
+            needs_keywords=False,
+            needs_visual_hint=True,
+            word_rate=1.9,
+        ),
+        voice=VoicePreset(),  # Edge default; o video ja e o custo dominante
     ),
     "dialogue_duo": VideoTemplate(
         id="dialogue_duo",

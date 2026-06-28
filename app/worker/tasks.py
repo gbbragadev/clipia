@@ -251,6 +251,47 @@ def task_generate_images(self, data: dict, job_id: str, template_id: str) -> dic
         raise
 
 
+@celery_app.task(name="generate_videos", bind=True)
+def task_generate_videos(self, data: dict, job_id: str, template_id: str) -> dict:
+    try:
+        if _check_cancelled(job_id):
+            return data
+
+        template = get_template(template_id)
+        if template.media.source != "ai_video":
+            return data
+
+        script = data.get("script") or _read_json_file(get_job_dir(job_id) / "script.json")
+        scenes = script.get("scenes", [])
+        if not scenes:
+            raise ValueError("Script sem cenas")
+
+        _update_job(job_id, "processing", "generating_videos", 0.15, detail=f"Gerando {len(scenes)} clipes IA...")
+
+        suffix = template.media.style_suffix
+        prompts = []
+        for i, scene in enumerate(scenes):
+            hint = scene.get("visual_hint", "").strip()
+            if not hint:
+                raise ValueError(f"cena {i+1} sem visual_hint")
+            prompts.append(f"{hint}, {suffix}" if suffix else hint)
+
+        from app.services.video_gen_provider import generate_scenes
+
+        videos_dir = get_job_dir(job_id) / "videos"
+        paths = asyncio.run(generate_scenes(prompts, str(videos_dir)))
+        data["video_paths"] = paths
+        _update_job(job_id, "processing", "generating_videos", 0.30, detail=f"{len(paths)} clipes IA prontos.")
+        return data
+
+    except SoftTimeLimitExceeded:
+        _handle_soft_timeout(job_id, "generate_videos")
+        raise
+    except Exception as e:
+        _fail_job(job_id, f"Falha ao gerar videos IA: {e}")
+        raise
+
+
 def dispatch_pipeline(
     job_id: str,
     topic: str,
@@ -283,6 +324,7 @@ def dispatch_pipeline(
     pipeline = chain(
         task_generate_script.s(job_id, topic, style, duration_target, template_id, trend_context),
         task_generate_images.s(job_id, template_id),
+        task_generate_videos.s(job_id, template_id),
         task_synthesize_audio.s(job_id, template_id),
         task_transcribe_audio.s(job_id),
         task_fetch_media.s(job_id, template_id),
@@ -547,6 +589,14 @@ def task_fetch_media(self, data: dict, job_id: str, template_id: str = "stock_na
                 image_paths = sorted(str(p) for p in img_dir.glob("scene_*.png"))
             data["media_paths"] = image_paths
             _update_job(job_id, "processing", "media", 0.65, detail="Imagens IA ja geradas, skip Pexels.")
+            return data
+        if template.media.source == "ai_video":
+            video_paths = data.get("video_paths")
+            if not video_paths:
+                vid_dir = get_job_dir(job_id) / "videos"
+                video_paths = sorted(str(p) for p in vid_dir.glob("scene_*.mp4"))
+            data["media_paths"] = video_paths
+            _update_job(job_id, "processing", "media", 0.65, detail="Clipes IA ja gerados, skip Pexels.")
             return data
         _update_job(job_id, "processing", "media", 0.55, detail="Buscando videos...")
         script = data["script"]

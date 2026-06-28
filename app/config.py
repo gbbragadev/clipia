@@ -88,16 +88,28 @@ class Settings(BaseSettings):
     GPT_IMAGE_QUALITY: str = "medium"  # "low" | "medium" | "high"
     GPT_IMAGE_MODERATION: str = "low"  # "auto" | "low"
 
-    # Kling AI (Phase 3)
+    # Kling AI (legado — substituido por video IA via OpenRouter)
     KLING_ACCESS_KEY: str = ""
     KLING_SECRET_KEY: str = ""
+
+    # Video IA via OpenRouter (geracao assincrona; ver app/services/video_gen_provider.py)
+    # Slugs: bytedance/seedance-2.0-fast (default) | bytedance/seedance-2.0 | bytedance/seedance-1-5-pro
+    OPENROUTER_VIDEO_MODEL: str = "bytedance/seedance-2.0-fast"
+    VIDEO_GEN_RESOLUTION: str = "720p"  # 480p (barato) | 720p. 2.0-fast nao tem 1080p.
+    VIDEO_GEN_ASPECT_RATIO: str = "9:16"
+    VIDEO_GEN_CLIP_SECONDS: int = 5  # duracao de cada clipe por cena (Seedance aceita 4-15)
+    VIDEO_GEN_POLL_INTERVAL: int = 15  # segundos entre polls do job assincrono
+    VIDEO_GEN_TIMEOUT: int = 600  # teto por clipe (10 min)
+    # Custo em creditos do template de video IA. Preco e por TOKEN = w*h*dur*24/1024.
+    # Ex.: 2.0-fast 720p 9:16 ~= R$0,67/s; um Short ~30s ~= R$20 de API -> ~30 creditos com margem.
+    # Ajuste junto com OPENROUTER_VIDEO_MODEL/VIDEO_GEN_RESOLUTION.
 
     # Credit costs
     CREDIT_COST_EDGE: int = 1
     CREDIT_COST_ELEVENLABS: int = 2
     CREDIT_COST_CUSTOM_AUDIO: int = 1
     CREDIT_COST_AI_IMAGE: int = 5
-    CREDIT_COST_AI_VIDEO: int = 5
+    CREDIT_COST_AI_VIDEO: int = 30  # template premium de video IA (ver nota de precificacao acima)
 
     # MercadoPago
     MP_ACCESS_TOKEN: str = ""

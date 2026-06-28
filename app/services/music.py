@@ -17,6 +17,7 @@ TEMPLATE_MOODS: dict[str, str] = {
     "story_time": "dark-ambient",
     "novelinha_historica": "cinematic-tension",
     "ai_visual": "dreamy-space",
+    "ai_video": "cinematic-tension",  # video IA premium = trilha épica
     "dialogue_duo": "lofi-chill",  # suave, não compete com as falas
 }
 DEFAULT_MOOD = "inspirational"

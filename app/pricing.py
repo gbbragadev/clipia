@@ -21,6 +21,8 @@ def get_generation_credit_cost(template_id: str, voice_provider: str) -> int:
     """
     voice_cost = get_voice_credit_cost(voice_provider)
     template = get_template(template_id)
+    if template.media.source == "ai_video":
+        return max(voice_cost, settings.CREDIT_COST_AI_VIDEO)
     if template.media.source == "ai_image":
         return max(voice_cost, settings.CREDIT_COST_AI_IMAGE)
     return voice_cost
