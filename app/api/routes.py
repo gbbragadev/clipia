@@ -629,6 +629,11 @@ async def get_composition(
 
     job_template_id = getattr(job, "template_id", "stock_narration")
     tmpl = get_template(job_template_id)
+    from app.job_config import resolve_job_flag
+    from app.services.music import auto_music_url
+
+    music_on = resolve_job_flag(_redis, job_id, "music_enabled", settings.AUTO_MUSIC_ENABLED)
+    default_music_url = auto_music_url(job_template_id) if music_on else None
 
     return CompositionResponse(
         job_id=job_id,
@@ -650,6 +655,8 @@ async def get_composition(
         template_id=job_template_id,
         layout_type=tmpl.layout.type,
         pending_credits=job.pending_credits if job else 0.0,
+        music_url=default_music_url,
+        music_volume=settings.AUTO_MUSIC_VOLUME,
     )
 
 
