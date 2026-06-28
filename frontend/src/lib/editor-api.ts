@@ -96,6 +96,8 @@ export interface GenerateParams {
   voice_provider?: 'edge' | 'elevenlabs' | 'custom'
   voice_config?: Record<string, unknown>
   trend_context?: string
+  sfx_enabled?: boolean
+  music_enabled?: boolean
 }
 
 export interface VoiceInfo {
