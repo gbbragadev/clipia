@@ -62,7 +62,8 @@ Start-Sleep -Seconds 2
 # 4. Subir os 4 processos (hidden; cada launcher copia env User->Process e loga em storage\)
 $launchers = @('_run-backend.ps1', '_run-worker.ps1', '_run-frontend.ps1', '_run-tunnel.ps1')
 foreach ($l in $launchers) {
-    Start-Process powershell -WindowStyle Hidden -ArgumentList '-ExecutionPolicy', 'Bypass', '-File', "$root\scripts\$l"
+    # -NoProfile: evita que hooks de shell (ex. lean-ctx) interceptem args dos launchers (quebrava `-p 3003`)
+    Start-Process powershell -WindowStyle Hidden -ArgumentList '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', "$root\scripts\$l"
     Log "Lancado: $l"
     Start-Sleep -Seconds 2
 }
