@@ -674,16 +674,19 @@ def task_compose_video(self, data: dict, job_id: str, template_id: str = "stock_
         job_dir = get_job_dir(job_id)
         output_path = str(job_dir / "final.mp4")
 
+        from app.job_config import resolve_job_flag
+
         audio_path = data["audio_path"]
-        if settings.SFX_ENABLED:
+        if resolve_job_flag(_redis, job_id, "sfx_enabled", settings.SFX_ENABLED):
             from app.services.sfx import mix_transitions
 
             scene_durs = [s.get("duration_hint", 0) for s in data["script"]["scenes"]]
             audio_path = mix_transitions(audio_path, scene_durs, str(job_dir / "narration_sfx.wav"))
 
-        from app.services.music import resolve_auto_music
+        from app.services.music import resolve_music_path
 
-        music_path = resolve_auto_music(template_id)
+        music_enabled = resolve_job_flag(_redis, job_id, "music_enabled", settings.AUTO_MUSIC_ENABLED)
+        music_path = resolve_music_path(template_id) if music_enabled else None
         compose_short(
             scenes=data["script"]["scenes"],
             media_paths=data["media_paths"],

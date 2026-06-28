@@ -23,10 +23,24 @@ TEMPLATE_MOODS: dict[str, str] = {
 DEFAULT_MOOD = "inspirational"
 
 
+def _mood_for(template_id: str) -> str:
+    return TEMPLATE_MOODS.get(template_id, DEFAULT_MOOD)
+
+
+def resolve_music_path(template_id: str) -> str | None:
+    """Path FS do mp3 do mood do template (SEM checar a flag global; o caller decide)."""
+    path = _MUSIC_DIR / f"{_mood_for(template_id)}.mp3"
+    return str(path) if path.exists() else None
+
+
+def auto_music_url(template_id: str) -> str | None:
+    """URL relativa (/music/<mood>.mp3) do mood do template, ou None se a faixa nao existe."""
+    mood = _mood_for(template_id)
+    return f"/music/{mood}.mp3" if (_MUSIC_DIR / f"{mood}.mp3").exists() else None
+
+
 def resolve_auto_music(template_id: str) -> str | None:
-    """Path do mp3 de fundo para o template, ou None se desabilitado/arquivo ausente."""
+    """Path FS da musica do template respeitando a flag global AUTO_MUSIC_ENABLED."""
     if not settings.AUTO_MUSIC_ENABLED:
         return None
-    mood = TEMPLATE_MOODS.get(template_id, DEFAULT_MOOD)
-    path = _MUSIC_DIR / f"{mood}.mp3"
-    return str(path) if path.exists() else None
+    return resolve_music_path(template_id)
