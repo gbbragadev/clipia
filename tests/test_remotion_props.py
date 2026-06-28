@@ -25,6 +25,8 @@ def test_default_music_url_applied_when_no_editor_state(tmp_path, monkeypatch):
     monkeypatch.setattr(remotion.settings, "STORAGE_DIR", tmp_path)
     props = remotion.build_composition_props("job1", default_music_url="/music/lofi-chill.mp3")
     assert props["musicUrl"] == "/music/lofi-chill.mp3"
+    # volume default tem que bater com o que /composition devolve (AUTO_MUSIC_VOLUME), sem divergir
+    assert props["musicVolume"] == remotion.settings.AUTO_MUSIC_VOLUME
 
 
 def test_editor_state_null_music_is_respected(tmp_path, monkeypatch):

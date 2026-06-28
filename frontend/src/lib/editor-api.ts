@@ -56,7 +56,7 @@ export async function fetchComposition(jobId: string): Promise<CompositionData> 
     height: data.height,
     overlays: saved?.overlays ?? [],
     musicUrl: saved ? (saved.musicUrl ?? null) : (data.music_url ?? null),
-    musicVolume: saved?.musicVolume ?? data.music_volume ?? 0.15,
+    musicVolume: saved?.musicVolume ?? data.music_volume ?? 0.12, // alinha com AUTO_MUSIC_VOLUME do backend
     isRendering: false,
     templateId: data.template_id || 'stock_narration',
     layoutType: (data.layout_type as import('@/remotion/types').LayoutType) || 'fullscreen',

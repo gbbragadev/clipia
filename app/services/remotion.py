@@ -122,7 +122,7 @@ def build_composition_props(
         "height": settings.VIDEO_HEIGHT,
         "overlays": [],
         "musicUrl": default_music_url,
-        "musicVolume": 0.15,
+        "musicVolume": settings.AUTO_MUSIC_VOLUME,
         "isRendering": True,
         "layoutType": "fullscreen",
     }
