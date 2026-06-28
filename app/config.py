@@ -10,6 +10,11 @@ class Settings(BaseSettings):
     # API Keys
     PEXELS_API_KEY: str = ""
 
+    # Biblioteca de midia de fundo via Google Drive (rclone). RCLONE_EXE = caminho absoluto se o
+    # binario (winget) nao estiver no PATH do worker. Remote gdrive ja configurado (OAuth da conta).
+    RCLONE_EXE: str = "rclone"
+    RCLONE_REMOTE: str = "gdrive"
+
     # LLM (OpenRouter — API compativel com OpenAI; usado p/ roteiro e IA do editor)
     OPEN_ROUTER_API_KEY: str = ""
     OPENROUTER_BASE_URL: str = "https://openrouter.ai/api/v1"

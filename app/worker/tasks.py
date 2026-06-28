@@ -606,15 +606,47 @@ def task_fetch_media(self, data: dict, job_id: str, template_id: str = "stock_na
 
         media_paths = []
 
-        if template.media.source == "local" and template.media.loop_single:
-            # Single local clip, looped for entire video
-            clip = pick_clip(template.media.library_tag or "minecraft_parkour")
-            if clip is None:
-                raise RuntimeError(f"No clips in library '{template.media.library_tag}'")
-            dest = str(media_dir / "background.mp4")
-            shutil.copy2(str(clip), dest)
-            media_paths = [dest]
-            logger.info(f"Using local clip: {clip.name} (will loop)")
+        if template.media.source == "local":
+            # Biblioteca local (Drive): 1 clip/cena por busca semantica (CLIP) + pool
+            # anti-repeticao. Fallback aleatorio se nao houver embeddings/dep. loop_single
+            # => 1 clip (busca pelo tema) pro video todo.
+            from app.services.drive_library import search_clips
+
+            tag = template.media.library_tag or "satisfying"
+            topic = data.get("topic", "")
+            if template.media.loop_single:
+                clips = search_clips(topic, tag, k=1)
+                clip = clips[0] if clips else pick_clip(tag)
+                if clip is None:
+                    raise RuntimeError(f"No clips in library '{tag}'")
+                dest = str(media_dir / "background.mp4")
+                shutil.copy2(str(clip), dest)
+                media_paths = [dest]
+                logger.info(f"Local clip (semantic): {clip.name} (will loop)")
+            else:
+                used_names: set[str] = set()
+                for i, scene in enumerate(script["scenes"]):
+                    if _check_cancelled(job_id):
+                        return {"cancelled": True}
+                    kw = scene.get("keywords_en") or []
+                    query = scene.get("visual_hint") or (kw[0] if kw else None) or scene.get("text") or topic
+                    _update_job(
+                        job_id,
+                        "processing",
+                        "media",
+                        0.55,
+                        detail=f"Buscando fundo (cena {i + 1}/{len(script['scenes'])})...",
+                    )
+                    clips = search_clips(query, tag, k=1, exclude=used_names)
+                    clip = clips[0] if clips else pick_clip(tag)
+                    if clip is None:
+                        logger.warning(f"Cena {i}: sem clip para tag '{tag}'")
+                        continue
+                    used_names.add(clip.name)
+                    dest = str(media_dir / f"scene_{i}.mp4")
+                    shutil.copy2(str(clip), dest)
+                    media_paths.append(dest)
+                    logger.info(f"Cena {i}: fundo '{clip.name}' (query='{str(query)[:40]}')")
         else:
             # Pexels per-scene: ranqueia candidatos e baixa o melhor ainda nao usado
             used_clips: set[str] = set()

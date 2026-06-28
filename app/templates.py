@@ -72,11 +72,11 @@ TEMPLATES: dict[str, VideoTemplate] = {
         description="Fatos/história em cima, gameplay embaixo (Minecraft, Subway Surfers)",
         icon="🎮",
         layout=LayoutConfig(type="split_horizontal", split_ratio=0.55),
-        media=MediaStrategy(source="local", library_tag="minecraft_parkour", loop_single=True),
+        media=MediaStrategy(source="local", library_tag="cinematic", loop_single=False),
         script=ScriptConfig(
             prompt_extra=(
-                "\n\nEste video usa formato SPLIT SCREEN — texto em cima, gameplay embaixo."
-                "\nNAO inclua keywords_en (o video de fundo sera gameplay)."
+                "\n\nEste video usa formato SPLIT SCREEN — texto em cima, trecho de filme/serie embaixo."
+                "\nNAO inclua keywords_en (o video de fundo sera clipe cinematografico)."
                 "\nFoque em fatos curtos e impactantes, estilo lista numerada."
                 "\nCada cena = 1 fato. Frases MUITO curtas (max 10 palavras)."
             ),
@@ -88,18 +88,18 @@ TEMPLATES: dict[str, VideoTemplate] = {
     "character_narration": VideoTemplate(
         id="character_narration",
         name="Personagem Narrador",
-        description="Personagem IA explica o tema com gameplay ou fundo simples",
+        description="Personagem IA explica o tema com fundo satisfying",
         icon="🗣️",
         layout=LayoutConfig(
             type="character_overlay",
             character_image="peter_griffin.png",
         ),
-        media=MediaStrategy(source="local", library_tag="minecraft_parkour", loop_single=True),
+        media=MediaStrategy(source="local", library_tag="satisfying", loop_single=False),
         script=ScriptConfig(
             prompt_extra=(
                 "\n\nEste video tem um PERSONAGEM narrando (estilo Peter Griffin)."
                 "\nTom COMICO e informal. Use humor, exageros, e comparacoes absurdas."
-                "\nNAO inclua keywords_en (o fundo sera gameplay generico)."
+                "\nNAO inclua keywords_en (o fundo sera video satisfying)."
                 "\nFrases curtas, dramaticas. Pausa entre ideias."
                 "\nComece com algo tipo 'Ei, voce sabia que...' ou 'Cara, isso e INSANO...'"
             ),
@@ -114,7 +114,7 @@ TEMPLATES: dict[str, VideoTemplate] = {
         description="História narrada com gameplay/satisfying no fundo, estilo Reddit",
         icon="📖",
         layout=LayoutConfig(type="split_horizontal", split_ratio=0.50),
-        media=MediaStrategy(source="local", library_tag="satisfying", loop_single=True),
+        media=MediaStrategy(source="local", library_tag="satisfying", loop_single=False),
         script=ScriptConfig(
             prompt_extra=(
                 "\n\nEste video e uma HISTORIA narrada (estilo Reddit stories)."
@@ -227,7 +227,7 @@ TEMPLATES: dict[str, VideoTemplate] = {
         description="Conversa entre dois personagens com vozes distintas e fundo dinâmico",
         icon="💬",
         layout=LayoutConfig(type="split_horizontal", split_ratio=0.55),
-        media=MediaStrategy(source="local", library_tag="minecraft_parkour", loop_single=True),
+        media=MediaStrategy(source="local", library_tag="podcast", loop_single=False),
         script=ScriptConfig(
             prompt_extra="",
             needs_keywords=False,

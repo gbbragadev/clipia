@@ -23,8 +23,25 @@ def list_clips(tag: str) -> list[Path]:
 
 
 def pick_clip(tag: str) -> Path | None:
-    """Pick a random clip from the library for a given tag."""
+    """Pick a random clip: local library first, then Google Drive (rclone cache)."""
     clips = list_clips(tag)
-    if not clips:
+    if clips:
+        return random.choice(clips)
+    try:
+        from app.services.drive_library import pick_drive_clip
+
+        return pick_drive_clip(tag)
+    except Exception as e:  # noqa: BLE001 — Drive e opcional; degrada para "sem clip"
+        logger.warning("drive_library indisponivel para '%s': %s", tag, e)
         return None
-    return random.choice(clips)
+
+
+def count_clips(tag: str) -> int:
+    """Total de clips para a tag: pasta local + indice do Drive."""
+    local = len(list_clips(tag))
+    try:
+        from app.services.drive_library import count_for_tag
+
+        return local + count_for_tag(tag)
+    except Exception:  # noqa: BLE001
+        return local
