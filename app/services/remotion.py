@@ -67,7 +67,12 @@ def scene_sort_key(p: Path) -> int:
         return 10**9
 
 
-def build_composition_props(job_id: str, backend_url: str | None = None) -> dict:
+def build_composition_props(
+    job_id: str,
+    backend_url: str | None = None,
+    audio_filename: str = "narration.wav",
+    default_music_url: str | None = None,
+) -> dict:
     """Build the Remotion CompositionData for a job.
 
     Authoritative asset URLs come from the job files; edited fields (caption
@@ -108,7 +113,7 @@ def build_composition_props(job_id: str, backend_url: str | None = None) -> dict
         "title": script.get("title", ""),
         "scenes": scenes,
         "words": words,
-        "audioUrl": url("narration.wav"),
+        "audioUrl": url(audio_filename),
         "mediaUrls": [url(f"{p.parent.name}/{p.name}") for p in media_files],
         "subtitleStyle": DEFAULT_SUBTITLE_STYLE,
         "voiceConfig": DEFAULT_VOICE_CONFIG,
@@ -116,7 +121,7 @@ def build_composition_props(job_id: str, backend_url: str | None = None) -> dict
         "width": settings.VIDEO_WIDTH,
         "height": settings.VIDEO_HEIGHT,
         "overlays": [],
-        "musicUrl": None,
+        "musicUrl": default_music_url,
         "musicVolume": 0.15,
         "isRendering": True,
         "layoutType": "fullscreen",
@@ -126,7 +131,10 @@ def build_composition_props(job_id: str, backend_url: str | None = None) -> dict
     if state_path.exists():
         comp = (_read_json(state_path) or {}).get("composition", {}) or {}
         for key in _EDITABLE_KEYS:
-            if comp.get(key) is not None:
+            if key == "musicUrl":
+                if "musicUrl" in comp:  # respeita None explicito (usuario tirou a musica)
+                    props["musicUrl"] = comp["musicUrl"]
+            elif comp.get(key) is not None:
                 props[key] = comp[key]
 
     if settings.WATERMARK_ENABLED and settings.WATERMARK_TEXT:
@@ -140,6 +148,8 @@ def invoke_remotion_render(
     output_path: str,
     on_progress=None,
     timeout: int | None = None,
+    audio_filename: str = "narration.wav",
+    default_music_url: str | None = None,
 ) -> str:
     """Render a job's composition to output_path via the Remotion CLI helper.
 
@@ -148,7 +158,7 @@ def invoke_remotion_render(
     timeout = timeout or settings.REMOTION_RENDER_TIMEOUT
     job_dir = settings.STORAGE_DIR / "jobs" / job_id
 
-    props = build_composition_props(job_id)
+    props = build_composition_props(job_id, audio_filename=audio_filename, default_music_url=default_music_url)
     props_path = job_dir / "remotion_props.json"
     props_path.write_text(json.dumps(props, ensure_ascii=False), encoding="utf-8")
 
