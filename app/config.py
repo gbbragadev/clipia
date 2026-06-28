@@ -14,6 +14,8 @@ class Settings(BaseSettings):
     OPEN_ROUTER_API_KEY: str = ""
     OPENROUTER_BASE_URL: str = "https://openrouter.ai/api/v1"
     LLM_MODEL: str = "deepseek/deepseek-v4-pro"  # slug OpenRouter; alt: deepseek/deepseek-v4-flash
+    # Fallback FREE no OpenRouter quando o modelo principal falha (cota estourada / erro). "" desliga.
+    LLM_FALLBACK_MODEL: str = "nvidia/nemotron-3-nano-30b-a3b:free"
 
     # Database
     DATABASE_URL: str = "postgresql+asyncpg://clipia:clipia_dev@localhost:5435/clipia"

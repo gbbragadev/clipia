@@ -30,6 +30,19 @@ def strip_code_fences(raw: str) -> str:
     return raw
 
 
+def _call(model: str, prompt: str, max_tokens: int, json_mode: bool) -> str:
+    client = get_client()
+    kwargs: dict = {
+        "model": model,
+        "max_tokens": max_tokens,
+        "messages": [{"role": "user", "content": prompt}],
+    }
+    if json_mode:
+        kwargs["response_format"] = {"type": "json_object"}
+    completion = client.chat.completions.create(**kwargs)
+    return completion.choices[0].message.content or ""
+
+
 def complete_text(prompt: str, max_tokens: int = 16000, json_mode: bool = True) -> str:
     """Faz uma chamada de chat completion e retorna o texto da resposta.
 
@@ -38,14 +51,19 @@ def complete_text(prompt: str, max_tokens: int = 16000, json_mode: bool = True) 
     tokens "pensando" antes do output. Com budget baixo (ex. 4096) o reasoning
     consome tudo (finish_reason=length) e o content volta vazio. O modelo para em
     finish=stop quando termina, entao o teto alto nao custa tokens extras.
+
+    Se o modelo principal falhar (cota estourada / erro) e LLM_FALLBACK_MODEL estiver
+    setado, tenta uma vez no modelo FREE de fallback antes de propagar o erro.
     """
-    client = get_client()
-    kwargs: dict = {
-        "model": settings.LLM_MODEL,
-        "max_tokens": max_tokens,
-        "messages": [{"role": "user", "content": prompt}],
-    }
-    if json_mode:
-        kwargs["response_format"] = {"type": "json_object"}
-    completion = client.chat.completions.create(**kwargs)
-    return completion.choices[0].message.content or ""
+    try:
+        return _call(settings.LLM_MODEL, prompt, max_tokens, json_mode)
+    except Exception as e:
+        if not settings.LLM_FALLBACK_MODEL:
+            raise
+        logger.warning(
+            "LLM principal (%s) falhou: %s — tentando fallback FREE %s",
+            settings.LLM_MODEL,
+            e,
+            settings.LLM_FALLBACK_MODEL,
+        )
+        return _call(settings.LLM_FALLBACK_MODEL, prompt, max_tokens, json_mode)
