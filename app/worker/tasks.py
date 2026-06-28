@@ -674,16 +674,19 @@ def task_compose_video(self, data: dict, job_id: str, template_id: str = "stock_
         job_dir = get_job_dir(job_id)
         output_path = str(job_dir / "final.mp4")
 
+        from app.job_config import resolve_job_flag
+
         audio_path = data["audio_path"]
-        if settings.SFX_ENABLED:
+        if resolve_job_flag(_redis, job_id, "sfx_enabled", settings.SFX_ENABLED):
             from app.services.sfx import mix_transitions
 
             scene_durs = [s.get("duration_hint", 0) for s in data["script"]["scenes"]]
             audio_path = mix_transitions(audio_path, scene_durs, str(job_dir / "narration_sfx.wav"))
 
-        from app.services.music import resolve_auto_music
+        from app.services.music import resolve_music_path
 
-        music_path = resolve_auto_music(template_id)
+        music_enabled = resolve_job_flag(_redis, job_id, "music_enabled", settings.AUTO_MUSIC_ENABLED)
+        music_path = resolve_music_path(template_id) if music_enabled else None
         compose_short(
             scenes=data["script"]["scenes"],
             media_paths=data["media_paths"],
@@ -791,6 +794,22 @@ def task_rerender_video(self, job_id: str) -> str:
         if not Path(audio_path).exists():
             raise RuntimeError("narration.wav not found")
 
+        from app.job_config import resolve_job_flag
+        from app.services.music import auto_music_url
+
+        template_id = _redis_hget(f"job:{job_id}", "template_id") or "stock_narration"
+
+        audio_basename = "narration.wav"
+        if resolve_job_flag(_redis, job_id, "sfx_enabled", settings.SFX_ENABLED):
+            from app.services.sfx import mix_transitions
+
+            scene_durs = [s.get("duration_hint", 0) for s in script.get("scenes", [])]
+            audio_path = mix_transitions(audio_path, scene_durs, str(job_dir / "narration_sfx.wav"))
+            audio_basename = Path(audio_path).name  # narration_sfx.wav se mixou; senao narration.wav
+
+        music_enabled = resolve_job_flag(_redis, job_id, "music_enabled", settings.AUTO_MUSIC_ENABLED)
+        default_music_url = auto_music_url(template_id) if music_enabled else None
+
         # Collect media file paths
         media_paths = []
         media_dir = job_dir / "media"
@@ -824,6 +843,8 @@ def task_rerender_video(self, job_id: str) -> str:
             invoke_remotion_render(
                 job_id,
                 output_path,
+                audio_filename=audio_basename,
+                default_music_url=default_music_url,
                 on_progress=lambda p: _update_job(
                     job_id,
                     "rendering",
@@ -835,7 +856,7 @@ def task_rerender_video(self, job_id: str) -> str:
         else:
             # FFmpeg+NVENC fallback path
             music_path = None
-            music_url = comp_data.get("musicUrl")
+            music_url = comp_data.get("musicUrl", default_music_url)
             if music_url:
                 music_file = BASE_DIR / "frontend" / "public" / music_url.lstrip("/")
                 if music_file.exists():
@@ -847,8 +868,7 @@ def task_rerender_video(self, job_id: str) -> str:
 
             from app.templates import get_template
 
-            re_template_id = _redis_hget(f"job:{job_id}", "template_id") or "stock_narration"
-            re_template = get_template(re_template_id)
+            re_template = get_template(template_id)
 
             compose_short(
                 scenes=script.get("scenes", []),
@@ -857,7 +877,7 @@ def task_rerender_video(self, job_id: str) -> str:
                 words=words,
                 output_path=output_path,
                 music_path=music_path,
-                music_volume=comp_data.get("musicVolume", 0.15),
+                music_volume=comp_data.get("musicVolume", settings.AUTO_MUSIC_VOLUME),
                 subtitle_style=comp_data.get("subtitleStyle"),
                 layout=re_template.layout,
             )

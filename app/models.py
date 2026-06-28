@@ -21,6 +21,12 @@ class GenerateRequest(BaseModel):
         max_length=2000,
         description="Dados reais da tendencia (titulo + contexto) para fundamentar o roteiro",
     )
+    sfx_enabled: bool | None = Field(
+        default=None, description="Liga/desliga SFX (whoosh) por video. None = usar settings.SFX_ENABLED"
+    )
+    music_enabled: bool | None = Field(
+        default=None, description="Liga/desliga musica de fundo por video. None = usar settings.AUTO_MUSIC_ENABLED"
+    )
 
     @field_validator("template_id")
     @classmethod
@@ -71,6 +77,8 @@ class CompositionResponse(BaseModel):
     width: int = Field(default=1080, description="Video width")
     height: int = Field(default=1920, description="Video height")
     pending_credits: float = Field(default=0.0, description="Pending credits cost")
+    music_url: str | None = Field(default=None, description="Faixa de fundo do mood (default quando sem editor_state)")
+    music_volume: float = Field(default=0.12, description="Volume default da musica de fundo")
 
 
 class EditRequest(BaseModel):

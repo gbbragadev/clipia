@@ -53,6 +53,8 @@ export default function GenerateForm({ onJobComplete, prefillTopic, prefillTrend
   const [wpm, setWpm] = useState(150)
   const [showAdvancedScript, setShowAdvancedScript] = useState(false)
   const [voiceProvider, setVoiceProvider] = useState<'edge' | 'elevenlabs'>('edge')
+  const [sfxEnabled, setSfxEnabled] = useState(true)
+  const [musicEnabled, setMusicEnabled] = useState(true)
   const [templates, setTemplates] = useState<VideoTemplateInfo[]>([])
 
   const selectedTemplate = templates.find((template) => template.id === templateId)
@@ -140,6 +142,8 @@ export default function GenerateForm({ onJobComplete, prefillTopic, prefillTrend
         voice_config: voiceProvider === 'elevenlabs' && selectedTemplate?.default_voice_id
           ? { voice_id: selectedTemplate.default_voice_id }
           : undefined,
+        sfx_enabled: sfxEnabled,
+        music_enabled: musicEnabled,
         trend_context: trendContext ?? undefined,
       }
       lastRequestRef.current = params
@@ -256,6 +260,42 @@ export default function GenerateForm({ onJobComplete, prefillTopic, prefillTrend
               {supportsDefaultPremiumVoice ? `Premium · ${creditCost} creditos` : 'Premium no template IA'}
             </div>
           </button>
+        </div>
+      </div>
+
+      {/* Audio */}
+      <div className="mb-5">
+        <label className="block text-xs text-[var(--text-tertiary)] mb-2">Áudio</label>
+        <div className="flex flex-col gap-2">
+          {([
+            { on: sfxEnabled, set: setSfxEnabled, label: 'Efeitos sonoros', hint: 'Whoosh nas transições de cena' },
+            { on: musicEnabled, set: setMusicEnabled, label: 'Música de fundo', hint: 'Trilha automática pelo tema do template' },
+          ] as const).map((item) => (
+            <button
+              key={item.label}
+              type="button"
+              onClick={() => item.set(!item.on)}
+              disabled={generating}
+              className={`flex items-center justify-between py-2.5 px-3 rounded-xl border text-xs font-medium transition cursor-pointer disabled:opacity-50 ${
+                item.on
+                  ? 'border-purple-500/50 bg-purple-500/10 text-purple-300'
+                  : 'border-[var(--border-default)] bg-[var(--bg-surface)] text-[var(--text-tertiary)] hover:border-purple-500/30'
+              }`}
+            >
+              <span className="flex flex-col items-start text-left">
+                <span className="font-semibold">{item.label}</span>
+                <span className="text-[10px] opacity-60">{item.hint}</span>
+              </span>
+              <span
+                className={`relative w-9 h-5 rounded-full transition shrink-0 ${item.on ? 'bg-purple-600' : 'bg-[var(--bg-surface-hover)]'}`}
+              >
+                <span
+                  className="absolute top-0.5 w-4 h-4 rounded-full bg-white transition-all"
+                  style={{ left: item.on ? '18px' : '2px' }}
+                />
+              </span>
+            </button>
+          ))}
         </div>
       </div>
 

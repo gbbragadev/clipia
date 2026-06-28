@@ -30,6 +30,8 @@ export async function fetchComposition(jobId: string): Promise<CompositionData> 
     width: number
     height: number
     pending_credits: number
+    music_url: string | null
+    music_volume: number
   }>(`${API_BASE}/jobs/${jobId}/composition`, {
     headers: getAuthHeaders(),
   })
@@ -53,8 +55,8 @@ export async function fetchComposition(jobId: string): Promise<CompositionData> 
     width: data.width,
     height: data.height,
     overlays: saved?.overlays ?? [],
-    musicUrl: saved?.musicUrl ?? null,
-    musicVolume: saved?.musicVolume ?? 0.15,
+    musicUrl: saved ? (saved.musicUrl ?? null) : (data.music_url ?? null),
+    musicVolume: saved?.musicVolume ?? data.music_volume ?? 0.12, // alinha com AUTO_MUSIC_VOLUME do backend
     isRendering: false,
     templateId: data.template_id || 'stock_narration',
     layoutType: (data.layout_type as import('@/remotion/types').LayoutType) || 'fullscreen',
@@ -94,6 +96,8 @@ export interface GenerateParams {
   voice_provider?: 'edge' | 'elevenlabs' | 'custom'
   voice_config?: Record<string, unknown>
   trend_context?: string
+  sfx_enabled?: boolean
+  music_enabled?: boolean
 }
 
 export interface VoiceInfo {
