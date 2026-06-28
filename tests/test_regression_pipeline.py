@@ -51,6 +51,8 @@ def test_templates_endpoint_unchanged():
         "character_narration",
         "story_time",
         "novelinha_historica",
+        "ai_visual",
+        "dialogue_duo",
     }
 
 

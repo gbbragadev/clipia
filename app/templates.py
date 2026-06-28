@@ -28,6 +28,7 @@ class ScriptConfig:
     prompt_extra: str
     needs_keywords: bool = True
     needs_visual_hint: bool = False
+    is_dialogue: bool = False  # roteiro como conversa entre 2 personagens (speaker A/B por cena)
     word_rate: float = 2.05
 
 
@@ -164,6 +165,51 @@ TEMPLATES: dict[str, VideoTemplate] = {
             rate=-10,
             pitch=-2,
         ),
+    ),
+    "ai_visual": VideoTemplate(
+        id="ai_visual",
+        name="Imagens IA",
+        description="Narração com imagens geradas por IA para qualquer tema, com efeito Ken Burns",
+        icon="🖼️",
+        layout=LayoutConfig(type="fullscreen"),
+        media=MediaStrategy(
+            source="ai_image",
+            image_quality="medium",
+            image_size="1024x1536",
+            style_suffix=(
+                "ilustração digital cinematográfica de alta qualidade, composição vertical 2:3, "
+                "iluminação rica, cores marcantes, foco nítido, "
+                "sem texto na imagem, sem marca d'água"
+            ),
+            ken_burns=True,
+        ),
+        script=ScriptConfig(
+            prompt_extra=(
+                "\n\nEste vídeo usa IMAGENS GERADAS POR IA (uma por cena)."
+                "\nCada cena precisa de um visual_hint concreto e visualmente rico,"
+                " adequado ao tema (não precisa ser histórico)."
+            ),
+            needs_keywords=False,
+            needs_visual_hint=True,
+            word_rate=1.9,
+        ),
+        voice=VoicePreset(),  # Edge default (mais barato que ElevenLabs)
+    ),
+    "dialogue_duo": VideoTemplate(
+        id="dialogue_duo",
+        name="Diálogo (2 vozes)",
+        description="Conversa entre dois personagens com vozes distintas e fundo dinâmico",
+        icon="💬",
+        layout=LayoutConfig(type="split_horizontal", split_ratio=0.55),
+        media=MediaStrategy(source="local", library_tag="minecraft_parkour", loop_single=True),
+        script=ScriptConfig(
+            prompt_extra="",
+            needs_keywords=False,
+            is_dialogue=True,
+            word_rate=2.0,
+        ),
+        # As 2 vozes reais vêm de settings.DIALOGUE_VOICE_A/B na síntese; provider elevenlabs p/ pricing
+        voice=VoicePreset(provider="elevenlabs", voice_id="21m00Tcm4TlvDq8ikWAM"),
     ),
 }
 

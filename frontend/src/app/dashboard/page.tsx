@@ -1,11 +1,12 @@
 'use client'
 
 import { strings } from '@/lib/strings';
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { fetchJobs, type JobSummary } from '@/lib/editor-api'
 import { useAuth } from '@/contexts/AuthContext'
 import GenerateForm from '@/components/dashboard/GenerateForm'
+import TrendingPanel from '@/components/dashboard/TrendingPanel'
 import VideoGrid from '@/components/dashboard/VideoGrid'
 import ReferralCard from '@/components/dashboard/ReferralCard'
 import { InlineError } from '@/components/ui/feedback'
@@ -17,6 +18,8 @@ export default function DashboardPage() {
   const [jobs, setJobs] = useState<JobSummary[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [prefill, setPrefill] = useState<{ topic: string; trendContext: string } | null>(null)
+  const formRef = useRef<HTMLDivElement>(null)
 
   const loadJobs = useCallback(async () => {
     setError(null)
@@ -60,12 +63,24 @@ export default function DashboardPage() {
         </div>
       )}
 
+      {/* Painel "Em alta" — descoberta de temas em tendência */}
+      <TrendingPanel
+        onSelect={(topic, trendContext) => {
+          setPrefill({ topic, trendContext })
+          formRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+        }}
+      />
+
       {/* Studio-like Generate Form Wrapper */}
-      <div className="relative rounded-3xl bg-[#110d1a] border border-white/5 overflow-hidden p-6 md:p-10 shadow-2xl mb-16">
+      <div ref={formRef} className="relative rounded-3xl bg-[#110d1a] border border-white/5 overflow-hidden p-6 md:p-10 shadow-2xl mb-16">
         <div className="absolute inset-0 bg-[url(/noise.svg)] opacity-20 pointer-events-none mix-blend-overlay"></div>
         <div className="absolute -top-40 -right-40 w-96 h-96 bg-purple-600/20 blur-[120px] rounded-full pointer-events-none"></div>
         <div className="relative z-10">
-          <GenerateForm onJobComplete={loadJobs} />
+          <GenerateForm
+            onJobComplete={loadJobs}
+            prefillTopic={prefill?.topic}
+            prefillTrendContext={prefill?.trendContext}
+          />
         </div>
       </div>
 

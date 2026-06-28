@@ -69,7 +69,29 @@ REGRAS DE VISUAL_HINT:
 """
 
 
-def generate_script(topic: str, style: str, duration_target: int, template_id: str = "stock_narration") -> dict:
+DIALOGUE_INSTRUCTION = """
+
+REGRAS DE DIÁLOGO:
+- Este vídeo é uma CONVERSA entre 2 personagens: A e B (A começa).
+- Cada cena é UMA fala curta, alternando A → B → A → B...
+- Cada cena tem o campo "speaker": "A" ou "B".
+- Falas naturais e com ritmo de conversa real; juntas, explicam/contam o tema.
+"""
+
+TREND_CONTEXT_INSTRUCTION = """
+
+CONTEXTO REAL (tendencia atual — ancore o roteiro nestes fatos/angulos reais, sem inventar dados):
+{trend_context}
+"""
+
+
+def generate_script(
+    topic: str,
+    style: str,
+    duration_target: int,
+    template_id: str = "stock_narration",
+    trend_context: str | None = None,
+) -> dict:
     template = get_template(template_id)
     word_count = int(duration_target * template.script.word_rate)
 
@@ -102,7 +124,17 @@ def generate_script(topic: str, style: str, duration_target: int, template_id: s
             '"visual_hint": "descricao concreta da cena",\n      "duration_hint": 7',
         )
 
+    if template.script.is_dialogue:
+        prompt_text += DIALOGUE_INSTRUCTION
+        prompt_text = prompt_text.replace(
+            '"duration_hint": 7',
+            '"speaker": "A",\n      "duration_hint": 7',
+        )
+
     prompt_text += template.script.prompt_extra
+
+    if trend_context and trend_context.strip():
+        prompt_text += TREND_CONTEXT_INSTRUCTION.format(trend_context=trend_context.strip())
 
     # max_tokens default de complete_text e alto de proposito (reasoning do DeepSeek V4 Pro).
     raw = complete_text(prompt_text)
@@ -120,6 +152,11 @@ def generate_script(topic: str, style: str, duration_target: int, template_id: s
         for i, sc in enumerate(script.get("scenes", [])):
             if not sc.get("visual_hint", "").strip():
                 raise ScriptValidationError(f"cena {i+1} sem visual_hint (template {template_id} exige)")
+
+    # Dialogue: normalize speaker to A/B (default A) so synthesis always has a valid voice
+    if template.script.is_dialogue:
+        for sc in script.get("scenes", []):
+            sc["speaker"] = "B" if str(sc.get("speaker", "A")).strip().upper() == "B" else "A"
 
     return script
 

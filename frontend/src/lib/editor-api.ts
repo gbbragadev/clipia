@@ -93,6 +93,7 @@ export interface GenerateParams {
   template_id: string
   voice_provider?: 'edge' | 'elevenlabs' | 'custom'
   voice_config?: Record<string, unknown>
+  trend_context?: string
 }
 
 export interface VoiceInfo {
@@ -159,6 +160,22 @@ export async function generateVideo(params: GenerateParams): Promise<{ job_id: s
     headers: getAuthHeaders(),
     body: JSON.stringify(params),
   })
+}
+
+export interface Trend {
+  title: string
+  source: string
+  score: number
+  url: string
+  context: string
+}
+
+export async function fetchTrends(nicho?: string): Promise<Trend[]> {
+  const qs = nicho ? `?nicho=${encodeURIComponent(nicho)}` : ''
+  const res = await fetch(`${API_BASE}/trends${qs}`, { headers: getAuthHeaders() })
+  if (!res.ok) return []
+  const data = await res.json().catch(() => ({ trends: [] }))
+  return data.trends ?? []
 }
 
 export async function regenerateTTS(

@@ -51,6 +51,21 @@ class Settings(BaseSettings):
     RENDER_ENGINE: str = "remotion"  # "remotion" | "ffmpeg"
     REMOTION_RENDER_TIMEOUT: int = 300
 
+    # Selecao de midia: "heuristic" (default, sem dep) | "clip" (rerank semantico, exige sentence-transformers)
+    MEDIA_RERANK: str = "heuristic"
+    # Quality gate pos-render (ffprobe/ffmpeg): grava quality_warning no job se o video sair ruim
+    QUALITY_GATE_ENABLED: bool = True
+    # SFX (whoosh) nas transicoes de cena via ElevenLabs. No-op gracioso sem ELEVENLABS_API_KEY.
+    SFX_ENABLED: bool = True
+    # Musica de fundo automatica na geracao inicial (mood por template; faixas royalty-free locais)
+    AUTO_MUSIC_ENABLED: bool = True
+    AUTO_MUSIC_VOLUME: float = 0.12
+
+    # Dialogo multi-locutor (text_to_dialogue): 2 vozes ElevenLabs. Defaults = premade (EN, falam
+    # pt via multilingual_v2 com sotaque); troque por vozes pt-BR da sua conta via env.
+    DIALOGUE_VOICE_A: str = "21m00Tcm4TlvDq8ikWAM"  # Rachel (premade)
+    DIALOGUE_VOICE_B: str = "pNInz6obpgDQGcFmaJgB"  # Adam (premade)
+
     # GPU
     DEVICE: str = "cuda"
     WHISPER_MODEL_SIZE: str = "large-v3"
@@ -121,3 +136,8 @@ def validate_production_settings(s: Settings) -> None:
     for key in warn_keys:
         if not getattr(s, key):
             _logger.warning("Config: %s nao configurado — funcionalidade limitada", key)
+    if not s.SMTP_HOST:
+        _logger.warning(
+            "Config: SMTP_HOST nao configurado — emails de verificacao e reset de senha NAO serao enviados "
+            "(o codigo OTP so vai para o log). Configure SMTP_* no .env."
+        )

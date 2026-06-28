@@ -32,13 +32,16 @@ const STEP_LABELS: Record<string, string> = {
 
 interface GenerateFormProps {
   onJobComplete: () => void
+  prefillTopic?: string
+  prefillTrendContext?: string | null
 }
 
-export default function GenerateForm({ onJobComplete }: GenerateFormProps) {
+export default function GenerateForm({ onJobComplete, prefillTopic, prefillTrendContext }: GenerateFormProps) {
   const { user, refreshUser } = useAuth()
   const { success, error: toastError, info } = useToast()
 
   const [topic, setTopic] = useState('')
+  const [trendContext, setTrendContext] = useState<string | null>(null)
   const [style, setStyle] = useState<StyleValue>('educational')
   const [templateId, setTemplateId] = useState('stock_narration')
   const [duration, setDuration] = useState(45)
@@ -97,6 +100,14 @@ export default function GenerateForm({ onJobComplete }: GenerateFormProps) {
       .catch(() => setTemplates([]))
   }, [])
 
+  // Pre-preenche o tema (e o contexto da tendencia) quando o usuario clica num trend do painel "Em alta"
+  useEffect(() => {
+    if (prefillTopic) {
+      setTopic(prefillTopic)
+      setTrendContext(prefillTrendContext ?? null)
+    }
+  }, [prefillTopic, prefillTrendContext])
+
   const handleTemplateSelect = (id: string) => {
     const nextTemplate = templates.find((template) => template.id === id)
     setTemplateId(id)
@@ -129,6 +140,7 @@ export default function GenerateForm({ onJobComplete }: GenerateFormProps) {
         voice_config: voiceProvider === 'elevenlabs' && selectedTemplate?.default_voice_id
           ? { voice_id: selectedTemplate.default_voice_id }
           : undefined,
+        trend_context: trendContext ?? undefined,
       }
       lastRequestRef.current = params
       const result = await generateVideo(params)
@@ -172,7 +184,7 @@ export default function GenerateForm({ onJobComplete }: GenerateFormProps) {
         <input
           type="text"
           value={topic}
-          onChange={(e) => setTopic(e.target.value)}
+          onChange={(e) => { setTopic(e.target.value); setTrendContext(null) }}
           onKeyDown={(e) => { if (e.key === 'Enter') handleGenerate() }}
           placeholder="Ex: 5 curiosidades sobre o oceano profundo"
           disabled={generating}

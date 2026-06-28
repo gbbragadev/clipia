@@ -13,7 +13,8 @@ from app.config import settings
 from app.redis_pool import get_redis
 from app.services.compositor import compose_short
 from app.services.image_provider import ModerationBlockedError, OpenAIImageProvider
-from app.services.media import download_media, search_media_for_scene
+from app.services.media import download_media, order_candidates, search_media_for_scene
+from app.services.outro import append_outro
 from app.services.scriptwriter import generate_script
 from app.services.transcriber import transcribe_with_timestamps
 from app.services.tts import synthesize_narration
@@ -258,6 +259,7 @@ def dispatch_pipeline(
     template_id: str = "stock_narration",
     voice_provider: str = "edge",
     voice_config: dict | None = None,
+    trend_context: str | None = None,
 ):
     from celery import chain
 
@@ -279,7 +281,7 @@ def dispatch_pipeline(
         _redis.hset(f"job:{job_id}", mapping={"voice_config": json.dumps(voice_config)})
 
     pipeline = chain(
-        task_generate_script.s(job_id, topic, style, duration_target, template_id),
+        task_generate_script.s(job_id, topic, style, duration_target, template_id, trend_context),
         task_generate_images.s(job_id, template_id),
         task_synthesize_audio.s(job_id, template_id),
         task_transcribe_audio.s(job_id),
@@ -384,13 +386,19 @@ def cleanup_orphan_files() -> dict[str, int]:
 
 @celery_app.task(name="generate_script", bind=True)
 def task_generate_script(
-    self, job_id: str, topic: str, style: str, duration_target: int, template_id: str = "stock_narration"
+    self,
+    job_id: str,
+    topic: str,
+    style: str,
+    duration_target: int,
+    template_id: str = "stock_narration",
+    trend_context: str | None = None,
 ) -> dict:
     try:
         if _check_cancelled(job_id):
             return {"cancelled": True}
         _update_job(job_id, "processing", "scripting", 0.1, detail="Gerando roteiro com IA...")
-        script = generate_script(topic, style, duration_target, template_id=template_id)
+        script = generate_script(topic, style, duration_target, template_id=template_id, trend_context=trend_context)
         job_dir = get_job_dir(job_id)
         (job_dir / "script.json").write_text(json.dumps(script, ensure_ascii=False, indent=2), encoding="utf-8")
 
@@ -432,7 +440,11 @@ def task_synthesize_audio(self, script: dict, job_id: str, template_id: str = "s
         voice_config = json.loads(voice_config_raw) if voice_config_raw else None
         template = get_template(template_id)
 
-        if voice_provider_name == "custom":
+        if template.script.is_dialogue:
+            from app.services.dialogue import synthesize_dialogue
+
+            synthesize_dialogue(script["scenes"], output_path, duration_target=duration_target)
+        elif voice_provider_name == "custom":
             # Custom audio — just copy the uploaded file (already validated)
             uploaded_path = voice_config.get("source_path", "") if voice_config else ""
             if uploaded_path and Path(uploaded_path).exists():
@@ -554,7 +566,8 @@ def task_fetch_media(self, data: dict, job_id: str, template_id: str = "stock_na
             media_paths = [dest]
             logger.info(f"Using local clip: {clip.name} (will loop)")
         else:
-            # Original Pexels behavior (per-scene search)
+            # Pexels per-scene: ranqueia candidatos e baixa o melhor ainda nao usado
+            used_clips: set[str] = set()
             for i, scene in enumerate(script["scenes"]):
                 if _check_cancelled(job_id):
                     return {"cancelled": True}
@@ -567,22 +580,22 @@ def task_fetch_media(self, data: dict, job_id: str, template_id: str = "stock_na
                     detail=f"Buscando videos (cena {i + 1}/{len(script['scenes'])})...",
                 )
                 results = asyncio.run(search_media_for_scene(keywords))
-                if results:
-                    dest = str(media_dir / f"scene_{i}.mp4")
-                    try:
-                        asyncio.run(download_media(results[0]["url"], dest))
-                        media_paths.append(dest)
-                        logger.info(f"Scene {i}: downloaded '{keywords[0]}'")
-                    except Exception as e:
-                        logger.warning(f"Scene {i}: download failed, trying next result: {e}")
-                        if len(results) > 1:
-                            try:
-                                asyncio.run(download_media(results[1]["url"], dest))
-                                media_paths.append(dest)
-                            except Exception:
-                                logger.error(f"Scene {i}: all downloads failed")
-                else:
+                ordered = order_candidates(results, scene, used_clips)
+                if not ordered:
                     logger.warning(f"Scene {i}: no media found for {keywords}")
+                    continue
+                dest = str(media_dir / f"scene_{i}.mp4")
+                for cand in ordered:
+                    try:
+                        asyncio.run(download_media(cand["url"], dest))
+                        media_paths.append(dest)
+                        used_clips.add(cand["url"])
+                        logger.info(f"Scene {i}: downloaded '{keywords[0]}' (dur={cand.get('duration')}s)")
+                        break
+                    except Exception as e:
+                        logger.warning(f"Scene {i}: download failed, trying next candidate: {e}")
+                else:
+                    logger.error(f"Scene {i}: all downloads failed")
 
         if not media_paths:
             raise RuntimeError("No media available")
@@ -610,15 +623,37 @@ def task_compose_video(self, data: dict, job_id: str, template_id: str = "stock_
         _update_job(job_id, "processing", "compositing", 0.7, detail="Montando video com FFmpeg...")
         job_dir = get_job_dir(job_id)
         output_path = str(job_dir / "final.mp4")
+
+        audio_path = data["audio_path"]
+        if settings.SFX_ENABLED:
+            from app.services.sfx import mix_transitions
+
+            scene_durs = [s.get("duration_hint", 0) for s in data["script"]["scenes"]]
+            audio_path = mix_transitions(audio_path, scene_durs, str(job_dir / "narration_sfx.wav"))
+
+        from app.services.music import resolve_auto_music
+
+        music_path = resolve_auto_music(template_id)
         compose_short(
             scenes=data["script"]["scenes"],
             media_paths=data["media_paths"],
-            audio_path=data["audio_path"],
+            audio_path=audio_path,
             words=data["words"],
             output_path=output_path,
             layout=template.layout,
+            music_path=music_path,
+            music_volume=settings.AUTO_MUSIC_VOLUME,
         )
         _update_job(job_id, "processing", "compositing", 0.9, detail="Video montado.")
+        if settings.QUALITY_GATE_ENABLED:
+            from app.services.quality import inspect_render
+
+            target = data.get("script", {}).get("_duration_target", 0)
+            report = inspect_render(output_path, target)
+            if not report.ok:
+                warning = "; ".join(report.warnings)
+                _redis.hset(f"job:{job_id}", "quality_warning", warning)
+                logger.warning("Job %s quality gate: %s", job_id, warning)
         return output_path
     except SoftTimeLimitExceeded:
         _handle_soft_timeout(job_id, "compose_video")
@@ -636,7 +671,10 @@ def task_finalize(self, video_path: str, job_id: str) -> str:
         _update_job(job_id, "processing", "finalizing", 0.95, detail="Salvando video final...")
         output_dir = get_output_dir()
         final_path = str(output_dir / f"{job_id}.mp4")
-        shutil.copy2(video_path, final_path)
+        final_src = append_outro(video_path)  # selo de marca (~1.5s); no-op-safe se off/asset ausente/erro
+        shutil.copy2(final_src, final_path)
+        if final_src != video_path:
+            Path(final_src).unlink(missing_ok=True)
 
         # Save script to PostgreSQL for the editor (keep job dir for editing)
         try:

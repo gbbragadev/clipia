@@ -18,6 +18,7 @@ _VOICES_CACHE_TTL = 86400  # 24h
 
 def _get_client():
     from elevenlabs import ElevenLabs
+
     if not settings.ELEVENLABS_API_KEY:
         raise RuntimeError("ELEVENLABS_API_KEY not configured")
     return ElevenLabs(api_key=settings.ELEVENLABS_API_KEY)
@@ -54,15 +55,26 @@ class ElevenLabsProvider(VoiceProvider):
 
         # Convert PCM to WAV via ffmpeg
         import subprocess
+
         subprocess.run(
             [
-                "ffmpeg", "-y",
-                "-f", "s16le", "-ar", "24000", "-ac", "1",
-                "-i", pcm_path,
-                "-c:a", "pcm_s16le",
+                "ffmpeg",
+                "-y",
+                "-f",
+                "s16le",
+                "-ar",
+                "24000",
+                "-ac",
+                "1",
+                "-i",
+                pcm_path,
+                "-c:a",
+                "pcm_s16le",
                 output_path,
             ],
-            capture_output=True, text=True, timeout=30,
+            capture_output=True,
+            text=True,
+            timeout=30,
             check=True,
         )
         Path(pcm_path).unlink(missing_ok=True)
@@ -87,15 +99,17 @@ class ElevenLabsProvider(VoiceProvider):
         response = client.voices.get_all()
         voices = []
         for v in response.voices:
-            voices.append(VoiceInfo(
-                id=v.voice_id,
-                name=v.name,
-                provider="elevenlabs",
-                language="multilingual",
-                gender=v.labels.get("gender") if v.labels else None,
-                preview_url=v.preview_url,
-                is_clone=v.category == "cloned",
-            ))
+            voices.append(
+                VoiceInfo(
+                    id=v.voice_id,
+                    name=v.name,
+                    provider="elevenlabs",
+                    language="multilingual",
+                    gender=v.labels.get("gender") if v.labels else None,
+                    preview_url=v.preview_url,
+                    is_clone=v.category == "cloned",
+                )
+            )
 
         # Cache for 24h
         r.set(_VOICES_CACHE_KEY, json.dumps([v.__dict__ for v in voices]), ex=_VOICES_CACHE_TTL)
@@ -103,6 +117,31 @@ class ElevenLabsProvider(VoiceProvider):
 
     def estimate_cost(self, text: str) -> int:
         return settings.CREDIT_COST_ELEVENLABS
+
+    async def design_voice(self, name: str, description: str, text: str | None = None) -> str:
+        """Design a voice from a text description (Voice Design). Returns the new voice_id.
+
+        One-shot: gera previews a partir da descrição e cria a voz com o primeiro preview.
+        """
+        client = _get_client()
+        design = client.text_to_voice.design(
+            voice_description=description,
+            text=text,
+            auto_generate_text=text is None,
+        )
+        previews = getattr(design, "previews", None) or []
+        if not previews:
+            raise RuntimeError("Voice Design não retornou previews")
+
+        voice = client.text_to_voice.create(
+            voice_name=name,
+            voice_description=description,
+            generated_voice_id=previews[0].generated_voice_id,
+        )
+
+        get_redis().delete(_VOICES_CACHE_KEY)  # nova voz aparece em list_voices
+        logger.info("Voice Design: '%s' → %s", name, voice.voice_id)
+        return voice.voice_id
 
     async def clone_voice(self, name: str, audio_files: list[bytes], description: str = "") -> str:
         """Clone a voice from audio samples. Returns the new voice_id."""

@@ -16,6 +16,11 @@ class GenerateRequest(BaseModel):
     template_id: str = Field(default="stock_narration", description="Template to use for the video")
     voice_provider: Literal["edge", "elevenlabs", "custom"] = Field(default="edge", description="Voice provider to use")
     voice_config: dict | None = Field(default=None, description="Voice configuration (voice_id, rate, pitch, etc)")
+    trend_context: str | None = Field(
+        default=None,
+        max_length=2000,
+        description="Dados reais da tendencia (titulo + contexto) para fundamentar o roteiro",
+    )
 
     @field_validator("template_id")
     @classmethod
@@ -28,6 +33,17 @@ class GenerateRequest(BaseModel):
 class VoiceCloneRequest(BaseModel):
     name: str = Field(..., min_length=1, max_length=100, description="Name for the cloned voice")
     description: str = Field(default="", max_length=500)
+
+
+class VoiceDesignRequest(BaseModel):
+    name: str = Field(..., min_length=1, max_length=100, description="Nome da voz a criar")
+    description: str = Field(
+        ...,
+        min_length=20,
+        max_length=1000,
+        description="Descrição da voz (ex: 'narrador grave e misterioso, ritmo pausado')",
+    )
+    text: str | None = Field(default=None, max_length=1000, description="Texto de amostra (opcional)")
 
 
 class JobStatus(BaseModel):

@@ -26,6 +26,7 @@ from app.models import (
     JobStatus,
     RegenerateTTSRequest,
     VoiceCloneRequest,
+    VoiceDesignRequest,
     WaitlistRequest,
 )
 from app.observability import record_credit_metric
@@ -33,6 +34,7 @@ from app.pricing import get_generation_credit_cost
 from app.redis_pool import get_redis
 from app.services.llm import complete_text, strip_code_fences
 from app.services.remotion import scene_sort_key
+from app.services.trends import fetch_trends
 from app.utils.files import bytes_to_gb, path_size_bytes
 from app.utils.locks import get_lock
 from app.worker.tasks import dispatch_pipeline
@@ -211,9 +213,50 @@ async def generate(
         template_id=req.template_id,
         voice_provider=req.voice_provider,
         voice_config=req.voice_config,
+        trend_context=req.trend_context,
     )
 
     return {"job_id": job_id, "status": "queued", "credit_cost": credit_cost}
+
+
+@router.post(
+    "/voices/design",
+    summary="Design a voice",
+    description="Cria uma voz ElevenLabs a partir de uma descrição textual (Voice Design).",
+)
+@limiter.limit(settings.RATE_LIMIT_AUTH)
+async def design_voice(
+    request: Request,
+    req: VoiceDesignRequest,
+    user: User = Depends(get_current_user),
+):
+    """Cria uma voz sob medida a partir de uma descrição. Retorna o voice_id (aparece em /voices)."""
+    from app.services.elevenlabs_provider import ElevenLabsProvider
+
+    try:
+        voice_id = await ElevenLabsProvider().design_voice(req.name, req.description, req.text)
+    except Exception as e:  # noqa: BLE001
+        logger.warning("Voice Design falhou: %s", e)
+        raise HTTPException(status_code=502, detail=f"Não foi possível criar a voz: {e}")
+    return {"voice_id": voice_id, "name": req.name}
+
+
+@router.get(
+    "/trends",
+    summary="Trending topics",
+    description="Temas em alta de fontes gratuitas (Reddit, Hacker News, Google Trends BR).",
+)
+async def get_trends(
+    nicho: str | None = None,
+    user: User = Depends(get_current_user),
+):
+    """Temas em alta para o painel 'Em alta'. Nunca 500 por falha de fonte externa."""
+    try:
+        trends = await fetch_trends(niche=nicho)
+    except Exception as e:  # noqa: BLE001 — descoberta e best-effort
+        logger.warning("fetch_trends falhou para nicho=%s: %s", nicho, e)
+        trends = []
+    return {"trends": trends}
 
 
 @router.get(
