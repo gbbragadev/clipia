@@ -24,6 +24,11 @@ export function CinematicSection({
       setIsVisible(true)
       return
     }
+    // reduced-motion: mostra imediatamente, sem esperar o IntersectionObserver.
+    if (typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      setIsVisible(true)
+      return
+    }
     const observer = new IntersectionObserver(
       ([entry]) => {
         if (entry.isIntersecting) {

@@ -1,8 +1,18 @@
 import type { Metadata, Viewport } from "next";
+import { GeistSans } from "geist/font/sans";
+import { Sora } from "next/font/google";
 import "./globals.css";
 import FilmGrain from "@/components/FilmGrain";
 import AppProviders from "@/components/providers/AppProviders";
 import TrackingScripts from "@/components/TrackingScripts";
+
+// Sora = display (titulos cinematograficos); GeistSans = corpo (var --font-geist-sans).
+const sora = Sora({
+  subsets: ["latin"],
+  variable: "--font-sora",
+  weight: ["400", "500", "600", "700", "800"],
+  display: "swap",
+});
 
 export const metadata: Metadata = {
   title: "ClipIA - Crie vídeos curtos com IA",
@@ -56,7 +66,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="pt-BR" className="h-full antialiased">
+    <html lang="pt-BR" className={`h-full antialiased ${GeistSans.variable} ${sora.variable}`}>
       <head>
         <script
           type="application/ld+json"
