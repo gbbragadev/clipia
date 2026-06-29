@@ -1,5 +1,6 @@
 'use client'
 
+import { Layers, Mic, Captions, Shapes, Sparkles, Clock, X } from 'lucide-react'
 import { strings } from '@/lib/strings';
 import { useState } from 'react'
 import dynamic from 'next/dynamic'
@@ -27,11 +28,11 @@ const VideoPlayer = dynamic(() => import('./VideoPlayer').then((m) => ({ default
 })
 
 const PANELS = [
-  { key: 'scenes' as const, label: strings.editor.scenes, icon: '▦' },
-  { key: 'voice' as const, label: strings.editor.voice, icon: '♪' },
-  { key: 'subtitles' as const, label: strings.editor.subtitles, icon: 'T' },
-  { key: 'elements' as const, label: strings.editor.elements, icon: '◈' },
-  { key: 'ai' as const, label: strings.editor.ai, icon: '✦' },
+  { key: 'scenes' as const, label: strings.editor.scenes, Icon: Layers },
+  { key: 'voice' as const, label: strings.editor.voice, Icon: Mic },
+  { key: 'subtitles' as const, label: strings.editor.subtitles, Icon: Captions },
+  { key: 'elements' as const, label: strings.editor.elements, Icon: Shapes },
+  { key: 'ai' as const, label: strings.editor.ai, Icon: Sparkles },
 ]
 
 export function EditorLayout() {
@@ -97,7 +98,7 @@ export function EditorLayout() {
                 onClick={() => setActivePanel(p.key)}
                 className={`editor-tab ${activePanel === p.key ? 'editor-tab--active' : ''}`}
               >
-                <span className="editor-tab__icon">{p.icon}</span>
+                <span className="editor-tab__icon"><p.Icon className="w-4 h-4" /></span>
                 <span className="editor-tab__label">{p.label}</span>
               </button>
             ))}
@@ -136,7 +137,7 @@ export function EditorLayout() {
             onClick={() => setTimelineOpen(true)}
             aria-label="Abrir linha do tempo"
           >
-            ⏱ Linha do tempo
+            <Clock className="w-4 h-4" /> Linha do tempo
           </button>
           {timelineOpen && (
             <>
@@ -145,7 +146,7 @@ export function EditorLayout() {
                 <div className="editor-timeline-drawer__handle">
                   <span>Linha do tempo</span>
                   <button className="editor-timeline-drawer__close" onClick={() => setTimelineOpen(false)}>
-                    Fechar ✕
+                    Fechar <X className="w-4 h-4 inline" />
                   </button>
                 </div>
                 <EditorTimeline />

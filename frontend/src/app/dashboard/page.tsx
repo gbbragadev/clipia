@@ -1,5 +1,6 @@
 'use client'
 
+import { Mail } from 'lucide-react'
 import { strings } from '@/lib/strings';
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
@@ -42,7 +43,7 @@ export default function DashboardPage() {
   return (
     <div className="max-w-6xl mx-auto px-4 py-12">
       <div className="mb-10">
-        <h1 className="text-2xl sm:text-3xl md:text-4xl font-bold text-white mb-2 tracking-tight">
+        <h1 className="text-2xl sm:text-3xl md:text-4xl font-display font-bold text-white mb-2 tracking-tight">
           <span className="text-purple-400">{timeGreeting}.</span> {greeting} Pronto para criar?
         </h1>
         <p className="text-slate-400 text-lg">Transforme suas ideias em vídeos com apenas um clique.</p>
@@ -50,9 +51,12 @@ export default function DashboardPage() {
 
       {user && !user.email_verified && (
         <div className="bg-yellow-500/10 border border-yellow-500/20 rounded-xl p-5 mb-8 flex flex-col md:flex-row items-center justify-between gap-4 backdrop-blur-md">
-          <div>
-            <p className="text-yellow-200 font-semibold mb-1">{strings.auth.verify.title}</p>
-            <p className="text-yellow-200/70 text-sm">Confirme seu e-mail para receber 2 créditos grátis e começar a gerar vídeos.</p>
+          <div className="flex items-start gap-3">
+            <Mail className="w-5 h-5 text-yellow-300 mt-0.5 shrink-0" />
+            <div>
+              <p className="text-yellow-200 font-semibold mb-1">{strings.auth.verify.title}</p>
+              <p className="text-yellow-200/70 text-sm">Confirme seu e-mail para receber 2 créditos grátis e começar a gerar vídeos.</p>
+            </div>
           </div>
           <button
             onClick={() => router.push(`/auth/verify?email=${encodeURIComponent(user.email)}`)}
@@ -90,7 +94,7 @@ export default function DashboardPage() {
 
       <section className="mt-8">
         <div className="flex items-center justify-between mb-8 border-b border-white/5 pb-4">
-          <h2 className="text-2xl font-bold text-white">Seus vídeos</h2>
+          <h2 className="text-2xl font-display font-bold text-white">Seus vídeos</h2>
           <div className="text-sm text-slate-500 font-medium bg-white/5 px-3 py-1 rounded-full border border-white/5">
             {jobs.length} vídeos
           </div>
