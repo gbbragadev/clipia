@@ -1,7 +1,9 @@
 'use client'
 
 import { Layers, Mic, Captions, Shapes, Sparkles, Clock, X } from 'lucide-react'
+import { AnimatePresence, motion } from 'motion/react'
 import { strings } from '@/lib/strings';
+import { EASE, DURATIONS, useReducedMotionState } from '@/lib/motion'
 import { useState } from 'react'
 import dynamic from 'next/dynamic'
 import { useEditor } from '@/contexts/EditorContext'
@@ -40,6 +42,7 @@ export function EditorLayout() {
   const [showExport, setShowExport] = useState(false)
   const isMobile = useIsMobile()
   const [timelineOpen, setTimelineOpen] = useState(false)
+  const reduceMotion = useReducedMotionState()
   useKeyboardShortcuts()
 
   if (loading) {
@@ -139,20 +142,37 @@ export function EditorLayout() {
           >
             <Clock className="w-4 h-4" /> Linha do tempo
           </button>
-          {timelineOpen && (
-            <>
-              <div className="editor-timeline-backdrop" onClick={() => setTimelineOpen(false)} />
-              <div className="editor-timeline-drawer" role="dialog" aria-label="Linha do tempo">
-                <div className="editor-timeline-drawer__handle">
-                  <span>Linha do tempo</span>
-                  <button className="editor-timeline-drawer__close" onClick={() => setTimelineOpen(false)}>
-                    Fechar <X className="w-4 h-4 inline" />
-                  </button>
-                </div>
-                <EditorTimeline />
-              </div>
-            </>
-          )}
+          <AnimatePresence>
+            {timelineOpen && (
+              <>
+                <motion.div
+                  className="editor-timeline-backdrop"
+                  onClick={() => setTimelineOpen(false)}
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  transition={{ duration: DURATIONS.normal, ease: EASE }}
+                />
+                <motion.div
+                  className="editor-timeline-drawer"
+                  role="dialog"
+                  aria-label="Linha do tempo"
+                  initial={reduceMotion ? false : { y: '100%' }}
+                  animate={{ y: 0 }}
+                  exit={reduceMotion ? { opacity: 0 } : { y: '100%' }}
+                  transition={{ duration: DURATIONS.normal, ease: EASE }}
+                >
+                  <div className="editor-timeline-drawer__handle">
+                    <span>Linha do tempo</span>
+                    <button className="editor-timeline-drawer__close" onClick={() => setTimelineOpen(false)}>
+                      Fechar <X className="w-4 h-4 inline" />
+                    </button>
+                  </div>
+                  <EditorTimeline />
+                </motion.div>
+              </>
+            )}
+          </AnimatePresence>
         </>
       )}
 

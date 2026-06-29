@@ -349,7 +349,7 @@
     border-radius: 14px 14px 0 0;
     box-shadow: 0 -8px 32px rgba(0,0,0,0.5);
     padding-bottom: env(safe-area-inset-bottom);
-    animation: drawer-up 0.22s ease;
+    /* enter/exit agora via motion (AnimatePresence no EditorLayout) — respeita reduced-motion */
   }
   .editor-timeline-drawer__handle {
     display: flex; align-items: center; justify-content: space-between;
@@ -364,11 +364,6 @@
   }
   /* Dentro da gaveta a timeline tem altura própria (não está mais no grid) */
   .editor-timeline-drawer .editor-timeline { padding-bottom: 8px; }
-}
-
-@keyframes drawer-up {
-  from { transform: translateY(100%); }
-  to { transform: translateY(0); }
 }
 
 /* Em telas muito estreitas, abas icon-only para caber as 5 */
