@@ -907,6 +907,11 @@ async def render_video(
     job = await get_owned_job(db, user, job_id)
     job_id = str(job.id)
     async with get_lock(f"render:{job_id}"):
+        # Re-le o estado fresco DENTRO do lock: cada request concorrente carregou seu proprio
+        # job ANTES do lock, entao um render paralelo ja pode ter zerado o pending. commit encerra
+        # a transacao de leitura -> refresh enxerga o que o concorrente commitou (cobra so 1x).
+        await db.commit()
+        await db.refresh(job)
         cost = math.ceil(job.pending_credits or 0.0)
         if cost > 0:
             await _debit_credits(db, user.id, cost)  # atomico: 402 se sem saldo, sem read-modify-write

@@ -35,8 +35,9 @@ def test_build_props_resolves_assets_and_merges_editor_state(tmp_path, monkeypat
     props = build_composition_props("job1", backend_url="http://x:8005")
 
     assert props["isRendering"] is True
-    assert props["audioUrl"] == "http://x:8005/storage/jobs/job1/narration.wav"
-    assert props["mediaUrls"] == ["http://x:8005/storage/jobs/job1/media/scene_0.mp4"]
+    assert props["audioUrl"].split("?")[0] == "http://x:8005/storage/jobs/job1/narration.wav"
+    assert "sig=" in props["audioUrl"]  # midia privada vem assinada (HMAC)
+    assert [u.split("?")[0] for u in props["mediaUrls"]] == ["http://x:8005/storage/jobs/job1/media/scene_0.mp4"]
     # editor edits win over defaults
     assert props["overlays"][0]["type"] == "questionBox"
     assert props["subtitleStyle"]["preset"] == "tiktok"
@@ -87,7 +88,7 @@ def test_build_props_falls_back_to_ai_images(tmp_path, monkeypatch):
 
     props = build_composition_props("job4", backend_url="http://x:8005")
 
-    assert props["mediaUrls"] == [
+    assert [u.split("?")[0] for u in props["mediaUrls"]] == [
         "http://x:8005/storage/jobs/job4/images/scene_1.png",
         "http://x:8005/storage/jobs/job4/images/scene_2.png",
     ]

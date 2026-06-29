@@ -170,7 +170,7 @@ def test_regenerate_tts_edge_default(tmp_path, monkeypatch):
             )
 
     response = run(_case())
-    assert response["audio_url"].endswith("/narration.wav")
+    assert response["audio_url"].split("?")[0].endswith("/narration.wav")
     synth_mock.assert_awaited_once()
 
 
