@@ -1,6 +1,8 @@
 'use client'
 
 import { useMemo, useState } from 'react'
+import { motion } from 'motion/react'
+import { fadeUp, staggerContainer, useReducedMotionState } from '@/lib/motion'
 import type { JobSummary } from '@/lib/editor-api'
 import VideoCard from './VideoCard'
 import EmptyState from './EmptyState'
@@ -28,6 +30,7 @@ function SkeletonCard() {
 }
 
 export default function VideoGrid({ jobs, loading, onEdit }: VideoGridProps) {
+  const reduceMotion = useReducedMotionState()
   const [sort, setSort] = useState<SortOrder>('newest')
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all')
 
@@ -96,11 +99,18 @@ export default function VideoGrid({ jobs, loading, onEdit }: VideoGridProps) {
           },
         ]}
       />
-      <div className="grid grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
+      <motion.div
+        className="grid grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4"
+        variants={staggerContainer(0.05)}
+        initial={reduceMotion ? false : 'hidden'}
+        animate="visible"
+      >
         {filteredJobs.map((job) => (
-          <VideoCard key={job.job_id} job={job} onEdit={onEdit} />
+          <motion.div key={job.job_id} variants={fadeUp}>
+            <VideoCard job={job} onEdit={onEdit} />
+          </motion.div>
         ))}
-      </div>
+      </motion.div>
       {filteredJobs.length === 0 && (
         <p className="text-center py-8 text-sm" style={{ color: 'var(--text-tertiary)' }}>
           Nenhum vídeo com esse filtro.

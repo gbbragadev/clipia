@@ -1,6 +1,6 @@
 'use client'
 
-import { Layers, Mic, Captions, Shapes, Sparkles, Clock, X } from 'lucide-react'
+import { Layers, Mic, Captions, Shapes, Sparkles, Clock, X, Download } from 'lucide-react'
 import { AnimatePresence, motion } from 'motion/react'
 import { strings } from '@/lib/strings';
 import { EASE, DURATIONS, useReducedMotionState } from '@/lib/motion'
@@ -82,7 +82,7 @@ export function EditorLayout() {
           {saving && <span className="editor-header__status editor-header__status--saving">{strings.editor.saving}</span>}
           {dirty && !saving && <span className="editor-header__status editor-header__status--dirty">Não salvo</span>}
           {!dirty && !saving && <span className="editor-header__status editor-header__status--saved">{strings.editor.saved}</span>}
-          <button className="editor-header__export" onClick={() => setShowExport(true)}>Exportar Vídeo</button>
+          <button className="editor-header__export inline-flex items-center gap-1.5" onClick={() => setShowExport(true)}><Download className="w-3.5 h-3.5" /> Exportar</button>
         </div>
       </header>
 
