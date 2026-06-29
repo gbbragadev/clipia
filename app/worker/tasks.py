@@ -844,7 +844,7 @@ def task_rerender_video(self, job_id: str) -> str:
         editor_state_path = job_dir / "editor_state.json"
         comp_data = {}
         if editor_state_path.exists():
-            editor_state = json.loads(editor_state_path.read_text())
+            editor_state = json.loads(editor_state_path.read_text(encoding="utf-8"))
             comp_data = editor_state.get("composition", {})
 
         if settings.RENDER_ENGINE == "remotion":

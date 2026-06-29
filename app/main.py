@@ -23,6 +23,7 @@ from app.errors import (
 )
 from app.observability import access_log_middleware, get_deep_health, render_metrics
 from app.payments.routes import router as payments_router
+from app.utils.media_url import PRIVATE_PREFIX, verify_media_sig
 from app.utils.ratelimit import client_ip
 
 logger = logging.getLogger(__name__)
@@ -47,6 +48,23 @@ async def lifespan(app: FastAPI):
     await engine.dispose()
 
 
+async def media_guard_middleware(request: Request, call_next):
+    """Protege a midia privada (/storage/jobs/*): exige assinatura ?exp&sig valida.
+
+    A galeria publica (/storage/showcase) e qualquer outra rota passam direto.
+    """
+    if request.method in ("GET", "HEAD") and request.url.path.startswith(PRIVATE_PREFIX):
+        if not verify_media_sig(
+            request.url.path,
+            request.query_params.get("exp"),
+            request.query_params.get("sig"),
+        ):
+            return JSONResponse(
+                status_code=403, content={"detail": "Midia protegida: assinatura invalida ou expirada."}
+            )
+    return await call_next(request)
+
+
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request, call_next):
         response = await call_next(request)
@@ -66,6 +84,7 @@ def create_app() -> FastAPI:
     app.add_exception_handler(ValidationError, pydantic_validation_exception_handler)
     app.add_exception_handler(Exception, unhandled_exception_handler)
     app.middleware("http")(access_log_middleware)
+    app.middleware("http")(media_guard_middleware)
 
     app.add_middleware(SecurityHeadersMiddleware)
 

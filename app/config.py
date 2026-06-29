@@ -124,6 +124,10 @@ class Settings(BaseSettings):
     FRONTEND_URL: str = "http://localhost:3003"
     BACKEND_URL: str = ""  # https://api.clipia.com.br in production
 
+    # Anti-bot (Cloudflare Turnstile no cadastro). Vazio = desabilitado (cadastro funciona sem captcha).
+    # Gere as keys no painel Cloudflare (Turnstile): secret aqui, site key em NEXT_PUBLIC_TURNSTILE_SITE_KEY (frontend).
+    TURNSTILE_SECRET_KEY: str = ""
+
     # Rate Limiting
     RATE_LIMIT_AUTH: str = "5/minute"
     RATE_LIMIT_GENERATE: str = "10/minute"

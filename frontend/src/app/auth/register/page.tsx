@@ -8,11 +8,13 @@ import { useAuth } from "@/contexts/AuthContext";
 import Logo from "@/components/brand/Logo";
 import { FilmstripBackground } from "@/components/ui/FilmstripBackground";
 import { trackEvent, trackGA } from "@/components/TrackingScripts";
+import { TurnstileWidget } from "@/components/auth/TurnstileWidget";
 
 export default function RegisterPage() {
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [captchaToken, setCaptchaToken] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const { register } = useAuth();
@@ -35,7 +37,7 @@ export default function RegisterPage() {
     }
     setLoading(true);
     try {
-      await register(email, name, password);
+      await register(email, name, password, captchaToken);
       trackEvent("CompleteRegistration");
       trackGA("sign_up", { method: "email" });
       router.push(`/auth/verify?email=${encodeURIComponent(email)}`);
@@ -117,6 +119,8 @@ export default function RegisterPage() {
               Minimo 8 caracteres, 1 maiuscula e 1 numero
             </p>
           </div>
+
+          <TurnstileWidget onToken={setCaptchaToken} />
 
           <button
             type="submit"

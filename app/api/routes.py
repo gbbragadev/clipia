@@ -37,6 +37,7 @@ from app.services.remotion import scene_sort_key
 from app.services.trends import fetch_trends
 from app.utils.files import bytes_to_gb, path_size_bytes
 from app.utils.locks import get_lock
+from app.utils.media_url import sign_media_url
 from app.utils.ratelimit import client_ip
 from app.worker.tasks import dispatch_pipeline
 
@@ -598,12 +599,12 @@ async def upload_audio(
         from app.services.transcriber import transcribe_with_timestamps
 
         words = transcribe_with_timestamps(output_path)
-        (job_dir / "words.json").write_text(json.dumps(words, ensure_ascii=False))
+        (job_dir / "words.json").write_text(json.dumps(words, ensure_ascii=False), encoding="utf-8")
     except Exception as e:
         logger.warning(f"Whisper transcription of uploaded audio failed: {e}")
 
     return {
-        "audio_url": f"/storage/jobs/{job_id}/narration.wav",
+        "audio_url": sign_media_url(f"/storage/jobs/{job_id}/narration.wav"),
         "words": words,
         "duration": meta["duration"],
     }
@@ -632,7 +633,7 @@ async def get_composition(
     # Load script from filesystem or DB
     script_path = job_dir / "script.json"
     if script_path.exists():
-        script = json.loads(script_path.read_text())
+        script = json.loads(script_path.read_text(encoding="utf-8"))
     else:
         if not job.script:
             raise not_found_error()
@@ -640,7 +641,7 @@ async def get_composition(
 
     # Load word timestamps
     words_path = job_dir / "words.json"
-    words = json.loads(words_path.read_text()) if words_path.exists() else []
+    words = json.loads(words_path.read_text(encoding="utf-8")) if words_path.exists() else []
 
     # Enumerate media files
     media_dir = job_dir / "media"
@@ -649,20 +650,20 @@ async def get_composition(
         # Check for local template background first
         bg_file = media_dir / "background.mp4"
         if bg_file.exists():
-            media_urls = [f"/storage/jobs/{job_id}/media/background.mp4"]
+            media_urls = [sign_media_url(f"/storage/jobs/{job_id}/media/background.mp4")]
         else:
             for i in range(len(script.get("scenes", []))):
                 scene_file = media_dir / f"scene_{i}.mp4"
                 if scene_file.exists():
-                    media_urls.append(f"/storage/jobs/{job_id}/media/scene_{i}.mp4")
+                    media_urls.append(sign_media_url(f"/storage/jobs/{job_id}/media/scene_{i}.mp4"))
 
     if not media_urls:
         images_dir = job_dir / "images"
         if images_dir.exists():
             for p in sorted(images_dir.glob("scene_*.png"), key=scene_sort_key):
-                media_urls.append(f"/storage/jobs/{job_id}/images/{p.name}")
+                media_urls.append(sign_media_url(f"/storage/jobs/{job_id}/images/{p.name}"))
 
-    audio_url = f"/storage/jobs/{job_id}/narration.wav" if (job_dir / "narration.wav").exists() else ""
+    audio_url = sign_media_url(f"/storage/jobs/{job_id}/narration.wav") if (job_dir / "narration.wav").exists() else ""
 
     # Load editor state from DB if exists
     editor_state = job.editor_state
@@ -732,12 +733,12 @@ async def save_editor_state(
             comp = req.editor_state.get("composition", {})
             script_path = job_dir / "script.json"
             if script_path.exists() and comp.get("scenes"):
-                script = json.loads(script_path.read_text())
+                script = json.loads(script_path.read_text(encoding="utf-8"))
                 script["scenes"] = comp["scenes"]
-                script_path.write_text(json.dumps(script, ensure_ascii=False, indent=2))
+                script_path.write_text(json.dumps(script, ensure_ascii=False, indent=2), encoding="utf-8")
             if comp.get("words"):
                 words_path = job_dir / "words.json"
-                words_path.write_text(json.dumps(comp["words"], ensure_ascii=False))
+                words_path.write_text(json.dumps(comp["words"], ensure_ascii=False), encoding="utf-8")
     except Exception as e:
         logger.warning(f"Could not sync editor state to disk for {job_id}: {e}")
 
@@ -768,7 +769,7 @@ async def regenerate_tts(
     if not script_path.exists():
         raise not_found_error()
 
-    script = json.loads(script_path.read_text())
+    script = json.loads(script_path.read_text(encoding="utf-8"))
     narration = req.text if req.text else script.get("narration", "")
 
     # Regenerate TTS (async). ElevenLabs e pago -> cobra credito; Edge e gratuito -> sem debito.
@@ -809,7 +810,7 @@ async def regenerate_tts(
 
     # Re-transcribe with Whisper (keep old words as fallback)
     words_path = job_dir / "words.json"
-    old_words = json.loads(words_path.read_text()) if words_path.exists() else []
+    old_words = json.loads(words_path.read_text(encoding="utf-8")) if words_path.exists() else []
     words = []
     try:
         from app.services.transcriber import transcribe_with_timestamps
@@ -821,10 +822,10 @@ async def regenerate_tts(
 
     # Save updated words
     if words:
-        words_path.write_text(json.dumps(words, ensure_ascii=False))
+        words_path.write_text(json.dumps(words, ensure_ascii=False), encoding="utf-8")
 
     return {
-        "audio_url": f"/storage/jobs/{job_id}/narration.wav",
+        "audio_url": sign_media_url(f"/storage/jobs/{job_id}/narration.wav"),
         "words": words,
     }
 

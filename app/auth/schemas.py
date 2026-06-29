@@ -18,6 +18,9 @@ class RegisterRequest(BaseModel):
     utm_source: str | None = Field(default=None, max_length=100)
     utm_medium: str | None = Field(default=None, max_length=100)
     utm_campaign: str | None = Field(default=None, max_length=100)
+    turnstile_token: str | None = Field(
+        default=None, max_length=2048, description="Cloudflare Turnstile token (anti-bot)"
+    )
 
     @field_validator("email", mode="before")
     @classmethod

@@ -15,6 +15,7 @@ import subprocess
 from pathlib import Path
 
 from app.config import BASE_DIR, settings
+from app.utils.media_url import sign_media_url
 
 logger = logging.getLogger(__name__)
 
@@ -92,7 +93,7 @@ def build_composition_props(job_id: str, backend_url: str | None = None) -> dict
             media_files = sorted(images_dir.glob("scene_*.png"), key=scene_sort_key)
 
     def url(rel: str) -> str:
-        return f"{backend}/storage/jobs/{job_id}/{rel}"
+        return sign_media_url(f"{backend}/storage/jobs/{job_id}/{rel}")
 
     scenes = [
         {

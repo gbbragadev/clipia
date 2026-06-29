@@ -7,7 +7,9 @@ from app.db.models import CreditPurchase, Job, User
 
 
 @pytest.mark.asyncio
-async def test_edit_persists_editor_state_and_composition_reads_it(client, db_session, job_factory, verified_user, auth_headers, storage_dir):
+async def test_edit_persists_editor_state_and_composition_reads_it(
+    client, db_session, job_factory, verified_user, auth_headers, storage_dir
+):
     job = await job_factory(script={"scenes": [{"text": "scene 1"}]}, editor_state=None)
     job_dir = storage_dir / "jobs" / str(job.id)
     (job_dir / "media").mkdir(parents=True)
@@ -29,7 +31,40 @@ async def test_edit_persists_editor_state_and_composition_reads_it(client, db_se
 
 
 @pytest.mark.asyncio
-async def test_jobs_endpoint_falls_back_to_database_status_when_redis_is_empty(client, job_factory, verified_user, auth_headers):
+async def test_composition_preserves_utf8_accents(
+    client, db_session, job_factory, verified_user, auth_headers, storage_dir
+):
+    """Regressao: no Windows read_text() sem encoding le UTF-8 como cp1252 -> mojibake.
+
+    O worker grava script.json/words.json em UTF-8; o composition tem de devolver os
+    acentos intactos (Sério, São, até), nao 'SÃ©rio'/'SÃ£o'.
+    """
+    job = await job_factory(script={"scenes": [{"text": "placeholder"}]}, editor_state=None)
+    job_dir = storage_dir / "jobs" / str(job.id)
+    (job_dir / "media").mkdir(parents=True)
+    texto = "Buracos negros podem parar o tempo. Sério. São cadáveres com gravidade extrema até a luz."
+    (job_dir / "script.json").write_text(
+        json.dumps({"title": "Curiosidades é ótimo demais", "scenes": [{"text": texto}]}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    (job_dir / "words.json").write_text(
+        json.dumps([{"word": "São", "start": 0.0, "end": 0.5}], ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+    response = await client.get(f"/api/v1/jobs/{job.id}/composition", headers=auth_headers(verified_user))
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["script"]["scenes"][0]["text"] == texto, "Acentos UTF-8 devem voltar intactos (sem mojibake cp1252)."
+    assert data["script"]["title"] == "Curiosidades é ótimo demais"
+    assert data["words"][0]["word"] == "São"
+
+
+@pytest.mark.asyncio
+async def test_jobs_endpoint_falls_back_to_database_status_when_redis_is_empty(
+    client, job_factory, verified_user, auth_headers
+):
     job = await job_factory(status="completed")
     response = await client.get("/api/v1/jobs", headers=auth_headers(verified_user))
 

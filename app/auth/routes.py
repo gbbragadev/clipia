@@ -32,6 +32,7 @@ from app.auth.schemas import (
     VerifyResetCodeRequest,
 )
 from app.auth.service import create_access_token, create_reset_token, decode_reset_token, hash_password, verify_password
+from app.auth.turnstile import verify_turnstile
 from app.config import settings
 from app.db.engine import get_db
 from app.db.models import CreditPurchase, Job, User
@@ -60,6 +61,11 @@ def _ensure_utc(dt: datetime) -> datetime:
 @limiter.limit(settings.RATE_LIMIT_AUTH)
 async def register(request: Request, body: RegisterRequest, db: AsyncSession = Depends(get_db)):
     """Register a new user and return an access token."""
+    if not await verify_turnstile(body.turnstile_token, client_ip(request)):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Verificacao anti-bot falhou. Recarregue a pagina e tente novamente.",
+        )
     if is_disposable_email(body.email):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,

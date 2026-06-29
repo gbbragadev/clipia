@@ -221,7 +221,7 @@ def test_upload_audio_success(tmp_path, monkeypatch):
             )
 
     payload = run(_case())
-    assert payload["audio_url"].endswith("/narration.wav")
+    assert payload["audio_url"].split("?")[0].endswith("/narration.wav")
     assert payload["words"] == [{"word": "ola"}]
     normalize_mock.assert_called_once()
 
@@ -464,7 +464,7 @@ def test_regenerate_tts_with_edge(tmp_path, monkeypatch):
             )
 
     payload = run(_case())
-    assert payload["audio_url"].endswith("/narration.wav")
+    assert payload["audio_url"].split("?")[0].endswith("/narration.wav")
     synth_mock.assert_awaited_once()
 
 
@@ -489,7 +489,7 @@ def test_regenerate_tts_with_elevenlabs(tmp_path, monkeypatch):
             )
 
     payload = run(_case())
-    assert payload["audio_url"].endswith("/narration.wav")
+    assert payload["audio_url"].split("?")[0].endswith("/narration.wav")
     synth_mock.assert_awaited_once()
 
 

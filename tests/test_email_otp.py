@@ -46,6 +46,38 @@ async def test_register_rejects_disposable_email(client, db_session):
 
 
 @pytest.mark.asyncio
+async def test_verify_turnstile_noop_when_secret_absent(monkeypatch):
+    from app.auth import turnstile
+
+    monkeypatch.setattr(turnstile.settings, "TURNSTILE_SECRET_KEY", "")
+    assert await turnstile.verify_turnstile("anything") is True, "Sem secret o captcha e no-op (cadastro livre)."
+
+
+@pytest.mark.asyncio
+async def test_verify_turnstile_rejects_missing_token_when_enabled(monkeypatch):
+    from app.auth import turnstile
+
+    monkeypatch.setattr(turnstile.settings, "TURNSTILE_SECRET_KEY", "test-secret")
+    assert await turnstile.verify_turnstile(None) is False, "Com captcha ativo, token ausente reprova (fail-closed)."
+
+
+@pytest.mark.asyncio
+async def test_register_blocks_when_captcha_rejected(client, db_session, monkeypatch):
+    async def _reject(token, remoteip=None):
+        return False
+
+    monkeypatch.setattr("app.auth.routes.verify_turnstile", _reject)
+    response = await client.post(
+        "/api/v1/auth/register",
+        json={"email": "bot@example.com", "name": "Bot", "password": "Secret123"},
+    )
+    assert response.status_code == 400, "Cadastro deve ser bloqueado quando o captcha reprova."
+    assert "anti-bot" in response.json()["detail"].lower()
+    user = await db_session.scalar(select(User).where(User.email == "bot@example.com"))
+    assert user is None, "Cadastro reprovado no captcha nao deve criar usuario."
+
+
+@pytest.mark.asyncio
 async def test_verify_email_rejects_wrong_and_expired_codes(client, user_factory):
     wrong_user = await user_factory(
         email="wrong@example.com",
