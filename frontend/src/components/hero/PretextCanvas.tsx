@@ -8,6 +8,7 @@ import {
   type PreparedTextWithSegments,
   type LayoutCursor,
 } from '@chenglou/pretext'
+import { prefersReducedMotion } from '@/lib/motion'
 
 const PHRASES = [
   'Voce sabia que o oceano cobre mais de 70% da Terra?',
@@ -81,7 +82,20 @@ export default function PretextCanvas() {
       animRef.current = requestAnimationFrame(animate)
     }
 
-    const init = () => animate()
+    const init = () => {
+      // a11y: sem ciclo de frases nem rAF — desenha uma frase completa, legivel e parada.
+      if (prefersReducedMotion()) {
+        const w = rect.width
+        const h = rect.height
+        const phrase = PHRASES[0]
+        ctx.clearRect(0, 0, w, h)
+        const prepared = prepareWithSegments(phrase, font)
+        const result = layoutWithLines(prepared, Math.max(100, w - 24), 22)
+        drawMode(ctx, 'blur', prepared, result, phrase.split(' '), 1, 99999, w, h - 18, font)
+        return
+      }
+      animate()
+    }
     if (document.fonts?.ready) {
       document.fonts.ready.then(init)
     } else {

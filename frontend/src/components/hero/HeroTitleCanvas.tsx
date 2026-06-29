@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, type RefObject } from 'react'
 import { prepareWithSegments, layoutWithLines } from '@chenglou/pretext'
+import { prefersReducedMotion } from '@/lib/motion'
 
 interface HeroTitleCanvasProps {
   targetRef: RefObject<HTMLHeadingElement | null>
@@ -21,6 +22,9 @@ export default function HeroTitleCanvas({ targetRef }: HeroTitleCanvasProps) {
     const canvas = canvasRef.current
     const h1 = targetRef.current
     if (!canvas || !h1) return
+
+    // a11y: glow decorativo (rAF) — nao anima com prefers-reduced-motion (o titulo HTML fica legivel).
+    if (prefersReducedMotion()) return
 
     // Get font from H1
     const computed = getComputedStyle(h1)

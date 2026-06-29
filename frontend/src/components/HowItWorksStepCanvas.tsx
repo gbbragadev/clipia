@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useCallback } from 'react'
 import { prepareWithSegments } from '@chenglou/pretext'
+import { prefersReducedMotion } from '@/lib/motion'
 
 interface HowItWorksStepCanvasProps {
   number: string // "01", "02", or "03"
@@ -24,6 +25,7 @@ export default function HowItWorksStepCanvas({ number }: HowItWorksStepCanvasPro
   const animatedRef = useRef(false)
   const startTimeRef = useRef(0)
   const rafRef = useRef(0)
+  const reduceRef = useRef(false)
 
   const draw = useCallback(() => {
     const canvas = canvasRef.current
@@ -65,7 +67,7 @@ export default function HowItWorksStepCanvas({ number }: HowItWorksStepCanvasPro
     // Glow after animation settles
     const maxSettleTime = STAGGER + ANIM_DURATION
     const settled = elapsed > maxSettleTime
-    if (settled) {
+    if (settled && !reduceRef.current) {
       const glowElapsed = elapsed - maxSettleTime
       const glowPhase = (glowElapsed % GLOW_PERIOD) / GLOW_PERIOD
       const glowBlur = Math.sin(glowPhase * Math.PI * 2) * 4 + 4 // oscillates 0..8
@@ -103,7 +105,7 @@ export default function HowItWorksStepCanvas({ number }: HowItWorksStepCanvasPro
       ctx.restore()
     }
 
-    rafRef.current = requestAnimationFrame(draw)
+    if (!reduceRef.current) rafRef.current = requestAnimationFrame(draw)
   }, [number])
 
   useEffect(() => {
@@ -122,6 +124,13 @@ export default function HowItWorksStepCanvas({ number }: HowItWorksStepCanvasPro
       ([entry]) => {
         if (entry.isIntersecting && !animatedRef.current) {
           animatedRef.current = true
+          // a11y: numero final estatico (sem slide-up nem glow oscilante via rAF).
+          if (prefersReducedMotion()) {
+            reduceRef.current = true
+            startTimeRef.current = performance.now() - 10000 // forca estado "settled"
+            draw()
+            return
+          }
           startTimeRef.current = performance.now()
           rafRef.current = requestAnimationFrame(draw)
         }

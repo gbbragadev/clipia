@@ -52,3 +52,12 @@ export const staggerContainer = (stagger = 0.08, delayChildren = 0): Variants =>
 export function useReducedMotionState(): boolean {
   return useReducedMotion() ?? false;
 }
+
+/**
+ * Checagem imperativa (fora do React) de prefers-reduced-motion. Para usar dentro
+ * de useEffect/loops de canvas onde não dá pra chamar o hook — a media query CSS
+ * global NÃO cobre animações via requestAnimationFrame. SSR-safe.
+ */
+export function prefersReducedMotion(): boolean {
+  return typeof window !== "undefined" && !!window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+}

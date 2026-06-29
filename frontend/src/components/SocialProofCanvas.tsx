@@ -2,6 +2,7 @@
 
 import { useRef, useEffect, useCallback, useState } from 'react'
 import { prepareWithSegments, layoutWithLines } from '@chenglou/pretext'
+import { prefersReducedMotion } from '@/lib/motion'
 
 interface SocialProofCanvasProps {
   target: number
@@ -98,6 +99,12 @@ export default function SocialProofCanvas({
           if (entry.isIntersecting && !hasAnimatedRef.current) {
             hasAnimatedRef.current = true
             observer.disconnect()
+
+            // a11y: sem count-up animado — desenha o valor final direto.
+            if (prefersReducedMotion()) {
+              drawText(target)
+              return
+            }
 
             const duration = 1500 // 1.5s
             const startTime = performance.now()

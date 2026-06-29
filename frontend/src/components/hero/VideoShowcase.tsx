@@ -3,6 +3,7 @@
 import { useState, useRef, useEffect } from 'react'
 import ReelSubtitleCanvas from './ReelSubtitleCanvas'
 import { loadShowcase } from '@/lib/showcase'
+import { prefersReducedMotion } from '@/lib/motion'
 
 const PHONE_RATIO = 497 / 280 // ~1.775
 
@@ -30,6 +31,8 @@ function Reel({ reel, isActive, index, muted, height }: { reel: ReelData; isActi
 
   useEffect(() => {
     if (!isActive) { setWordIdx(0); return }
+    // a11y: sem karaoke palavra-a-palavra — mostra a legenda completa de uma vez.
+    if (prefersReducedMotion()) { setWordIdx(reel.words.length + 1); return }
     let i = 0
     const id = setInterval(() => {
       i++
@@ -162,6 +165,7 @@ export default function VideoShowcase() {
 
   useEffect(() => {
     if (reels.length === 0) return
+    if (prefersReducedMotion()) return // a11y: sem auto-scroll dos reels
     const id = setInterval(() => {
       if (userScrolled.current) { userScrolled.current = false; return }
       const el = scrollRef.current
