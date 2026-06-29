@@ -1,6 +1,6 @@
 'use client'
 
-import { Layers, Mic, Captions, Shapes, Sparkles, Clock, X, Download } from 'lucide-react'
+import { Layers, Mic, Captions, Shapes, Sparkles, Clock, X, Download, ChevronLeft, ChevronRight } from 'lucide-react'
 import { AnimatePresence, motion } from 'motion/react'
 import { strings } from '@/lib/strings';
 import { EASE, DURATIONS, useReducedMotionState } from '@/lib/motion'
@@ -125,9 +125,10 @@ export function EditorLayout() {
         <button
           className={`editor-panel-toggle ${panelCollapsed ? 'editor-panel-toggle--collapsed' : ''}`}
           onClick={togglePanel}
-          title="Tab"
+          title={panelCollapsed ? 'Expandir painel' : 'Recolher painel'}
+          aria-label={panelCollapsed ? 'Expandir painel' : 'Recolher painel'}
         >
-          {panelCollapsed ? '◂' : '▸'}
+          {panelCollapsed ? <ChevronLeft className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
         </button>
       </div>
 

@@ -1,6 +1,11 @@
 'use client'
 
+import { motion } from 'motion/react'
+import { Sparkles } from 'lucide-react'
 import Link from 'next/link'
+import { SPRING } from '@/lib/motion'
+
+const MotionLink = motion.create(Link)
 
 export default function WaitlistForm() {
   return (
@@ -21,12 +26,16 @@ export default function WaitlistForm() {
             </p>
 
             {process.env.NEXT_PUBLIC_PUBLIC_SIGNUP === "true" && (
-              <Link
+              <MotionLink
                 href="/auth/register"
-                className="inline-block px-8 py-4 rounded-xl bg-gradient-to-r from-purple-600 to-blue-600 text-white font-semibold hover:opacity-90 transition text-lg shadow-lg shadow-purple-500/20"
+                whileHover={{ scale: 1.04 }}
+                whileTap={{ scale: 0.97 }}
+                transition={SPRING}
+                className="inline-flex items-center gap-2 px-8 py-4 rounded-xl bg-gradient-to-r from-purple-600 to-blue-600 text-white font-semibold hover:opacity-90 transition text-lg shadow-lg shadow-purple-500/20"
               >
+                <Sparkles className="w-5 h-5" />
                 Criar minha conta grátis
-              </Link>
+              </MotionLink>
             )}
           </div>
 

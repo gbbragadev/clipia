@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { Gift, Copy, Check } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 
 export default function ReferralCard() {
@@ -20,8 +21,8 @@ export default function ReferralCard() {
   return (
     <div className="rounded-2xl bg-gradient-to-br from-purple-600/10 to-blue-600/10 border border-purple-500/20 p-6 backdrop-blur-md">
       <div className="flex items-center gap-3 mb-3">
-        <div className="w-10 h-10 rounded-xl bg-purple-500/20 flex items-center justify-center text-xl">
-          🎁
+        <div className="w-10 h-10 rounded-xl bg-purple-500/20 flex items-center justify-center text-purple-300">
+          <Gift className="w-5 h-5" />
         </div>
         <div>
           <h3 className="text-white font-bold text-lg">Convide amigos</h3>
@@ -37,12 +38,13 @@ export default function ReferralCard() {
         />
         <button
           onClick={handleCopy}
-          className={`w-full sm:w-auto sm:shrink-0 px-5 py-2.5 rounded-xl font-semibold text-sm transition-all ${
+          className={`w-full sm:w-auto sm:shrink-0 inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl font-semibold text-sm transition-all ${
             copied
               ? "bg-green-500/20 text-green-300 border border-green-500/30"
               : "bg-purple-600 text-white hover:bg-purple-500 shadow-lg shadow-purple-500/25"
           }`}
         >
+          {copied ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
           {copied ? "Copiado!" : "Copiar"}
         </button>
       </div>
