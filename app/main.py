@@ -9,7 +9,6 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import ValidationError
 from slowapi import Limiter
 from slowapi.errors import RateLimitExceeded
-from slowapi.util import get_remote_address
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from app.api.routes import router
@@ -24,6 +23,7 @@ from app.errors import (
 )
 from app.observability import access_log_middleware, get_deep_health, render_metrics
 from app.payments.routes import router as payments_router
+from app.utils.ratelimit import client_ip
 
 logger = logging.getLogger(__name__)
 
@@ -35,7 +35,7 @@ def _get_cors_origins() -> list[str]:
     return [o.strip() for o in raw.split(",") if o.strip()]
 
 
-limiter = Limiter(key_func=get_remote_address, default_limits=[settings.RATE_LIMIT_DEFAULT])
+limiter = Limiter(key_func=client_ip, default_limits=[settings.RATE_LIMIT_DEFAULT])
 
 
 @asynccontextmanager

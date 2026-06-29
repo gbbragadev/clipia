@@ -10,7 +10,7 @@ from fastapi.security import HTTPAuthorizationCredentials
 from app.api import routes as api_routes
 from app.auth.dependencies import get_current_user
 from app.db.models import Job, User
-from app.models import GenerateRequest, RegenerateTTSRequest, VoiceCloneRequest
+from app.models import GenerateRequest, RegenerateTTSRequest, VoiceCloneRequest, VoiceDesignRequest
 from tests.voice_test_support import (
     DummyForm,
     DummyRequest,
@@ -491,3 +491,180 @@ def test_regenerate_tts_with_elevenlabs(tmp_path, monkeypatch):
     payload = run(_case())
     assert payload["audio_url"].endswith("/narration.wav")
     synth_mock.assert_awaited_once()
+
+
+# --- Cobranca de credito em endpoints pagos do editor (anti-abuso) ---
+
+
+def test_clone_voice_debits_credits(tmp_path, monkeypatch):
+    env = create_test_env(tmp_path, monkeypatch)
+    monkeypatch.setattr("app.api.routes.settings.ELEVENLABS_API_KEY", "test-key")
+    monkeypatch.setattr(
+        "app.services.elevenlabs_provider.ElevenLabsProvider.clone_voice", AsyncMock(return_value="cloned_voice_1")
+    )
+
+    async def _case():
+        async with env.session_factory() as db:
+            before = (await db.get(User, env.verified_user.id)).credits
+            await api_routes.clone_voice.__wrapped__(
+                request=DummyRequest(form=DummyForm(files=[DummyUpload("sample.wav", b"wav")])),
+                req=VoiceCloneRequest(name="Minha voz", description="Amostra"),
+                user=env.verified_user,
+                db=db,
+            )
+            after = (await db.get(User, env.verified_user.id)).credits
+            return before, after
+
+    before, after = run(_case())
+    assert before - after == 5  # CREDIT_COST_VOICE_CLONE
+
+
+def test_clone_voice_insufficient_credits_blocks_api(tmp_path, monkeypatch):
+    env = create_test_env(tmp_path, monkeypatch)
+    monkeypatch.setattr("app.api.routes.settings.ELEVENLABS_API_KEY", "test-key")
+    clone_mock = AsyncMock(return_value="cloned_voice_1")
+    monkeypatch.setattr("app.services.elevenlabs_provider.ElevenLabsProvider.clone_voice", clone_mock)
+
+    async def _case():
+        async with env.session_factory() as db:
+            user = await db.get(User, env.verified_user.id)
+            user.credits = 1
+            await db.commit()
+            return await api_routes.clone_voice.__wrapped__(
+                request=DummyRequest(form=DummyForm(files=[DummyUpload("sample.wav", b"wav")])),
+                req=VoiceCloneRequest(name="Minha voz", description="Amostra"),
+                user=env.verified_user,
+                db=db,
+            )
+
+    with pytest.raises(HTTPException) as exc:
+        run(_case())
+    assert exc.value.status_code == 402
+    clone_mock.assert_not_awaited()  # nao gasta API paga sem credito
+
+
+def test_clone_voice_refunds_on_api_failure(tmp_path, monkeypatch):
+    env = create_test_env(tmp_path, monkeypatch)
+    monkeypatch.setattr("app.api.routes.settings.ELEVENLABS_API_KEY", "test-key")
+    monkeypatch.setattr(
+        "app.services.elevenlabs_provider.ElevenLabsProvider.clone_voice",
+        AsyncMock(side_effect=RuntimeError("ElevenLabs down")),
+    )
+
+    async def _case():
+        async with env.session_factory() as db:
+            before = (await db.get(User, env.verified_user.id)).credits
+            try:
+                await api_routes.clone_voice.__wrapped__(
+                    request=DummyRequest(form=DummyForm(files=[DummyUpload("sample.wav", b"wav")])),
+                    req=VoiceCloneRequest(name="Minha voz", description="Amostra"),
+                    user=env.verified_user,
+                    db=db,
+                )
+            except HTTPException:
+                pass
+            after = (await db.get(User, env.verified_user.id)).credits
+            return before, after
+
+    before, after = run(_case())
+    assert before == after  # credito devolvido apos falha da API
+
+
+def test_design_voice_debits_credits(tmp_path, monkeypatch):
+    env = create_test_env(tmp_path, monkeypatch)
+    monkeypatch.setattr(
+        "app.services.elevenlabs_provider.ElevenLabsProvider.design_voice",
+        AsyncMock(return_value="designed_voice_1"),
+    )
+
+    async def _case():
+        async with env.session_factory() as db:
+            before = (await db.get(User, env.verified_user.id)).credits
+            await api_routes.design_voice.__wrapped__(
+                request=DummyRequest(),
+                req=VoiceDesignRequest(name="Narrador", description="narrador grave e misterioso para teste"),
+                user=env.verified_user,
+                db=db,
+            )
+            after = (await db.get(User, env.verified_user.id)).credits
+            return before, after
+
+    before, after = run(_case())
+    assert before - after == 5  # CREDIT_COST_VOICE_DESIGN
+
+
+def test_design_voice_insufficient_credits_blocks_api(tmp_path, monkeypatch):
+    env = create_test_env(tmp_path, monkeypatch)
+    design_mock = AsyncMock(return_value="designed_voice_1")
+    monkeypatch.setattr("app.services.elevenlabs_provider.ElevenLabsProvider.design_voice", design_mock)
+
+    async def _case():
+        async with env.session_factory() as db:
+            user = await db.get(User, env.verified_user.id)
+            user.credits = 1
+            await db.commit()
+            return await api_routes.design_voice.__wrapped__(
+                request=DummyRequest(),
+                req=VoiceDesignRequest(name="Narrador", description="narrador grave e misterioso para teste"),
+                user=env.verified_user,
+                db=db,
+            )
+
+    with pytest.raises(HTTPException) as exc:
+        run(_case())
+    assert exc.value.status_code == 402
+    design_mock.assert_not_awaited()
+
+
+def test_regenerate_tts_elevenlabs_debits_credits(tmp_path, monkeypatch):
+    env = create_test_env(tmp_path, monkeypatch)
+    job = create_job(env, script={"narration": "texto original", "scenes": []})
+    job_dir = env.storage_dir / "jobs" / str(job.id)
+    job_dir.mkdir(parents=True)
+    (job_dir / "script.json").write_text(json.dumps({"narration": "texto original", "scenes": []}))
+    synth_mock = AsyncMock(return_value=job_dir / "narration.wav")
+    monkeypatch.setattr("app.api.routes.settings.ELEVENLABS_API_KEY", "test-key")
+    monkeypatch.setattr("app.services.elevenlabs_provider.ElevenLabsProvider.synthesize", synth_mock)
+    monkeypatch.setattr("app.services.transcriber.transcribe_with_timestamps", lambda _path: [{"word": "ola"}])
+
+    async def _case():
+        async with env.session_factory() as db:
+            before = (await db.get(User, env.verified_user.id)).credits
+            await api_routes.regenerate_tts(
+                job_id=str(job.id),
+                req=RegenerateTTSRequest(voice_provider="elevenlabs", voice_id="el_123"),
+                user=env.verified_user,
+                db=db,
+            )
+            after = (await db.get(User, env.verified_user.id)).credits
+            return before, after
+
+    before, after = run(_case())
+    assert before - after == 2  # CREDIT_COST_ELEVENLABS
+
+
+def test_regenerate_tts_edge_is_free(tmp_path, monkeypatch):
+    env = create_test_env(tmp_path, monkeypatch)
+    job = create_job(env, script={"narration": "texto original", "scenes": []})
+    job_dir = env.storage_dir / "jobs" / str(job.id)
+    job_dir.mkdir(parents=True)
+    (job_dir / "script.json").write_text(json.dumps({"narration": "texto original", "scenes": []}))
+    monkeypatch.setattr(
+        "app.services.tts.synthesize_narration_async", AsyncMock(return_value=str(job_dir / "narration.wav"))
+    )
+    monkeypatch.setattr("app.services.transcriber.transcribe_with_timestamps", lambda _path: [{"word": "ola"}])
+
+    async def _case():
+        async with env.session_factory() as db:
+            before = (await db.get(User, env.verified_user.id)).credits
+            await api_routes.regenerate_tts(
+                job_id=str(job.id),
+                req=RegenerateTTSRequest(voice_provider="edge", voice_id="pt-BR-AntonioNeural"),
+                user=env.verified_user,
+                db=db,
+            )
+            after = (await db.get(User, env.verified_user.id)).credits
+            return before, after
+
+    before, after = run(_case())
+    assert before == after  # Edge e gratuito, nao debita

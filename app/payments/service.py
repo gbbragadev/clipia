@@ -78,14 +78,16 @@ async def create_checkout(user: User, package_key: str, db: AsyncSession) -> tup
 
 
 async def process_webhook(payment_id: str, db: AsyncSession) -> bool:
-    """Fetch payment from MP API and credit user if approved. Returns True if credited."""
+    """Reconcilia um pagamento contra a API do MP.
+
+    Credita na aprovacao (idempotente por status) e REVERTE em estorno/chargeback/
+    cancelamento. Retorna True se o saldo de creditos mudou.
+    """
     async with get_lock(f"payment:{payment_id}"):
         sdk = _get_sdk()
         result = await asyncio.to_thread(sdk.payment().get, int(payment_id))
         payment = result["response"]
-
-        if payment.get("status") != "approved":
-            return False
+        mp_status = payment.get("status")
 
         external_ref = payment.get("external_reference")
         if not external_ref:
@@ -93,27 +95,44 @@ async def process_webhook(payment_id: str, db: AsyncSession) -> bool:
             return False
 
         purchase_id = UUID(external_ref)
-        stmt = select(CreditPurchase).where(CreditPurchase.id == purchase_id)
-        row = await db.execute(stmt)
+        row = await db.execute(select(CreditPurchase).where(CreditPurchase.id == purchase_id))
         purchase = row.scalar_one_or_none()
-
         if not purchase:
             logger.warning("CreditPurchase %s not found for payment %s", purchase_id, payment_id)
             return False
 
-        if purchase.status == "approved":
-            return False
-
-        purchase.status = "approved"
-        purchase.mp_payment_id = str(payment_id)
-        purchase.paid_at = datetime.now(timezone.utc)
-
-        user_stmt = select(User).where(User.id == purchase.user_id)
-        user_row = await db.execute(user_stmt)
+        user_row = await db.execute(select(User).where(User.id == purchase.user_id))
         user = user_row.scalar_one()
-        user.credits += purchase.credits_amount
 
-        await db.commit()
-        record_credit_metric("credit", purchase.credits_amount)
-        logger.info("Credited %d credits to user %s (purchase %s)", purchase.credits_amount, user.id, purchase.id)
-        return True
+        # Aprovacao: credita uma unica vez (idempotente — segundo webhook nao re-credita).
+        if mp_status == "approved":
+            if purchase.status == "approved":
+                return False
+            purchase.status = "approved"
+            purchase.mp_payment_id = str(payment_id)
+            purchase.paid_at = datetime.now(timezone.utc)
+            user.credits += purchase.credits_amount
+            await db.commit()
+            record_credit_metric("credit", purchase.credits_amount)
+            logger.info("Credited %d credits to user %s (purchase %s)", purchase.credits_amount, user.id, purchase.id)
+            return True
+
+        # Estorno/chargeback/cancelamento: reverte os creditos se ja haviam sido creditados.
+        if mp_status in ("refunded", "charged_back", "cancelled"):
+            if purchase.status != "approved":
+                return False  # nunca creditou -> nada a reverter
+            purchase.status = "refunded"
+            # clamp em 0 sob o lock (evento raro; nao deixar saldo negativo).
+            user.credits = max(0, user.credits - purchase.credits_amount)
+            await db.commit()
+            record_credit_metric("debit", purchase.credits_amount)
+            logger.warning(
+                "Reverted %d credits from user %s (purchase %s, mp_status=%s)",
+                purchase.credits_amount,
+                user.id,
+                purchase.id,
+                mp_status,
+            )
+            return True
+
+        return False

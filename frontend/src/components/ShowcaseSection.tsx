@@ -1,11 +1,14 @@
 'use client'
 
 import { useRef, useCallback, useEffect, useState } from 'react'
+import { motion } from 'motion/react'
 import { CinematicSection } from './ui/CinematicSection'
 import { GlowCard } from './ui/GlowCard'
 import { PretextHeading } from './ui/PretextHeading'
+import { SkeletonBlock } from './ui/skeletons'
 import Link from 'next/link'
 import { loadShowcase, type ShowcaseManifest, type ShowcaseVideo } from '@/lib/showcase'
+import { fadeUp, staggerContainer, useReducedMotionState } from '@/lib/motion'
 
 export function ShowcaseCard({ item, featured = false }: { item: ShowcaseVideo; featured?: boolean }) {
   const videoRef = useRef<HTMLVideoElement>(null)
@@ -16,7 +19,10 @@ export function ShowcaseCard({ item, featured = false }: { item: ShowcaseVideo; 
     const video = videoRef.current
     if (!card || !video) return
     const observer = new IntersectionObserver(
-      ([entry]) => { if (entry.isIntersecting) video.play().catch(() => {}) },
+      ([entry]) => {
+        if (entry.isIntersecting) video.play().catch(() => {})
+        else video.pause() // pausa fora da viewport — poupa CPU/dados no mobile
+      },
       { threshold: 0.3 },
     )
     observer.observe(card)
@@ -30,7 +36,7 @@ export function ShowcaseCard({ item, featured = false }: { item: ShowcaseVideo; 
   const handleLeave = useCallback(() => { const v = videoRef.current; if (v) v.muted = true }, [])
 
   return (
-    <GlowCard className={`h-full ${featured ? 'md:col-span-2' : ''}`}>
+    <GlowCard className="h-full">
       <div
         ref={cardRef}
         className="w-full h-full relative cursor-pointer snap-center shrink-0"
@@ -42,7 +48,7 @@ export function ShowcaseCard({ item, featured = false }: { item: ShowcaseVideo; 
         <div className="relative w-full h-full aspect-[9/16] md:aspect-auto md:min-h-[500px] overflow-hidden">
           <video
             ref={videoRef}
-            autoPlay muted loop playsInline preload="metadata"
+            autoPlay muted loop playsInline preload="none"
             className="w-full h-full object-cover"
             src={item.video}
           />
@@ -70,13 +76,32 @@ export function ShowcaseCard({ item, featured = false }: { item: ShowcaseVideo; 
   )
 }
 
+function ShowcaseSkeleton() {
+  return (
+    <div className="max-w-6xl mx-auto px-4 md:px-0">
+      <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
+        {[0, 1, 2, 3, 4, 5].map((i) => (
+          <SkeletonBlock key={i} className="aspect-[9/16] md:aspect-auto md:min-h-[500px] w-full" />
+        ))}
+      </div>
+    </div>
+  )
+}
+
 export default function ShowcaseSection() {
   const [manifest, setManifest] = useState<ShowcaseManifest | null>(null)
   const [niche, setNiche] = useState<string>('all')
+  const reduceMotion = useReducedMotionState()
 
   useEffect(() => { loadShowcase().then(setManifest).catch(() => {}) }, [])
 
-  if (!manifest) return null
+  if (!manifest) {
+    return (
+      <CinematicSection background="none" spacing="xl" reveal="none" className="border-b border-white/5">
+        <ShowcaseSkeleton />
+      </CinematicSection>
+    )
+  }
   const videos = niche === 'all' ? manifest.videos : manifest.videos.filter((v) => v.niche === niche)
 
   return (
@@ -84,7 +109,7 @@ export default function ShowcaseSection() {
       <div className="text-center mb-10 max-w-3xl mx-auto">
         <PretextHeading text="O que a IA cria em minutos" animation="blur-focus" color="#ffffff" className="mb-6" />
         <p className="text-xl text-slate-400">
-          Vídeos reais gerados e editados no ClipIA. Passe o mouse para ouvir.
+          Vídeos reais gerados e editados no ClipIA. Passe o mouse ou toque para ouvir.
         </p>
       </div>
 
@@ -105,12 +130,23 @@ export default function ShowcaseSection() {
         ))}
       </div>
 
-      {/* Mobile: carrossel snap; Desktop: grid */}
-      <div className="flex md:grid md:grid-cols-2 lg:grid-cols-3 gap-6 max-w-6xl mx-auto overflow-x-auto md:overflow-visible snap-x snap-mandatory px-4 md:px-0 [&>*]:w-[80vw] md:[&>*]:w-auto overscroll-x-contain scroll-px-4">
-        {videos.map((item, i) => (
-          <ShowcaseCard key={item.id} item={item} featured={i === 0 && niche === 'all'} />
-        ))}
-      </div>
+      {/* Mobile: carrossel snap; Desktop: grid — stagger na entrada */}
+      <motion.div
+        className="flex md:grid md:grid-cols-2 lg:grid-cols-3 gap-6 max-w-6xl mx-auto overflow-x-auto md:overflow-visible snap-x snap-mandatory px-4 md:px-0 [&>*]:w-[80vw] md:[&>*]:w-auto [&>*]:shrink-0 md:[&>*]:shrink overscroll-x-contain scroll-px-4"
+        variants={staggerContainer(0.06)}
+        initial={reduceMotion ? false : 'hidden'}
+        whileInView="visible"
+        viewport={{ once: true, amount: 0.1 }}
+      >
+        {videos.map((item, i) => {
+          const featured = i === 0 && niche === 'all'
+          return (
+            <motion.div key={item.id} variants={fadeUp} className={featured ? 'md:col-span-2' : ''}>
+              <ShowcaseCard item={item} featured={featured} />
+            </motion.div>
+          )
+        })}
+      </motion.div>
 
       {process.env.NEXT_PUBLIC_PUBLIC_SIGNUP === 'true' && (
         <div className="text-center mt-16">

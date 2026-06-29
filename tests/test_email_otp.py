@@ -18,7 +18,9 @@ async def test_register_creates_pending_user_and_verify_grants_two_credits(clien
     assert user is not None, "Registration should persist the new user."
     assert user.credits == 0, "Fresh registrations should start with zero credits."
     assert user.email_verified is False, "Fresh registrations should be unverified."
-    assert user.verification_code.isdigit() and len(user.verification_code) == 6, "Registration should generate a six-digit OTP."
+    assert (
+        user.verification_code.isdigit() and len(user.verification_code) == 6
+    ), "Registration should generate a six-digit OTP."
 
     verify = await client.post(
         "/api/v1/auth/verify-email",
@@ -30,6 +32,17 @@ async def test_register_creates_pending_user_and_verify_grants_two_credits(clien
     await db_session.refresh(user)
     assert user.email_verified is True, "Verified users must be marked as verified."
     assert user.verification_code is None, "OTP should be cleared after successful verification."
+
+
+@pytest.mark.asyncio
+async def test_register_rejects_disposable_email(client, db_session):
+    response = await client.post(
+        "/api/v1/auth/register",
+        json={"email": "farmer@mailinator.com", "name": "Farm", "password": "Secret123"},
+    )
+    assert response.status_code == 400, "Disposable email domains must be rejected (anti-farming)."
+    user = await db_session.scalar(select(User).where(User.email == "farmer@mailinator.com"))
+    assert user is None, "Rejected disposable registration must not create a user."
 
 
 @pytest.mark.asyncio
@@ -69,7 +82,9 @@ async def test_verify_email_is_idempotent_for_verified_user(client, verified_use
     )
 
     assert response.status_code == 200, "Already-verified users should get an idempotent 200 response."
-    assert response.json()["status"] == "already_verified", "Already-verified users should receive the already_verified status."
+    assert (
+        response.json()["status"] == "already_verified"
+    ), "Already-verified users should receive the already_verified status."
 
 
 @pytest.mark.asyncio

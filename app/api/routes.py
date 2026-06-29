@@ -1,5 +1,6 @@
 import json
 import logging
+import math
 import shutil
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
@@ -8,7 +9,6 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import FileResponse
 from slowapi import Limiter
-from slowapi.util import get_remote_address
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -37,10 +37,11 @@ from app.services.remotion import scene_sort_key
 from app.services.trends import fetch_trends
 from app.utils.files import bytes_to_gb, path_size_bytes
 from app.utils.locks import get_lock
+from app.utils.ratelimit import client_ip
 from app.worker.tasks import dispatch_pipeline
 
 logger = logging.getLogger(__name__)
-limiter = Limiter(key_func=get_remote_address)
+limiter = Limiter(key_func=client_ip)
 router = APIRouter(tags=["jobs"])
 _redis = get_redis()
 
@@ -139,6 +140,39 @@ def _ensure_storage_ready() -> None:
         raise HTTPException(status_code=503, detail=ErrorMessages.DISK_FULL)
 
 
+async def _debit_credits(db: AsyncSession, user_id, cost: int) -> None:
+    """Debito atomico de creditos (mesmo padrao da rota /generate).
+
+    Faz UPDATE ... WHERE credits >= cost (sem read-modify-write) para evitar race/saldo negativo.
+    Levanta 402 se nao houver saldo, 403 se o email nao estiver verificado. No-op se cost <= 0.
+    """
+    if cost <= 0:
+        return
+    result = await db.execute(
+        update(User)
+        .where(User.id == user_id, User.email_verified.is_(True), User.credits >= cost)
+        .values(credits=User.credits - cost)
+    )
+    if result.rowcount == 0:
+        fresh = await db.get(User, user_id)
+        if fresh is None:
+            raise HTTPException(status_code=401, detail=ErrorMessages.UNAUTHORIZED)
+        if not fresh.email_verified:
+            raise HTTPException(status_code=403, detail=ErrorMessages.EMAIL_NOT_VERIFIED)
+        raise HTTPException(status_code=402, detail=ErrorMessages.INSUFFICIENT_CREDITS)
+    await db.commit()
+    record_credit_metric("debit", cost)
+
+
+async def _refund_credits(db: AsyncSession, user_id, cost: int) -> None:
+    """Devolve creditos quando uma operacao paga falha depois do debito. No-op se cost <= 0."""
+    if cost <= 0:
+        return
+    await db.execute(update(User).where(User.id == user_id).values(credits=User.credits + cost))
+    await db.commit()
+    record_credit_metric("credit", cost)
+
+
 @router.post(
     "/generate",
     summary="Generate a video",
@@ -229,13 +263,17 @@ async def design_voice(
     request: Request,
     req: VoiceDesignRequest,
     user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
 ):
-    """Cria uma voz sob medida a partir de uma descrição. Retorna o voice_id (aparece em /voices)."""
+    """Cria uma voz sob medida a partir de uma descrição. Cobra CREDIT_COST_VOICE_DESIGN creditos."""
     from app.services.elevenlabs_provider import ElevenLabsProvider
 
+    cost = settings.CREDIT_COST_VOICE_DESIGN
+    await _debit_credits(db, user.id, cost)
     try:
         voice_id = await ElevenLabsProvider().design_voice(req.name, req.description, req.text)
     except Exception as e:  # noqa: BLE001
+        await _refund_credits(db, user.id, cost)
         logger.warning("Voice Design falhou: %s", e)
         raise HTTPException(status_code=502, detail=f"Não foi possível criar a voz: {e}")
     return {"voice_id": voice_id, "name": req.name}
@@ -442,8 +480,15 @@ async def clone_voice(
 
     from app.services.elevenlabs_provider import ElevenLabsProvider
 
+    cost = settings.CREDIT_COST_VOICE_CLONE
+    await _debit_credits(db, user.id, cost)
     provider = ElevenLabsProvider()
-    voice_id = await provider.clone_voice(req.name, audio_bytes, req.description)
+    try:
+        voice_id = await provider.clone_voice(req.name, audio_bytes, req.description)
+    except Exception as e:  # noqa: BLE001
+        await _refund_credits(db, user.id, cost)
+        logger.warning("Voice clone falhou: %s", e)
+        raise HTTPException(status_code=502, detail=f"Não foi possível clonar a voz: {e}")
 
     clone = VoiceClone(
         user_id=user.id,
@@ -726,19 +771,26 @@ async def regenerate_tts(
     script = json.loads(script_path.read_text())
     narration = req.text if req.text else script.get("narration", "")
 
-    # Regenerate TTS (async)
+    # Regenerate TTS (async). ElevenLabs e pago -> cobra credito; Edge e gratuito -> sem debito.
     audio_path = str(job_dir / "narration.wav")
     if req.voice_provider == "elevenlabs":
         if not settings.ELEVENLABS_API_KEY:
             raise HTTPException(status_code=503, detail="ELEVENLABS_API_KEY not configured")
         from app.services.elevenlabs_provider import ElevenLabsProvider
 
+        cost = settings.CREDIT_COST_ELEVENLABS
+        await _debit_credits(db, user.id, cost)
         provider = ElevenLabsProvider()
-        await provider.synthesize(
-            text=narration,
-            output_path=audio_path,
-            voice_id=req.voice_id or "",
-        )
+        try:
+            await provider.synthesize(
+                text=narration,
+                output_path=audio_path,
+                voice_id=req.voice_id or "",
+            )
+        except Exception as e:  # noqa: BLE001
+            await _refund_credits(db, user.id, cost)
+            logger.warning("Regenerate TTS (ElevenLabs) falhou: %s", e)
+            raise HTTPException(status_code=502, detail=f"Não foi possível regenerar a narração: {e}")
     else:
         from app.services.edge_provider import EDGE_VOICES
         from app.services.tts import synthesize_narration_async
@@ -854,19 +906,11 @@ async def render_video(
     job = await get_owned_job(db, user, job_id)
     job_id = str(job.id)
     async with get_lock(f"render:{job_id}"):
-        pending = job.pending_credits or 0.0
-        if pending > 0:
-            user_result = await db.execute(select(User).where(User.id == user.id))
-            fresh_user = user_result.scalar_one()
-            if fresh_user.credits < pending:
-                raise HTTPException(
-                    status_code=402,
-                    detail=ErrorMessages.INSUFFICIENT_CREDITS,
-                )
-            fresh_user.credits = int(fresh_user.credits - pending)
+        cost = math.ceil(job.pending_credits or 0.0)
+        if cost > 0:
+            await _debit_credits(db, user.id, cost)  # atomico: 402 se sem saldo, sem read-modify-write
             job.pending_credits = 0.0
             await db.commit()
-            record_credit_metric("debit", pending)
 
     job_dir = Path(settings.STORAGE_DIR) / "jobs" / job_id
     if not job_dir.exists():
@@ -896,16 +940,11 @@ async def reset_job(
     """Reset job to original state. Costs 1 credit, clears pending_credits."""
     job = await get_owned_job(db, user, job_id)
     async with get_lock(f"reset:{job_id}"):
-        fresh_user = await db.get(User, user.id)
-        if fresh_user.credits < 1:
-            raise HTTPException(status_code=402, detail=ErrorMessages.INSUFFICIENT_CREDITS)
-
-        fresh_user.credits -= 1
+        await _debit_credits(db, user.id, 1)  # atomico: 402 se sem saldo, sem read-modify-write
         job.pending_credits = 0.0
         job.editor_state = None
         await db.commit()
-        record_credit_metric("debit", 1)
-
+        fresh_user = await db.get(User, user.id)
         return {"status": "reset", "credits_remaining": fresh_user.credits}
 
 

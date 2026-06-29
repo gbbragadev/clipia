@@ -60,7 +60,9 @@ async def test_webhook_rejects_missing_or_invalid_signature(client, monkeypatch)
 
 
 @pytest.mark.asyncio
-async def test_webhook_with_valid_signature_credits_purchase(client, db_session, purchase_factory, verified_user, monkeypatch):
+async def test_webhook_with_valid_signature_credits_purchase(
+    client, db_session, purchase_factory, verified_user, monkeypatch
+):
     purchase = await purchase_factory(package_name="popular")
     monkeypatch.setattr("app.payments.routes.settings.MP_WEBHOOK_SECRET", "secret")
 
@@ -97,3 +99,82 @@ async def test_webhook_ignores_irrelevant_actions_and_missing_payment_id(client)
 
     assert ignored.json()["status"] == "ignored", "Irrelevant webhook actions should be ignored."
     assert missing.json()["status"] == "no_payment_id", "Payment webhooks without an id should be reported clearly."
+
+
+def _signed_headers():
+    ts = str(int(datetime.now().timestamp()))
+    manifest = f"id:123;request-id:req-1;ts:{ts};"
+    signature = hmac.new(b"secret", manifest.encode(), hashlib.sha256).hexdigest()
+    return {"x-signature": f"ts={ts},v1={signature}", "x-request-id": "req-1"}
+
+
+@pytest.mark.asyncio
+async def test_webhook_reverts_credits_on_refund(client, db_session, purchase_factory, verified_user, monkeypatch):
+    purchase = await purchase_factory(package_name="popular")
+    credits_initial = (await db_session.get(User, verified_user.id)).credits
+    monkeypatch.setattr("app.payments.routes.settings.MP_WEBHOOK_SECRET", "secret")
+
+    mp_status = {"value": "approved"}
+
+    class _Sdk:
+        class payment:
+            @staticmethod
+            def get(_payment_id):
+                return {"response": {"status": mp_status["value"], "external_reference": str(purchase.id)}}
+
+    monkeypatch.setattr("app.payments.service._get_sdk", lambda: _Sdk())
+
+    # 1) Aprovacao credita
+    approved = await client.post(
+        "/api/v1/webhooks/mercadopago",
+        json={"action": "payment.updated", "data": {"id": "123"}},
+        headers=_signed_headers(),
+    )
+    assert approved.json()["status"] == "credited", "Approval should credit first."
+
+    # 2) Estorno reverte
+    mp_status["value"] = "refunded"
+    refunded = await client.post(
+        "/api/v1/webhooks/mercadopago",
+        json={"action": "payment.updated", "data": {"id": "123"}},
+        headers=_signed_headers(),
+    )
+    assert refunded.status_code == 200
+
+    refreshed_purchase = await db_session.get(CreditPurchase, purchase.id)
+    refreshed_user = await db_session.get(User, verified_user.id)
+    assert refreshed_purchase.status == "refunded", "Refund webhook should mark purchase refunded."
+    assert (
+        refreshed_user.credits == credits_initial
+    ), "Refund must revert the credited amount back to the initial balance."
+
+
+@pytest.mark.asyncio
+async def test_webhook_refund_of_unapproved_purchase_is_noop(
+    client, db_session, purchase_factory, verified_user, monkeypatch
+):
+    purchase = await purchase_factory(package_name="popular")
+    purchase.status = "pending"  # nunca foi aprovada
+    user = await db_session.get(User, verified_user.id)
+    credits_before = user.credits
+    await db_session.commit()
+
+    monkeypatch.setattr("app.payments.routes.settings.MP_WEBHOOK_SECRET", "secret")
+
+    class _Sdk:
+        class payment:
+            @staticmethod
+            def get(_payment_id):
+                return {"response": {"status": "refunded", "external_reference": str(purchase.id)}}
+
+    monkeypatch.setattr("app.payments.service._get_sdk", lambda: _Sdk())
+
+    response = await client.post(
+        "/api/v1/webhooks/mercadopago",
+        json={"action": "payment.updated", "data": {"id": "123"}},
+        headers=_signed_headers(),
+    )
+
+    assert response.json()["status"] == "not_credited", "Refund of a never-approved purchase must be a no-op."
+    refreshed_user = await db_session.get(User, verified_user.id)
+    assert refreshed_user.credits == credits_before, "No-op refund must not change the balance."

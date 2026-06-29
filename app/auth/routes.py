@@ -5,11 +5,11 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from slowapi import Limiter
-from slowapi.util import get_remote_address
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.dependencies import get_current_user
+from app.auth.disposable import is_disposable_email
 from app.auth.email import (
     generate_otp,
     otp_expiry,
@@ -28,8 +28,8 @@ from app.auth.schemas import (
     TokenResponse,
     UpdateProfileRequest,
     UserResponse,
-    VerifyResetCodeRequest,
     VerifyEmailRequest,
+    VerifyResetCodeRequest,
 )
 from app.auth.service import create_access_token, create_reset_token, decode_reset_token, hash_password, verify_password
 from app.config import settings
@@ -37,9 +37,10 @@ from app.db.engine import get_db
 from app.db.models import CreditPurchase, Job, User
 from app.observability import record_credit_metric
 from app.utils.locks import get_lock
+from app.utils.ratelimit import client_ip
 
 router = APIRouter(prefix="/auth", tags=["auth"])
-limiter = Limiter(key_func=get_remote_address)
+limiter = Limiter(key_func=client_ip)
 
 
 def _ensure_utc(dt: datetime) -> datetime:
@@ -54,11 +55,16 @@ def _ensure_utc(dt: datetime) -> datetime:
     status_code=status.HTTP_201_CREATED,
     summary="Register new user",
     description="Creates a new user account.",
-    responses={201: {"description": "User created"}, 409: {"description": "Email already exists"}}
+    responses={201: {"description": "User created"}, 409: {"description": "Email already exists"}},
 )
 @limiter.limit(settings.RATE_LIMIT_AUTH)
 async def register(request: Request, body: RegisterRequest, db: AsyncSession = Depends(get_db)):
     """Register a new user and return an access token."""
+    if is_disposable_email(body.email):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Use um email permanente; provedores descartaveis nao sao aceitos.",
+        )
     async with get_lock(f"register:{body.email}"):
         result = await db.execute(select(User).where(User.email == body.email))
         if result.scalar_one_or_none() is not None:
@@ -102,7 +108,7 @@ async def register(request: Request, body: RegisterRequest, db: AsyncSession = D
     response_model=TokenResponse,
     summary="User login",
     description="Authenticates user and returns JWT token.",
-    responses={200: {"description": "Login successful"}, 401: {"description": "Invalid credentials"}}
+    responses={200: {"description": "Login successful"}, 401: {"description": "Invalid credentials"}},
 )
 @limiter.limit(settings.RATE_LIMIT_AUTH)
 async def login(request: Request, body: LoginRequest, db: AsyncSession = Depends(get_db)):
@@ -121,7 +127,11 @@ async def login(request: Request, body: LoginRequest, db: AsyncSession = Depends
     "/verify-email",
     summary="Verify email",
     description="Verifies a user's email using OTP.",
-    responses={200: {"description": "Email verified"}, 400: {"description": "Invalid code"}, 404: {"description": "User not found"}}
+    responses={
+        200: {"description": "Email verified"},
+        400: {"description": "Invalid code"},
+        404: {"description": "User not found"},
+    },
 )
 @limiter.limit("5/minute")
 async def verify_email(request: Request, body: VerifyEmailRequest, db: AsyncSession = Depends(get_db)):
@@ -167,20 +177,20 @@ async def verify_email(request: Request, body: VerifyEmailRequest, db: AsyncSess
         MAX_REFERRAL_BONUS_COUNT = 10
 
         if user.referred_by:
-            from sqlalchemy import update as sql_update, func as sqla_func
+            from sqlalchemy import func as sqla_func
+            from sqlalchemy import update as sql_update
+
             # Count how many verified referrals already credited
-            referral_count = (await db.execute(
-                select(sqla_func.count(User.id)).where(
-                    User.referred_by == user.referred_by,
-                    User.email_verified == True
+            referral_count = (
+                await db.execute(
+                    select(sqla_func.count(User.id)).where(
+                        User.referred_by == user.referred_by, User.email_verified.is_(True)
+                    )
                 )
-            )).scalar() or 0
+            ).scalar() or 0
 
             if referral_count <= MAX_REFERRAL_BONUS_COUNT:
-                await db.execute(
-                    sql_update(User).where(User.id == user.referred_by)
-                    .values(credits=User.credits + 2)
-                )
+                await db.execute(sql_update(User).where(User.id == user.referred_by).values(credits=User.credits + 2))
                 await db.commit()
                 record_credit_metric("referral_bonus", 2)
 
@@ -191,7 +201,7 @@ async def verify_email(request: Request, body: VerifyEmailRequest, db: AsyncSess
     "/resend-code",
     summary="Resend OTP",
     description="Resends the verification email code.",
-    responses={200: {"description": "Code sent"}}
+    responses={200: {"description": "Code sent"}},
 )
 @limiter.limit("3/minute")
 async def resend_code(request: Request, body: ResendCodeRequest, db: AsyncSession = Depends(get_db)):
@@ -221,7 +231,7 @@ async def resend_code(request: Request, body: ResendCodeRequest, db: AsyncSessio
     "/forgot-password",
     summary="Forgot password",
     description="Sends an OTP to reset password.",
-    responses={200: {"description": "OTP sent"}}
+    responses={200: {"description": "OTP sent"}},
 )
 @limiter.limit("3/minute")
 async def forgot_password(request: Request, body: ForgotPasswordRequest, db: AsyncSession = Depends(get_db)):
@@ -246,7 +256,7 @@ async def forgot_password(request: Request, body: ForgotPasswordRequest, db: Asy
     "/verify-reset-code",
     summary="Verify password reset code",
     description="Verifies the OTP to reset password.",
-    responses={200: {"description": "OTP verified"}}
+    responses={200: {"description": "OTP verified"}},
 )
 @limiter.limit("5/minute")
 async def verify_reset_code(request: Request, body: VerifyResetCodeRequest, db: AsyncSession = Depends(get_db)):
@@ -284,7 +294,7 @@ async def verify_reset_code(request: Request, body: VerifyResetCodeRequest, db: 
     "/reset-password",
     summary="Reset password",
     description="Resets the password using a token.",
-    responses={200: {"description": "Password reset"}}
+    responses={200: {"description": "Password reset"}},
 )
 @limiter.limit("3/minute")
 async def reset_password(request: Request, body: ResetPasswordRequest, db: AsyncSession = Depends(get_db)):
@@ -323,7 +333,7 @@ async def reset_password(request: Request, body: ResetPasswordRequest, db: Async
     response_model=UserResponse,
     summary="Get current user",
     description="Returns the authenticated user's details.",
-    responses={200: {"description": "User details"}}
+    responses={200: {"description": "User details"}},
 )
 async def get_me(user: User = Depends(get_current_user)):
     """Retrieve user profile."""
@@ -343,7 +353,7 @@ async def get_me(user: User = Depends(get_current_user)):
     response_model=UserResponse,
     summary="Update profile",
     description="Updates user profile.",
-    responses={200: {"description": "Profile updated"}}
+    responses={200: {"description": "Profile updated"}},
 )
 async def update_me(
     body: UpdateProfileRequest,
@@ -369,7 +379,7 @@ async def update_me(
     "/change-password",
     summary="Change password",
     description="Changes current authenticated user password.",
-    responses={200: {"description": "Password changed"}}
+    responses={200: {"description": "Password changed"}},
 )
 async def change_password(
     body: ChangePasswordRequest,
@@ -389,7 +399,7 @@ async def change_password(
     "/delete-account",
     summary="Delete account",
     description="Permanently deletes the user's account.",
-    responses={200: {"description": "Account deleted"}}
+    responses={200: {"description": "Account deleted"}},
 )
 async def delete_account(
     body: DeleteAccountRequest,
@@ -421,16 +431,14 @@ async def delete_account(
     "/export-data",
     summary="Export data",
     description="Exports all user data.",
-    responses={200: {"description": "Exported data payload"}}
+    responses={200: {"description": "Exported data payload"}},
 )
 async def export_data(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Export user data to JSON."""
-    jobs_result = await db.execute(
-        select(Job).where(Job.user_id == user.id).order_by(Job.created_at.desc())
-    )
+    jobs_result = await db.execute(select(Job).where(Job.user_id == user.id).order_by(Job.created_at.desc()))
     purchases_result = await db.execute(
         select(CreditPurchase).where(CreditPurchase.user_id == user.id).order_by(CreditPurchase.created_at.desc())
     )

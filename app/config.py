@@ -115,6 +115,8 @@ class Settings(BaseSettings):
     CREDIT_COST_CUSTOM_AUDIO: int = 1
     CREDIT_COST_AI_IMAGE: int = 5
     CREDIT_COST_AI_VIDEO: int = 30  # template premium de video IA (ver nota de precificacao acima)
+    CREDIT_COST_VOICE_DESIGN: int = 5  # criar voz custom (ElevenLabs Voice Design) — operacao paga
+    CREDIT_COST_VOICE_CLONE: int = 5  # clonar voz (ElevenLabs Instant Voice Clone) — operacao paga
 
     # MercadoPago
     MP_ACCESS_TOKEN: str = ""
@@ -159,4 +161,14 @@ def validate_production_settings(s: Settings) -> None:
         _logger.warning(
             "Config: SMTP_HOST nao configurado — emails de verificacao e reset de senha NAO serao enviados "
             "(o codigo OTP so vai para o log). Configure SMTP_* no .env."
+        )
+    if not s.MP_ACCESS_TOKEN:
+        _logger.warning(
+            "Config: MP_ACCESS_TOKEN nao configurado — compra de creditos (Mercado Pago) DESABILITADA; "
+            "o checkout vai falhar. Preencha com o Access Token de producao do Mercado Pago para habilitar."
+        )
+    elif not s.MP_WEBHOOK_SECRET:
+        _logger.warning(
+            "Config: MP_WEBHOOK_SECRET nao configurado — a validacao de assinatura do webhook sera pulada. "
+            "A confirmacao ainda e segura (consulta a API do MP), mas configure o secret para defesa extra."
         )
