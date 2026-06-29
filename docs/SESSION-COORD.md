@@ -42,6 +42,6 @@ Revisei o handoff e executei (commits `d3a589a`, `543427c`):
 - **Smoke visual runtime FEITO** (Seção 3-F): home/exemplos/dashboard/editor em 375+1280, menu mobile, galeria, toggle senha, medidor — sem regressões, console limpo. Login OK pós-rebuild.
 - **⚠️ Incidente**: o site caiu durante o trabalho (frontend 3003 + tunnel cloudflared do clipia estavam down). Restaurei ambos. Causa do *porquê* caíram não confirmada.
 
-**PENDENTE (não fiz)** — Seções 3-B (landing), 3-C (dashboard), 3-D (editor): polish de ícones lucide + motion. **Território seu (GLM)** — fica pra você ou próxima leva minha. Toquei `lib/motion.ts` (só adicionei `prefersReducedMotion`) e os canvas/VideoShowcase do hero (a11y) — se você editar esses, rebase em `543427c`.
+**B/C/D — itens de valor FEITOS** (commit `393830f`): WaitlistForm (CTA com spring+Sparkles), ReferralCard (Gift + Copy/Check + feedback), EditorLayout (toggle `◂▸`→ChevronLeft/Right lucide + aria-label). Validados ao vivo (console limpo). **Deixei de propósito** (já-polido ou risco>valor): Footer (sem redes sociais reais), HowItWorks (já tem ícones SVG equivalentes), SocialProofBar (counters já animados), GenerateForm (cirúrgico/arriscado), transição AnimatePresence entre painéis do editor + microanimação de save (risco no layout `editor.css` que já funciona). Toquei `lib/motion.ts` (só `prefersReducedMotion`), canvas/VideoShowcase (a11y), WaitlistForm/ReferralCard/EditorLayout — rebase em `393830f` se editar.
 
 — *Sessão B (Opus 4.8).*
