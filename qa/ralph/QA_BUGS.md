@@ -74,6 +74,53 @@ Status possíveis: `open` · `confirmed` (falhou 3x igual) · `intermittent` · 
 - Repro QA: logar → navegar dashboard↔editor algumas vezes monitorando `localStorage.getItem('clipia_token')`; se virar
   null sem o usuário clicar em Sair → bug presente.
 
+### BUG-R004: Race condition — /api/v1/jobs e /api/v1/trends disparam 401 na carga inicial do dashboard
+- Assinatura: F05 + 401 race condition no load
+- Severidade: média (console poluído; UX com flash de grid vazio ~2s; riesgo de retry loop)
+- Status: **intermittent** (1 ocorrência no ciclo 1; NÃO reproduzido em ciclos 2 e 3 — F05 PASS em ambos)
+- Ocorrências: 1   Primeiro: 20260628-215416   Último: 20260628-215416
+- Reprodução:
+  1. Logar → navegar para /dashboard (primeira carga)
+  2. Observar console: `GET /api/v1/jobs → 401` e `GET /api/v1/trends → 401` nos primeiros 500ms
+  3. Após ~2s, as chamadas repetem e retornam 200
+- Esperado: primeira chamada já autentica (token pronto antes do fetch)
+- Observado: AuthContext não fornece o token a tempo das primeiras chamadas dos componentes; elas disparam sem Bearer header e retornam 401, depois retry retorna 200
+- Evidência: `qa/.claude/qa-evidence/F05-dashboard-20260628-215416.png` + network log inline
+
+### BUG-R007: Tunnel clipia.yml não sobrevive a reinicializações — prod cai sem aviso
+- Assinatura: P01 + 530 / tunnel dead
+- Severidade: alta (prod offline sem alerta; usuários reais sem acesso)
+- Status: **intermittent** (ocorreu no início do QA; P01/P02 PASS em 3 ciclos consecutivos sem recorrência; tunnel estável desde recuperação)
+- Ocorrências: 2   Primeiro: 20260613 (DISP-PRE-01)   Último: 20260628-221000
+- Reprodução: após reinicialização do sistema ou kill do cloudflared de prod, `clipia.com.br` retorna 530
+- Esperado: scheduled task 'ClipIA Production' mantém tunnel sempre no ar
+- Observado: `cloudflared.exe --config clipia.yml` não estava rodando (PID 23808=Services sem cmdline visível; PID 26136=senior-mcp; PID 29532=config.yml padrão sem clipia)
+- Correção aplicada (QA): subiu `_run-tunnel.ps1` manualmente → prod voltou a 200
+- Correção sugerida: monitorar/auto-restart do tunnel (Windows Service dedicado ou health check no scheduled task; confirmar que start-production.ps1 reinicia o tunnel quando chamado)
+- Evidência: `Get-CimInstance Win32_Process` inline + P01-prod-live-20260628-221245.png
+
+### BUG-R006: Landing mostra "2 vídeos" hardcoded enquanto /api/v1/public/stats retorna total_videos=0
+- Assinatura: F15 + public stats hardcoded
+- Severidade: baixa (social proof incorreto — número inventado)
+- Status: **resolved?** (falso positivo — re-analisado em 20260629)
+- Ocorrências: 1   Primeiro: 20260628   Último: 20260628
+- Re-análise (20260629): O "2 vídeos" capturado pelo regex era o COPY DE MARKETING ("2 vídeos grátis ao criar conta" em HeroSection.tsx:18), NÃO um stat de plataforma. O componente real de estatísticas é `SocialProofBar.tsx` que mostra "500+" por padrão (intencional — social proof default quando API retorna 0). Comportamento é design intencional, não bug.
+- Reprodução: `GET /api/v1/public/stats` → `{"total_videos":0}`; landing mostra "2 vídeos criados"
+- Esperado: número reflete endpoint dinâmico
+- Observado: landing hardcoded ou usa dado diferente do endpoint
+- Evidência: inline + F15-credits-20260628-220603.png
+
+### BUG-R005: noise.svg retorna 404 — asset estático faltando no build
+- Assinatura: F05 + noise.svg 404
+- Severidade: baixa (visual — textura de background ausente)
+- Status: **resolved?** (arquivo criado em 20260629; requer restart do next start para servir)
+- Ocorrências: 1   Primeiro: 20260628   Último: 20260628
+- Correção aplicada: `frontend/public/noise.svg` criado (328 bytes, SVG com feTurbulence fractalNoise). Next.js indexa `public/` na inicialização — o arquivo será servido após próximo restart/rebuild.
+- Reprodução: Acessar qualquer página do dashboard → console mostra `GET /noise.svg → 404`
+- Esperado: arquivo `frontend/public/noise.svg` existe e serve corretamente
+- Observado: 404 em ambas as cargas do dashboard observadas (servidor não reiniciado após criação)
+- Evidência: console inline
+
 ---
 
 _(achados preliminares de segurança/disponibilidade do dry-run abaixo)_
@@ -115,9 +162,9 @@ _(achados preliminares de segurança/disponibilidade do dry-run abaixo)_
 ### SEC-PRE-02: `/dashboard` deslogado cai em error boundary em vez de redirecionar
 - Assinatura: S01 + sem redirect deslogado
 - Severidade: baixa (não vaza dados — apenas UX/robustez)
-- Status: open (confirmar em PROD — dev tem ruído de turbopack que pode disparar o boundary)
+- Status: **resolved?** (S01 testado 20260628: /dashboard/settings/credits/admin→redirect "Entrar | ClipIA" sem dados sensíveis; editor→view genérica; 0 vazamentos)
 - Observado: deslogado, `/dashboard` permanece na URL e mostra "Não foi possível carregar esta página /
   Ocorreu um erro inesperado". **Não vaza dados sensíveis** (sem créditos/email/lista). Esperado: redirect
   limpo para `/auth/login`. Em dev, o ChunkLoadError do turbopack pode estar disparando o boundary, então
   precisa ser confirmado contra build de produção.
-- Evidência: dry-run inline (sem PNG).
+- Evidência: dry-run inline (sem PNG). S01 em 20260628 não encontrou recorrência.
