@@ -7,6 +7,7 @@ interface CinematicSectionProps {
   reveal?: 'fade-up' | 'slide-left' | 'blur-in' | 'none'
   spacing?: 'md' | 'lg' | 'xl'
   className?: string
+  id?: string
 }
 
 export function CinematicSection({
@@ -15,6 +16,7 @@ export function CinematicSection({
   reveal = 'fade-up',
   spacing = 'lg',
   className = '',
+  id,
 }: CinematicSectionProps) {
   const sectionRef = useRef<HTMLDivElement>(null)
   const [isVisible, setIsVisible] = useState(false)
@@ -67,7 +69,8 @@ export function CinematicSection({
   return (
     <section
       ref={sectionRef}
-      className={`w-full overflow-hidden ${spacingClasses[spacing]} ${backgroundClasses[background]} ${className}`}
+      id={id}
+      className={`w-full overflow-hidden ${id ? 'scroll-mt-20' : ''} ${spacingClasses[spacing]} ${backgroundClasses[background]} ${className}`}
     >
       <div className={`w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 ${revealClasses[reveal]}`}>
         {children}

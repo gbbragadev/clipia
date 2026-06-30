@@ -12,7 +12,7 @@ export default function DemoSection() {
   const { generate, status, isGenerating, error, downloadUrl, stepLabel } = useVideoGeneration()
 
   return (
-    <CinematicSection background="none" spacing="xl" className="border-b border-white/5">
+    <CinematicSection id="demo" background="none" spacing="xl" className="border-b border-white/5">
       <div className="grid lg:grid-cols-2 gap-12 lg:gap-24 items-center max-w-6xl mx-auto">
         <div className="order-2 lg:order-1">
           <div className="mb-8">
@@ -76,9 +76,9 @@ export default function DemoSection() {
         <div className="order-1 lg:order-2 flex flex-col gap-6">
           <div className="rounded-2xl border border-white/5 bg-[#1a1425]/50 p-8 backdrop-blur-xl relative overflow-hidden">
              <div className="absolute top-0 right-0 w-64 h-64 bg-blue-500/10 blur-[100px] rounded-full pointer-events-none"></div>
-             <h4 className="text-white font-semibold mb-4 text-lg">Multi-coluna dinâmico</h4>
+             <h4 className="text-white font-semibold mb-4 text-lg">Roteiro com gancho, cena a cena</h4>
              <p className="text-slate-400 text-sm leading-relaxed mb-6">
-               O ClipIA processa o roteiro em tempo real usando layouts tipográficos avançados. Cada cena é perfeitamente cronometrada e dividida.
+               A IA escreve o roteiro em pt-BR já dividido em cenas cronometradas — começando por um gancho nos primeiros segundos pra segurar o espectador.
              </p>
              <div className="grid grid-cols-2 gap-4 text-xs font-mono text-purple-300 opacity-70">
                <div className="bg-black/40 p-4 rounded-lg border border-purple-500/20">
@@ -93,12 +93,12 @@ export default function DemoSection() {
                </div>
              </div>
           </div>
-          
+
           <div className="rounded-2xl border border-white/5 bg-[#1a1425]/50 p-8 backdrop-blur-xl relative overflow-hidden">
              <div className="absolute bottom-0 left-0 w-64 h-64 bg-purple-500/10 blur-[100px] rounded-full pointer-events-none"></div>
-             <h4 className="text-white font-semibold mb-4 text-lg">Sincronização Sub-pixel</h4>
+             <h4 className="text-white font-semibold mb-4 text-lg">Legendas no tempo exato da fala</h4>
              <p className="text-slate-400 text-sm leading-relaxed mb-6">
-               A engine tipográfica pre-calcula as larguras para o ajuste exato de cada palavra na tela antes mesmo da renderização. 
+               Cada palavra entra sincronizada com a narração, em 5 estilos animados prontos pra TikTok, Reels e Shorts.
              </p>
              <div className="w-full h-12 bg-black/40 rounded-lg border border-white/5 flex items-center px-4 gap-1 relative overflow-hidden">
                <div className="absolute inset-0 w-full h-full" style={{ background: 'linear-gradient(90deg, rgba(124, 58, 237, 0.2) 0%, transparent 100%)', transform: 'translateX(-50%)', animation: 'slideRight 3s infinite linear' }}></div>

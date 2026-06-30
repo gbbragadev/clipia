@@ -5,6 +5,7 @@ import SocialProofBar from '@/components/SocialProofBar'
 import ShowcaseSection from '@/components/ShowcaseSection'
 import DemoSection from '@/components/demo/DemoSection'
 import HowItWorks from '@/components/HowItWorks'
+import LandingFAQ from '@/components/LandingFAQ'
 import WaitlistForm from '@/components/WaitlistForm'
 import Footer from '@/components/Footer'
 
@@ -23,6 +24,8 @@ export default function Home() {
         <WipeDivider />
         <HowItWorks />
         <FilmstripDivider />
+        <LandingFAQ />
+        <WipeDivider />
         <WaitlistForm />
       </main>
       <Footer />

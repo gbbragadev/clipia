@@ -88,7 +88,7 @@ export default function CreditsPage() {
                   key={pkg.id}
                   pkg={pkg}
                   highlight={pkg.id === 'popular'}
-                  badge={pkg.id === 'popular' ? 'Mais vendido' : pkg.id === 'pro' ? 'Melhor custo' : undefined}
+                  badge={pkg.id === 'popular' ? 'Mais Popular' : pkg.id === 'pro' ? 'Melhor custo' : undefined}
                 />
               ))
             )}

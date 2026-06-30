@@ -1,7 +1,7 @@
 'use client'
 
 import { motion } from 'motion/react'
-import { Sparkles } from 'lucide-react'
+import { Sparkles, Check } from 'lucide-react'
 import Link from 'next/link'
 import { SPRING } from '@/lib/motion'
 
@@ -36,6 +36,14 @@ export default function WaitlistForm() {
                 <Sparkles className="w-5 h-5" />
                 Criar minha conta grátis
               </MotionLink>
+            )}
+
+            {process.env.NEXT_PUBLIC_PUBLIC_SIGNUP === "true" && (
+              <div className="mt-6 flex flex-wrap items-center justify-center gap-x-5 gap-y-2 text-sm text-gray-500">
+                <span className="inline-flex items-center gap-1.5"><Check className="w-4 h-4 text-green-400" /> 2 vídeos grátis</span>
+                <span className="inline-flex items-center gap-1.5"><Check className="w-4 h-4 text-green-400" /> Sem cartão de crédito</span>
+                <span className="inline-flex items-center gap-1.5"><Check className="w-4 h-4 text-green-400" /> Leva 2 minutos</span>
+              </div>
             )}
           </div>
 

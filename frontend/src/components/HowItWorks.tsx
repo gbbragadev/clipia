@@ -56,7 +56,7 @@ function StepIcon({ type }: { type: string }) {
 
 export default function HowItWorks() {
   return (
-    <CinematicSection background="grain" spacing="xl" reveal="fade-up" className="border-b border-white/5 relative">
+    <CinematicSection id="como-funciona" background="grain" spacing="xl" reveal="fade-up" className="border-b border-white/5 relative">
       <div className="absolute top-0 bottom-0 left-1/2 w-px bg-gradient-to-b from-transparent via-purple-500/20 to-transparent hidden lg:block -translate-x-1/2 z-0" />
       
       <div className="max-w-4xl mx-auto relative z-10">

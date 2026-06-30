@@ -60,7 +60,7 @@ export default function VideoCard({ job, onEdit }: VideoCardProps) {
   const icon = STYLE_ICONS[job.style] || '🎬'
 
   // Preview do vídeo: /download é Bearer-only, então <video src> direto dava 401 (BUG-R002).
-  // Carrega como blob autenticado, lazy no primeiro hover, e revoga no unmount.
+  // Carrega como blob autenticado no mount (para aparecer sempre) e revoga no unmount.
   const [previewSrc, setPreviewSrc] = useState<string | null>(null)
   const videoRef = useRef<HTMLVideoElement>(null)
   const hoveringRef = useRef(false)
@@ -69,20 +69,17 @@ export default function VideoCard({ job, onEdit }: VideoCardProps) {
     return () => { if (previewSrc) URL.revokeObjectURL(previewSrc) }
   }, [previewSrc])
 
-  const handleEnter = useCallback(async () => {
-    hoveringRef.current = true
+  useEffect(() => {
     if (!job.download_url) return
-    if (previewSrc) {
-      videoRef.current?.play().catch(() => {})
-      return
-    }
-    try {
-      const url = await fetchAuthenticatedBlobUrl(job.download_url)
-      setPreviewSrc(url)
-    } catch {
-      /* preview é opcional: se falhar, mantém o ícone (sem deslogar) */
-    }
-  }, [job.download_url, previewSrc])
+    fetchAuthenticatedBlobUrl(job.download_url)
+      .then(url => setPreviewSrc(url))
+      .catch(() => {})
+  }, [job.download_url])
+
+  const handleEnter = useCallback(() => {
+    hoveringRef.current = true
+    if (previewSrc) videoRef.current?.play().catch(() => {})
+  }, [previewSrc])
 
   const handleLeave = useCallback(() => {
     hoveringRef.current = false

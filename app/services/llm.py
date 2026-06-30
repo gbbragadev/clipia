@@ -56,7 +56,10 @@ def complete_text(prompt: str, max_tokens: int = 16000, json_mode: bool = True) 
     setado, tenta uma vez no modelo FREE de fallback antes de propagar o erro.
     """
     try:
-        return _call(settings.LLM_MODEL, prompt, max_tokens, json_mode)
+        result = _call(settings.LLM_MODEL, prompt, max_tokens, json_mode)
+        if result:
+            return result
+        raise ValueError("modelo retornou resposta vazia (reasoning exauriu max_tokens)")
     except Exception as e:
         if not settings.LLM_FALLBACK_MODEL:
             raise
