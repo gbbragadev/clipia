@@ -76,6 +76,30 @@ const PRESETS: {
       borderRadius: 6,
     },
   },
+  {
+    key: 'pop',
+    label: 'Pop',
+    preview: {
+      fontFamily: 'Montserrat, sans-serif',
+      fontSize: 15,
+      fontWeight: 900,
+      color: '#FF6B35',
+      textTransform: 'uppercase',
+      WebkitTextStroke: '1px #000',
+    } as React.CSSProperties,
+  },
+  {
+    key: 'neon',
+    label: 'Neon',
+    preview: {
+      fontFamily: 'Montserrat, sans-serif',
+      fontSize: 14,
+      fontWeight: 800,
+      color: '#FFFFFF',
+      textTransform: 'uppercase',
+      textShadow: '0 0 6px #00D4FF, 0 0 14px #00D4FF',
+    } as React.CSSProperties,
+  },
 ]
 
 const ACCENT_COLORS = [
@@ -91,7 +115,7 @@ export function CaptionStylePicker() {
   if (!composition) return null
 
   const style = composition.subtitleStyle
-  const showAccent = style.preset === 'tiktok' || style.preset === 'impact' || style.preset === 'karaoke' || style.preset === 'boxed'
+  const showAccent = style.preset === 'tiktok' || style.preset === 'impact' || style.preset === 'karaoke' || style.preset === 'boxed' || style.preset === 'pop' || style.preset === 'neon'
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>

@@ -279,6 +279,67 @@ const BoxedCaptions: React.FC<{
   )
 }
 
+// Pop e Neon compartilham o chunk + pop-in do Minimal, mudando so o estilo do texto.
+const ChunkCaptions: React.FC<{
+  words: Word[]
+  style: SubtitleStyle
+  textStyle: (style: SubtitleStyle) => React.CSSProperties
+}> = ({ words, style, textStyle }) => {
+  const frame = useCurrentFrame()
+  const { fps } = useVideoConfig()
+  const chunks = groupWordsIntoChunks(words, style.maxWordsPerChunk, fps)
+  const activeChunk = chunks.find((c) => frame >= c.startFrame && frame <= c.endFrame)
+  if (!activeChunk) return null
+
+  const opacity = interpolate(frame, [activeChunk.startFrame, activeChunk.startFrame + 3], [0, 1], {
+    extrapolateLeft: 'clamp',
+    extrapolateRight: 'clamp',
+  })
+  const s = interpolate(frame, [activeChunk.startFrame, activeChunk.startFrame + 5], [0.8, 1], {
+    extrapolateLeft: 'clamp',
+    extrapolateRight: 'clamp',
+  })
+
+  return (
+    <AbsoluteFill
+      style={{
+        display: 'flex',
+        alignItems: style.position === 'bottom' ? 'flex-end' : 'center',
+        justifyContent: 'center',
+        paddingBottom: style.position === 'bottom' ? style.marginBottom : 0,
+      }}
+    >
+      <div style={{ opacity, transform: `scale(${s})`, maxWidth: '85%', textAlign: 'center' }}>
+        <span style={textStyle(style)}>{activeChunk.text}</span>
+      </div>
+    </AbsoluteFill>
+  )
+}
+
+const popTextStyle = (style: SubtitleStyle): React.CSSProperties => ({
+  fontFamily: style.fontFamily,
+  fontSize: style.fontSize,
+  fontWeight: 900,
+  color: style.accentColor,
+  textTransform: 'uppercase',
+  letterSpacing: '0.02em',
+  lineHeight: 1.2,
+  WebkitTextStroke: `${Math.max(style.strokeWidth, 2)}px ${style.outlineColor}`,
+  paintOrder: 'stroke fill',
+  textShadow: `0 3px 10px ${style.outlineColor}`,
+})
+
+const neonTextStyle = (style: SubtitleStyle): React.CSSProperties => ({
+  fontFamily: style.fontFamily,
+  fontSize: style.fontSize,
+  fontWeight: 800,
+  color: style.color,
+  textTransform: 'uppercase',
+  letterSpacing: '0.03em',
+  lineHeight: 1.2,
+  textShadow: `0 0 6px ${style.accentColor}, 0 0 16px ${style.accentColor}, 0 0 34px ${style.accentColor}`,
+})
+
 export const SubtitleOverlay: React.FC<{
   words: Word[]
   style: SubtitleStyle
@@ -292,6 +353,10 @@ export const SubtitleOverlay: React.FC<{
       return <KaraokeCaptions words={words} style={style} />
     case 'boxed':
       return <BoxedCaptions words={words} style={style} />
+    case 'pop':
+      return <ChunkCaptions words={words} style={style} textStyle={popTextStyle} />
+    case 'neon':
+      return <ChunkCaptions words={words} style={style} textStyle={neonTextStyle} />
     case 'minimal':
     default:
       return <MinimalCaptions words={words} style={style} />

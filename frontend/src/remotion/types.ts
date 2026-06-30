@@ -15,7 +15,7 @@ export interface Scene {
   visual_hint?: string
 }
 
-export type CaptionStylePreset = 'tiktok' | 'impact' | 'minimal' | 'karaoke' | 'boxed'
+export type CaptionStylePreset = 'tiktok' | 'impact' | 'minimal' | 'karaoke' | 'boxed' | 'pop' | 'neon'
 
 export interface SubtitleStyle {
   fontFamily: string

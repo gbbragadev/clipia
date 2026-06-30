@@ -326,6 +326,30 @@ export function PretextSubtitlePreview() {
           ctx.restore()
         }
 
+      } else if (style.preset === 'pop') {
+        // === POP STYLE: texto na cor de destaque + contorno, com pop-in (scaleVal global) ===
+        ctx.textAlign = 'center'
+        ctx.shadowColor = 'transparent'
+        ctx.shadowBlur = 0
+        const popStroke = Math.max(strokeW, 2 * scale)
+        ctx.strokeStyle = style.outlineColor
+        ctx.lineWidth = popStroke
+        ctx.lineJoin = 'round'
+        ctx.strokeText(line.text, x, y)
+        ctx.fillStyle = style.accentColor
+        ctx.fillText(line.text, x, y)
+
+      } else if (style.preset === 'neon') {
+        // === NEON STYLE: texto branco com brilho na cor de destaque ===
+        ctx.textAlign = 'center'
+        ctx.shadowColor = style.accentColor
+        ctx.shadowBlur = 22 * scale
+        ctx.fillStyle = style.color
+        ctx.fillText(line.text, x, y) // duas passadas reforcam o glow
+        ctx.fillText(line.text, x, y)
+        ctx.shadowColor = 'transparent'
+        ctx.shadowBlur = 0
+
       } else {
         // === MINIMAL STYLE ===
         ctx.textAlign = 'center'

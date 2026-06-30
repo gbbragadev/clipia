@@ -1,5 +1,4 @@
 import json
-import uuid
 
 import pytest
 
@@ -20,7 +19,12 @@ async def test_generate_invalid_style(client, verified_user, auth_headers):
     response = await client.post(
         "/api/v1/generate",
         headers=auth_headers(verified_user),
-        json={"topic": "Tema valido para gerar video", "style": "curiosity", "duration_target": 45, "template_id": "stock_narration"},
+        json={
+            "topic": "Tema valido para gerar video",
+            "style": "curiosity",
+            "duration_target": 45,
+            "template_id": "stock_narration",
+        },
     )
 
     assert response.status_code == 422
@@ -31,12 +35,22 @@ async def test_generate_duration_out_of_range(client, verified_user, auth_header
     short_response = await client.post(
         "/api/v1/generate",
         headers=auth_headers(verified_user),
-        json={"topic": "Tema valido para gerar video", "style": "educational", "duration_target": 10, "template_id": "stock_narration"},
+        json={
+            "topic": "Tema valido para gerar video",
+            "style": "educational",
+            "duration_target": 10,
+            "template_id": "stock_narration",
+        },
     )
     long_response = await client.post(
         "/api/v1/generate",
         headers=auth_headers(verified_user),
-        json={"topic": "Tema valido para gerar video", "style": "educational", "duration_target": 181, "template_id": "stock_narration"},
+        json={
+            "topic": "Tema valido para gerar video",
+            "style": "educational",
+            "duration_target": 181,
+            "template_id": "stock_narration",
+        },
     )
 
     assert short_response.status_code == 422
@@ -48,7 +62,12 @@ async def test_generate_invalid_template(client, verified_user, auth_headers):
     response = await client.post(
         "/api/v1/generate",
         headers=auth_headers(verified_user),
-        json={"topic": "Tema valido para gerar video", "style": "educational", "duration_target": 45, "template_id": "missing"},
+        json={
+            "topic": "Tema valido para gerar video",
+            "style": "educational",
+            "duration_target": 45,
+            "template_id": "missing",
+        },
     )
 
     assert response.status_code == 422
@@ -92,7 +111,7 @@ async def test_tts_invalid_voice(client, verified_user, auth_headers, job_factor
     response = await client.post(
         f"/api/v1/jobs/{job.id}/regenerate-tts",
         headers=auth_headers(verified_user),
-        json={"voice_id": "pt-BR-ThalitaMultilingualNeural"},
+        json={"voice_id": "pt-BR-VozInexistenteNeural"},
     )
 
     assert response.status_code == 422

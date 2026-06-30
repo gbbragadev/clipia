@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 EDGE_VOICES = [
     VoiceInfo(id="pt-BR-AntonioNeural", name="Antonio", provider="edge", language="pt-BR", gender="male"),
     VoiceInfo(id="pt-BR-FranciscaNeural", name="Francisca", provider="edge", language="pt-BR", gender="female"),
-    VoiceInfo(id="pt-BR-ThalitaNeural", name="Thalita", provider="edge", language="pt-BR", gender="female"),
+    VoiceInfo(id="pt-BR-ThalitaMultilingualNeural", name="Thalita", provider="edge", language="pt-BR", gender="female"),
 ]
 
 
