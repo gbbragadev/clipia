@@ -108,7 +108,7 @@ def _refund_job_credit(job_id: str, status_value: str, error: str, cleanup_files
     try:
         from sqlalchemy import select, update
 
-        from app.db.engine import async_session
+        from app.db.engine import worker_session as async_session  # NullPool: seguro com asyncio.run() por task
         from app.db.models import Job, User
 
         async def _refund():
@@ -337,7 +337,7 @@ def dispatch_pipeline(
 async def _cleanup_old_jobs_async() -> dict[str, int]:
     from sqlalchemy import select
 
-    from app.db.engine import async_session
+    from app.db.engine import worker_session as async_session  # NullPool: seguro com asyncio.run() por task
     from app.db.models import Job
 
     now = datetime.now(timezone.utc)
@@ -381,7 +381,7 @@ async def _cleanup_old_jobs_async() -> dict[str, int]:
 async def _cleanup_orphan_files_async() -> dict[str, int]:
     from sqlalchemy import select
 
-    from app.db.engine import async_session
+    from app.db.engine import worker_session as async_session  # NullPool: seguro com asyncio.run() por task
     from app.db.models import Job
 
     total_reclaimed = 0
@@ -765,7 +765,7 @@ def task_finalize(self, video_path: str, job_id: str) -> str:
         try:
             from sqlalchemy import update
 
-            from app.db.engine import async_session
+            from app.db.engine import worker_session as async_session  # NullPool: seguro com asyncio.run() por task
             from app.db.models import Job
 
             job_dir = get_job_dir(job_id)

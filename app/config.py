@@ -22,6 +22,16 @@ class Settings(BaseSettings):
     # Fallback FREE no OpenRouter quando o modelo principal falha (cota estourada / erro). "" desliga.
     LLM_FALLBACK_MODEL: str = "nvidia/nemotron-3-nano-30b-a3b:free"
 
+    # Cascata de provedores LLM (failover por budget): OpenRouter pago -> OpenAI -> xAI -> OpenRouter free.
+    # complete_text tenta cada um EM ORDEM ate receber resposta nao-vazia; key vazia = provedor pulado.
+    # (OpenRouter pago retorna 402 quando sem credito -> a cascata segue automaticamente p/ o proximo.)
+    OPENAI_BASE_URL: str = "https://api.openai.com/v1"
+    LLM_OPENAI_KEY: str = ""  # se vazio, usa OPENAI_API_KEY
+    LLM_OPENAI_MODEL: str = "gpt-4o-mini"
+    LLM_XAI_BASE_URL: str = "https://api.x.ai/v1"
+    LLM_XAI_KEY: str = ""
+    LLM_XAI_MODEL: str = "grok-2-latest"
+
     # Database
     DATABASE_URL: str = "postgresql+asyncpg://clipia:clipia_dev@localhost:5435/clipia"
 
@@ -120,6 +130,10 @@ class Settings(BaseSettings):
     # MercadoPago
     MP_ACCESS_TOKEN: str = ""
     MP_WEBHOOK_SECRET: str = ""
+    # Stripe (segundo provedor de pagamento — Checkout hospedado, Cartao + Pix).
+    # Hosted Checkout so precisa da SECRET key no backend; a publishable key (client-side) nao e usada.
+    STRIPE_SECRET_KEY: str = ""
+    STRIPE_WEBHOOK_SECRET: str = ""
     FRONTEND_URL: str = "http://localhost:3003"
     BACKEND_URL: str = ""  # https://api.clipia.com.br in production
 
@@ -174,4 +188,13 @@ def validate_production_settings(s: Settings) -> None:
         _logger.warning(
             "Config: MP_WEBHOOK_SECRET nao configurado — a validacao de assinatura do webhook sera pulada. "
             "A confirmacao ainda e segura (consulta a API do MP), mas configure o secret para defesa extra."
+        )
+    if not s.STRIPE_SECRET_KEY:
+        _logger.warning(
+            "Config: STRIPE_SECRET_KEY nao configurado — pagamento via Stripe DESABILITADO (so Mercado Pago)."
+        )
+    elif not s.STRIPE_WEBHOOK_SECRET:
+        _logger.warning(
+            "Config: STRIPE_WEBHOOK_SECRET nao configurado — webhook do Stripe valida via consulta a API "
+            "(retrieve da session) em vez de assinatura. Configure o whsec_ para defesa extra."
         )

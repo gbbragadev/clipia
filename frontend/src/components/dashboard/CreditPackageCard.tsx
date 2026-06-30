@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import type { CreditPackage } from '@/lib/payments'
+import type { CreditPackage, PaymentProvider } from '@/lib/payments'
 import { createCheckout } from '@/lib/payments'
 import { useToast } from '@/components/ui/feedback'
 
@@ -9,9 +9,10 @@ interface CreditPackageCardProps {
   pkg: CreditPackage
   highlight?: boolean
   badge?: string
+  provider?: PaymentProvider
 }
 
-export default function CreditPackageCard({ pkg, highlight, badge }: CreditPackageCardProps) {
+export default function CreditPackageCard({ pkg, highlight, badge, provider = 'mercadopago' }: CreditPackageCardProps) {
   const [loading, setLoading] = useState(false)
   const { error: toastError } = useToast()
 
@@ -20,7 +21,7 @@ export default function CreditPackageCard({ pkg, highlight, badge }: CreditPacka
   async function handleBuy() {
     setLoading(true)
     try {
-      const url = await createCheckout(pkg.id)
+      const url = await createCheckout(pkg.id, provider)
       window.location.href = url
     } catch (err) {
       toastError(

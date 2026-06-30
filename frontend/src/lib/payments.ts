@@ -33,11 +33,16 @@ export async function fetchPackages(): Promise<CreditPackage[]> {
   }, "Erro ao carregar pacotes");
 }
 
-export async function createCheckout(packageId: string): Promise<string> {
+export type PaymentProvider = "mercadopago" | "stripe";
+
+export async function createCheckout(
+  packageId: string,
+  provider: PaymentProvider = "mercadopago",
+): Promise<string> {
   const data = await fetchJson<{ checkout_url: string }>(`${API_BASE}/api/v1/credits/checkout`, {
     method: "POST",
     headers: authHeaders(),
-    body: JSON.stringify({ package: packageId }),
+    body: JSON.stringify({ package: packageId, provider }),
   }, "Erro ao criar checkout");
   return data.checkout_url;
 }

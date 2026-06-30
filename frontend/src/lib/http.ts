@@ -4,28 +4,46 @@ export function notifySessionExpired(): void {
   window.dispatchEvent(new CustomEvent('clipia:session-expired'))
 }
 
+function friendlyStatusMessage(status: number, fallback: string): string {
+  if (status === 429) return 'Muitas requisições em pouco tempo. Aguarde um instante e tente novamente.'
+  if (status === 502 || status === 503 || status === 504)
+    return 'Serviço temporariamente indisponível. Tente novamente em instantes.'
+  if (status >= 500) return 'Ocorreu um erro no servidor. Tente novamente.'
+  return fallback
+}
+
 export async function readApiError(response: Response, fallbackMessage: string): Promise<string> {
   const contentType = response.headers.get('content-type') || ''
 
-  if (contentType.includes('application/json')) {
+  // Le o corpo UMA vez (o stream so pode ser consumido uma vez).
+  let raw = ''
+  try {
+    raw = await response.text()
+  } catch {
+    return friendlyStatusMessage(response.status, fallbackMessage)
+  }
+  const trimmed = raw.trim()
+
+  // Tenta JSON mesmo quando o content-type nao declara (proxies as vezes mentem).
+  if (trimmed && (contentType.includes('application/json') || trimmed.startsWith('{') || trimmed.startsWith('['))) {
     try {
-      const data = await response.json()
+      const data = JSON.parse(trimmed)
       if (typeof data?.detail === 'string' && data.detail.trim()) return data.detail
       if (typeof data?.message === 'string' && data.message.trim()) return data.message
       if (typeof data?.error === 'string' && data.error.trim()) return data.error
     } catch {
-      // Fall through to text parsing.
+      // nao era JSON valido; cai pro tratamento abaixo
     }
   }
 
-  try {
-    const text = await response.text()
-    if (text.trim()) return text.trim()
-  } catch {
-    // Ignore body parsing errors.
+  // Corpo HTML (ex.: pagina de erro 502 do Cloudflare) ou muito longo: NUNCA mostrar cru ao usuario.
+  const looksLikeHtml = /^\s*</.test(trimmed) || /<html|<!doctype/i.test(trimmed)
+  if (!trimmed || looksLikeHtml || trimmed.length > 300) {
+    return friendlyStatusMessage(response.status, fallbackMessage)
   }
 
-  return fallbackMessage
+  // Texto curto e legivel (mensagem de erro em texto puro) pode ser exibido.
+  return trimmed
 }
 
 export function normalizeNetworkError(error: unknown): Error {

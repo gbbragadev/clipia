@@ -4,7 +4,8 @@ import json
 import logging
 from json import JSONDecodeError
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+import stripe
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -20,7 +21,13 @@ from app.payments.schemas import (
     PurchaseHistoryItem,
     PurchaseHistoryResponse,
 )
-from app.payments.service import create_checkout, process_webhook
+from app.payments.service import (
+    create_checkout,
+    create_checkout_stripe,
+    process_webhook,
+    process_webhook_stripe,
+    verify_stripe_event_via_api,
+)
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["payments"])
@@ -31,7 +38,7 @@ router = APIRouter(tags=["payments"])
     response_model=list[PackageResponse],
     summary="List packages",
     description="Returns available credit packages.",
-    responses={200: {"description": "List of packages"}}
+    responses={200: {"description": "List of packages"}},
 )
 async def list_packages(user: User = Depends(get_current_user)):
     """Get available credit packages."""
@@ -57,18 +64,30 @@ async def list_packages(user: User = Depends(get_current_user)):
     response_model=CheckoutResponse,
     summary="Checkout package",
     description="Creates a checkout URL to buy credits.",
-    responses={200: {"description": "Checkout URL"}}
+    responses={200: {"description": "Checkout URL"}},
 )
 async def checkout(
     req: CheckoutRequest,
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Initiate a credit purchase."""
+    """Initiate a credit purchase via Mercado Pago (default) ou Stripe."""
     if req.package not in CREDIT_PACKAGES:
         raise HTTPException(status_code=400, detail="Pacote invalido")
+    if req.provider not in ("mercadopago", "stripe"):
+        raise HTTPException(status_code=400, detail="Provedor invalido")
 
-    checkout_url, purchase_id = await create_checkout(user, req.package, db)
+    try:
+        if req.provider == "stripe":
+            checkout_url, purchase_id = await create_checkout_stripe(user, req.package, db)
+        else:
+            checkout_url, purchase_id = await create_checkout(user, req.package, db)
+    except Exception as e:  # noqa: BLE001
+        logger.error("Checkout (%s) falhou: %s", req.provider, e)
+        raise HTTPException(
+            status_code=502,
+            detail="Não foi possível iniciar o pagamento. Tente novamente em instantes.",
+        )
     return CheckoutResponse(checkout_url=checkout_url, purchase_id=purchase_id)
 
 
@@ -77,7 +96,7 @@ async def checkout(
     status_code=200,
     summary="Mercado Pago Webhook",
     description="Receives payment updates from MercadoPago.",
-    responses={200: {"description": "Processed"}}
+    responses={200: {"description": "Processed"}},
 )
 async def mercadopago_webhook(
     request: Request,
@@ -142,12 +161,48 @@ async def mercadopago_webhook(
     return {"status": "credited" if credited else "not_credited"}
 
 
+@router.post(
+    "/webhooks/stripe",
+    status_code=200,
+    summary="Stripe Webhook",
+    description="Receives payment updates from Stripe (Checkout Session + refunds).",
+    responses={200: {"description": "Processed"}},
+)
+async def stripe_webhook(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    """Process Stripe payment webhook."""
+    payload = await request.body()
+
+    if settings.STRIPE_WEBHOOK_SECRET:
+        sig = request.headers.get("stripe-signature", "")
+        try:
+            event = stripe.Webhook.construct_event(payload, sig, settings.STRIPE_WEBHOOK_SECRET)
+        except Exception as e:  # noqa: BLE001 — assinatura invalida / payload malformado
+            logger.warning("Stripe webhook invalido: %s", e)
+            return {"status": "invalid_signature"}
+    else:
+        # Sem secret configurado: parse + RE-VERIFICA via API do Stripe antes de confiar (espelha o MP).
+        try:
+            parsed = json.loads(payload)
+        except JSONDecodeError:
+            logger.warning("Stripe webhook com JSON invalido")
+            return {"status": "invalid_payload"}
+        event = await verify_stripe_event_via_api(parsed)
+        if event is None:
+            return {"status": "unverified"}
+
+    credited = await process_webhook_stripe(event, db)
+    return {"status": "credited" if credited else "not_credited"}
+
+
 @router.get(
     "/credits/history",
     response_model=PurchaseHistoryResponse,
     summary="Purchase history",
     description="Returns a list of user credit purchases.",
-    responses={200: {"description": "Purchase history"}}
+    responses={200: {"description": "Purchase history"}},
 )
 async def purchase_history(
     user: User = Depends(get_current_user),

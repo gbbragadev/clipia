@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useSearchParams } from 'next/navigation'
 import { useAuth } from '@/contexts/AuthContext'
-import { fetchPackages, type CreditPackage } from '@/lib/payments'
+import { fetchPackages, type CreditPackage, type PaymentProvider } from '@/lib/payments'
 import CreditPackageCard from '@/components/dashboard/CreditPackageCard'
 import PurchaseHistory from '@/components/dashboard/PurchaseHistory'
 import { InlineError } from '@/components/ui/feedback'
@@ -16,6 +16,7 @@ export default function CreditsPage() {
   const [packages, setPackages] = useState<CreditPackage[]>([])
   const [loadingPackages, setLoadingPackages] = useState(true)
   const [packagesError, setPackagesError] = useState<string | null>(null)
+  const [provider, setProvider] = useState<PaymentProvider>('mercadopago')
   const mountedRef = useRef(true)
 
   const loadPackages = useCallback(async () => {
@@ -74,6 +75,31 @@ export default function CreditsPage() {
             </div>
           </div>
 
+          {/* Provider selector */}
+          <div className="flex justify-center gap-2 mb-6">
+            {([
+              { id: 'mercadopago', label: 'Mercado Pago', sub: 'Pix, cartão e boleto' },
+              { id: 'stripe', label: 'Stripe', sub: 'Cartão e Pix' },
+            ] as const).map((opt) => (
+              <button
+                key={opt.id}
+                onClick={() => setProvider(opt.id)}
+                aria-pressed={provider === opt.id}
+                className="px-4 py-2 rounded-xl text-sm font-medium transition-all duration-200 cursor-pointer"
+                style={{
+                  background: provider === opt.id ? 'var(--bg-raised)' : 'transparent',
+                  border: provider === opt.id
+                    ? '1px solid var(--accent-primary, #ff5638)'
+                    : '1px solid var(--border-subtle)',
+                  color: provider === opt.id ? 'var(--text-primary)' : 'var(--text-secondary)',
+                }}
+              >
+                {opt.label}
+                <span className="block text-[10px]" style={{ color: 'var(--text-tertiary)' }}>{opt.sub}</span>
+              </button>
+            ))}
+          </div>
+
           {/* Packages */}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-12">
             {loadingPackages ? (
@@ -87,6 +113,7 @@ export default function CreditsPage() {
                 <CreditPackageCard
                   key={pkg.id}
                   pkg={pkg}
+                  provider={provider}
                   highlight={pkg.id === 'popular'}
                   badge={pkg.id === 'popular' ? 'Mais Popular' : pkg.id === 'pro' ? 'Melhor custo' : undefined}
                 />

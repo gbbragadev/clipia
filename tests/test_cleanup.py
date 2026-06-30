@@ -1,5 +1,5 @@
-from datetime import datetime, timedelta, timezone
 import importlib
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -10,8 +10,8 @@ from app.api import routes as api_routes
 from app.auth.service import create_access_token, hash_password
 from app.config import settings
 from app.db.models import Job, User
-from app.worker.celery_app import celery_app
 from app.worker import tasks as worker_tasks
+from app.worker.celery_app import celery_app
 
 db_engine = importlib.import_module("app.db.engine")
 
@@ -28,7 +28,7 @@ async def test_cleanup_old_jobs_removes_expired_files_and_clears_video_url(
     job_factory,
     monkeypatch,
 ):
-    monkeypatch.setattr(db_engine, "async_session", test_db["session_factory"])
+    monkeypatch.setattr(db_engine, "worker_session", test_db["session_factory"])
 
     completed_job = await job_factory(status="completed")
     failed_job = await job_factory(status="failed")
@@ -43,12 +43,8 @@ async def test_cleanup_old_jobs_removes_expired_files_and_clears_video_url(
         .where(Job.id == completed_job.id)
         .values(created_at=old_completed, video_url=f"/storage/output/{completed_job.id}.mp4")
     )
-    await db_session.execute(
-        update(Job).where(Job.id == failed_job.id).values(created_at=old_failed)
-    )
-    await db_session.execute(
-        update(Job).where(Job.id == recent_job.id).values(created_at=recent_created)
-    )
+    await db_session.execute(update(Job).where(Job.id == failed_job.id).values(created_at=old_failed))
+    await db_session.execute(update(Job).where(Job.id == recent_job.id).values(created_at=recent_created))
     await db_session.commit()
 
     completed_dir = settings.STORAGE_DIR / "jobs" / str(completed_job.id)
@@ -89,7 +85,7 @@ async def test_cleanup_orphan_files_removes_untracked_dirs_and_outputs(
     job_factory,
     monkeypatch,
 ):
-    monkeypatch.setattr(db_engine, "async_session", test_db["session_factory"])
+    monkeypatch.setattr(db_engine, "worker_session", test_db["session_factory"])
 
     tracked_job = await job_factory(status="completed")
     tracked_dir = settings.STORAGE_DIR / "jobs" / str(tracked_job.id)

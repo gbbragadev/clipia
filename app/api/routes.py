@@ -1,3 +1,4 @@
+import asyncio
 import json
 import logging
 import math
@@ -593,14 +594,16 @@ async def upload_audio(
     output_path = str(job_dir / "narration.wav")
     from app.services.custom_audio_provider import normalize_audio
 
-    normalize_audio(upload_path, output_path)
+    await asyncio.to_thread(normalize_audio, upload_path, output_path)
 
     # Transcribe with Whisper for word timestamps
     words = []
     try:
         from app.services.transcriber import transcribe_with_timestamps
 
-        words = transcribe_with_timestamps(output_path)
+        # to_thread: normalize_audio (ffmpeg) e transcribe (Whisper/Groq) sao sincronos e bloqueiam o
+        # event loop. Em thread separada o backend continua respondendo durante a transcricao.
+        words = await asyncio.to_thread(transcribe_with_timestamps, output_path)
         (job_dir / "words.json").write_text(json.dumps(words, ensure_ascii=False), encoding="utf-8")
     except Exception as e:
         logger.warning(f"Whisper transcription of uploaded audio failed: {e}")
@@ -824,7 +827,8 @@ async def regenerate_tts(
     try:
         from app.services.transcriber import transcribe_with_timestamps
 
-        words = transcribe_with_timestamps(audio_path)
+        # to_thread: transcribe (Whisper/Groq) e sincrono e travaria o event loop sem isso.
+        words = await asyncio.to_thread(transcribe_with_timestamps, audio_path)
     except Exception as e:
         logger.warning(f"Whisper transcription failed, keeping old timestamps: {e}")
         words = old_words
@@ -883,7 +887,17 @@ Regras:
 - Seja especifico no reason (nao generico)
 - Maximo 3 sugestoes por resposta"""
 
-    raw = complete_text(prompt)
+    # asyncio.to_thread: complete_text usa o cliente OpenRouter SINCRONO (15-40s). Rodar direto no
+    # handler async travaria o event loop inteiro -> Cloudflare estoura ~100s -> 502 em TODA requisicao
+    # em voo (inclusive o polling de geracao). Em thread separada o loop fica livre.
+    try:
+        raw = await asyncio.to_thread(complete_text, prompt)
+    except Exception as e:  # noqa: BLE001
+        logger.warning("ai_suggest LLM falhou: %s", e)
+        raise HTTPException(
+            status_code=502,
+            detail="A IA está indisponível no momento. Tente novamente em instantes.",
+        )
     raw = strip_code_fences(raw)
 
     try:

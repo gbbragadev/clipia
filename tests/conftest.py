@@ -294,6 +294,7 @@ async def purchase_factory(test_db, verified_user):
         user_id=None,
         package_name: str = "starter",
         status: str = "pending",
+        provider: str = "mercadopago",
         mp_preference_id: str = "pref_123",
         mp_payment_id: str | None = None,
     ) -> CreditPurchase:
@@ -304,6 +305,7 @@ async def purchase_factory(test_db, verified_user):
                 package_name=package_name,
                 credits_amount=pkg["credits"],
                 price_brl=pkg["price_brl"],
+                provider=provider,
                 mp_preference_id=mp_preference_id,
                 mp_payment_id=mp_payment_id,
                 status=status,

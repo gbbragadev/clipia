@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import String, Integer, Float, Text, DateTime, ForeignKey, func
+from sqlalchemy import DateTime, Float, ForeignKey, Integer, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
@@ -16,6 +16,12 @@ class CreditPurchase(Base):
     package_name: Mapped[str] = mapped_column(String(50), nullable=False)
     credits_amount: Mapped[int] = mapped_column(Integer, nullable=False)
     price_brl: Mapped[int] = mapped_column(Integer, nullable=False)  # centavos
+    provider: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="mercadopago", server_default="mercadopago"
+    )
+    # ponytail: nomes mp_* mantidos por compatibilidade; guardam o id do checkout/pagamento do provider
+    # ATIVO (MP: preference_id/payment_id; Stripe: session_id/payment_intent_id). Renomear = churn em 8
+    # call-sites + export de conta + 4 testes, sem ganho funcional. provider diz qual gateway é.
     mp_payment_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
     mp_preference_id: Mapped[str] = mapped_column(String(255), nullable=False)
     status: Mapped[str] = mapped_column(String(50), default="pending")
@@ -42,7 +48,9 @@ class User(Base):
     utm_medium: Mapped[str | None] = mapped_column(String(100), nullable=True)
     utm_campaign: Mapped[str | None] = mapped_column(String(100), nullable=True)
     otp_attempts: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
-    referral_code: Mapped[str] = mapped_column(String(12), unique=True, nullable=False, default=lambda: uuid.uuid4().hex[:8])
+    referral_code: Mapped[str] = mapped_column(
+        String(12), unique=True, nullable=False, default=lambda: uuid.uuid4().hex[:8]
+    )
     referred_by: Mapped[uuid.UUID | None] = mapped_column(GUID(), ForeignKey("users.id"), nullable=True)
     password_reset_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 

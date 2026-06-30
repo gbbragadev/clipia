@@ -3,7 +3,6 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field
 
-
 CREDIT_PACKAGES = {
     "starter": {"name": "Starter", "credits": 10, "price_brl": 1990},
     "popular": {"name": "Popular", "credits": 30, "price_brl": 4990},
@@ -21,6 +20,7 @@ class PackageResponse(BaseModel):
 
 class CheckoutRequest(BaseModel):
     package: str = Field(..., description="Package ID to purchase")
+    provider: str = Field(default="mercadopago", description="Payment provider: mercadopago | stripe")
 
 
 class CheckoutResponse(BaseModel):

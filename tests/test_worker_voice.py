@@ -253,7 +253,7 @@ def test_refund_uses_credit_cost(monkeypatch, tmp_path):
         async with env.session_factory() as session:
             return (await session.get(User, env.verified_user.id)).credits
 
-    monkeypatch.setattr(db_engine, "async_session", env.session_factory)
+    monkeypatch.setattr(db_engine, "worker_session", env.session_factory)
     before = asyncio.run(_before())
     worker_tasks._refund_job_credit(str(job.id), "failed", "boom")
 

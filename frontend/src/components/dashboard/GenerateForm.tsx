@@ -73,9 +73,11 @@ export default function GenerateForm({ onJobComplete, prefillTopic, prefillTrend
   // Poll active job
   const startPolling = useCallback((jobId: string) => {
     if (pollRef.current) clearInterval(pollRef.current)
+    let failures = 0
     pollRef.current = setInterval(async () => {
       try {
         const status = await fetchJobStatus(jobId)
+        failures = 0
         setActiveJob(status)
         if (status.status === 'completed' || status.status === 'editable') {
           if (pollRef.current) clearInterval(pollRef.current)
@@ -88,7 +90,20 @@ export default function GenerateForm({ onJobComplete, prefillTopic, prefillTrend
           setGenError(status.error || 'Erro ao gerar vídeo')
           onJobComplete()
         }
-      } catch { /* silent */ }
+      } catch (err) {
+        // Tolera blips transitorios (rede/502 momentaneo); so desiste apos ~10s de falhas seguidas,
+        // em vez de engolir o erro e deixar o spinner girando pra sempre (bug do 502 do amigo).
+        failures += 1
+        if (failures >= 5) {
+          if (pollRef.current) clearInterval(pollRef.current)
+          setGenerating(false)
+          setGenError(
+            err instanceof Error
+              ? err.message
+              : 'Perdemos a conexão com o servidor. Recarregue a página para ver o status do seu vídeo.',
+          )
+        }
+      }
     }, 2000)
   }, [onJobComplete, refreshUser])
 

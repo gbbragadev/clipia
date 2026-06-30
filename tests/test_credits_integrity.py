@@ -100,8 +100,8 @@ async def test_ai_suggest_external_failure_does_not_charge(
         json={"message": "melhore o roteiro", "context": {"scenes": []}},
     )
     assert (
-        response.status_code == 500
-    ), "Anthropic failures should surface as server errors with current route behavior."
+        response.status_code == 502
+    ), "Falha do LLM upstream no ai-suggest deve virar 502 (Bad Gateway), com mensagem amigavel."
 
     refreshed_job = await db_session.get(Job, job.id)
     assert refreshed_job.pending_credits == 0.0, "Failed AI suggestions must not add pending credits."
