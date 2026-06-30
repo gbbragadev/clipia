@@ -36,6 +36,7 @@ from app.redis_pool import get_redis
 from app.services.llm import complete_text, strip_code_fences
 from app.services.remotion import scene_sort_key
 from app.services.trends import fetch_trends
+from app.templates import get_template
 from app.utils.files import bytes_to_gb, path_size_bytes
 from app.utils.locks import get_lock
 from app.utils.media_url import sign_media_url
@@ -191,8 +192,22 @@ async def generate(
     """Queue a video generation job."""
     credit_cost = get_generation_credit_cost(req.template_id, req.voice_provider)
 
+    # Guardrail $: video IA (Seedance) e a operacao mais cara. Teto DIARIO por usuario, vale ate p/
+    # conta admin/seed (foi o vetor do gasto de ~$6). O lock por usuario serializa get->incr (sem race).
+    is_ai_video = get_template(req.template_id).media.source == "ai_video"
+    cap_key = (
+        f"aivideo_count:{user.id}:{datetime.now(timezone.utc).strftime('%Y-%m-%d')}"
+        if is_ai_video and settings.MAX_AI_VIDEO_PER_DAY > 0
+        else None
+    )
+
     async with get_lock(f"generate:{user.id}"):
         _ensure_storage_ready()
+        if cap_key and int(_redis.get(cap_key) or 0) >= settings.MAX_AI_VIDEO_PER_DAY:
+            raise HTTPException(
+                status_code=429,
+                detail=f"Limite diário de vídeos IA atingido ({settings.MAX_AI_VIDEO_PER_DAY}/dia). Tente novamente amanhã.",
+            )
         debit = await db.execute(
             update(User)
             .where(User.id == user.id, User.email_verified.is_(True), User.credits >= credit_cost)
@@ -225,6 +240,9 @@ async def generate(
         db.add(job)
         await db.commit()
         await db.refresh(job)
+        if cap_key:  # conta a geracao de video IA do dia (so apos debito + job criados com sucesso)
+            _redis.incr(cap_key)
+            _redis.expire(cap_key, 90000)  # ~25h: zera no dia seguinte
 
     job_id = str(job.id)
 
@@ -254,6 +272,15 @@ async def generate(
         trend_context=req.trend_context,
     )
 
+    if is_ai_video:
+        # Telemetria de custo p/ medir gasto real (dono pediu): Seedance ~R$0,67/s.
+        logger.warning(
+            "ai_video enfileirado: ~R$%.2f de API estimado (%ds @ R$0,67/s) user=%s job=%s",
+            req.duration_target * 0.67,
+            req.duration_target,
+            user.id,
+            job_id,
+        )
     return {"job_id": job_id, "status": "queued", "credit_cost": credit_cost}
 
 

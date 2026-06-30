@@ -45,6 +45,14 @@ class FakeRedis:
     def get(self, key: str) -> str | None:
         return self.values.get(key)
 
+    def incr(self, key: str) -> int:
+        n = int(self.values.get(key, "0")) + 1
+        self.values[key] = str(n)
+        return n
+
+    def expire(self, key: str, seconds: int):
+        pass  # fake: sem expiracao real em teste
+
     def delete(self, key: str):
         self.data.pop(key, None)
         self.values.pop(key, None)

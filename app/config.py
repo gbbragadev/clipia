@@ -127,6 +127,11 @@ class Settings(BaseSettings):
     CREDIT_COST_VOICE_DESIGN: int = 5  # criar voz custom (ElevenLabs Voice Design) — operacao paga
     CREDIT_COST_VOICE_CLONE: int = 5  # clonar voz (ElevenLabs Instant Voice Clone) — operacao paga
 
+    # Guardrail anti-burn: teto DIARIO de geracoes de video IA (Seedance ~R$0,67/s, ~R$20/Short) por
+    # usuario. 0 desliga. Mesmo conta admin/seed (999k creditos) nao queima $ ilimitado num dia — foi
+    # o vetor do gasto de ~$6 (tester com conta admin). Vale pra TODOS os planos, inclusive admin.
+    MAX_AI_VIDEO_PER_DAY: int = 3
+
     # MercadoPago
     MP_ACCESS_TOKEN: str = ""
     MP_WEBHOOK_SECRET: str = ""
