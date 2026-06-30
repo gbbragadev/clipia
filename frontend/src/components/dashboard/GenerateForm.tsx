@@ -192,7 +192,7 @@ export default function GenerateForm({ onJobComplete, prefillTopic, prefillTrend
           onKeyDown={(e) => { if (e.key === 'Enter') handleGenerate() }}
           placeholder="Ex: 5 curiosidades sobre o oceano profundo"
           disabled={generating}
-          className="w-full px-4 py-3 text-sm rounded-xl border border-[var(--border-default)] bg-[var(--bg-surface)] text-[var(--text-primary)] placeholder:text-[var(--text-tertiary)] outline-none focus:border-purple-500/50 transition disabled:opacity-50"
+          className="w-full px-4 py-3 text-sm rounded-xl border border-[var(--border-default)] bg-[var(--bg-surface)] text-[var(--text-primary)] placeholder:text-[var(--text-tertiary)] outline-none focus:border-coral/50 transition disabled:opacity-50"
         />
       </div>
 
@@ -216,7 +216,7 @@ export default function GenerateForm({ onJobComplete, prefillTopic, prefillTrend
           value={duration}
           onChange={(e) => setDuration(Number(e.target.value))}
           disabled={generating}
-          className="w-full accent-purple-600"
+          className="w-full accent-coral"
         />
         <div className="flex justify-between text-[10px] text-[var(--text-tertiary)] mt-0.5">
           <span>15s</span>
@@ -234,8 +234,8 @@ export default function GenerateForm({ onJobComplete, prefillTopic, prefillTrend
             disabled={generating}
             className={`flex-1 py-2.5 px-3 rounded-xl border text-xs font-medium transition ${
               voiceProvider === 'edge'
-                ? 'border-purple-500/50 bg-purple-500/10 text-purple-300'
-                : 'border-[var(--border-default)] bg-[var(--bg-surface)] text-[var(--text-tertiary)] hover:border-purple-500/30'
+                ? 'border-coral/50 bg-coral/10 text-coral'
+                : 'border-[var(--border-default)] bg-[var(--bg-surface)] text-[var(--text-tertiary)] hover:border-coral/30'
             } disabled:opacity-50 cursor-pointer`}
           >
             <div className="font-semibold">Edge TTS</div>
@@ -251,8 +251,8 @@ export default function GenerateForm({ onJobComplete, prefillTopic, prefillTrend
             disabled={generating || !supportsDefaultPremiumVoice}
             className={`flex-1 py-2.5 px-3 rounded-xl border text-xs font-medium transition ${
               voiceProvider === 'elevenlabs'
-                ? 'border-blue-500/50 bg-blue-500/10 text-blue-300'
-                : 'border-[var(--border-default)] bg-[var(--bg-surface)] text-[var(--text-tertiary)] hover:border-blue-500/30'
+                ? 'border-azure/50 bg-azure/10 text-azure'
+                : 'border-[var(--border-default)] bg-[var(--bg-surface)] text-[var(--text-tertiary)] hover:border-azure/30'
             } disabled:opacity-50 cursor-pointer`}
           >
             <div className="font-semibold">ElevenLabs</div>
@@ -278,8 +278,8 @@ export default function GenerateForm({ onJobComplete, prefillTopic, prefillTrend
               disabled={generating}
               className={`flex items-center justify-between py-2.5 px-3 rounded-xl border text-xs font-medium transition cursor-pointer disabled:opacity-50 ${
                 item.on
-                  ? 'border-purple-500/50 bg-purple-500/10 text-purple-300'
-                  : 'border-[var(--border-default)] bg-[var(--bg-surface)] text-[var(--text-tertiary)] hover:border-purple-500/30'
+                  ? 'border-coral/50 bg-coral/10 text-coral'
+                  : 'border-[var(--border-default)] bg-[var(--bg-surface)] text-[var(--text-tertiary)] hover:border-coral/30'
               }`}
             >
               <span className="flex flex-col items-start text-left">
@@ -287,7 +287,7 @@ export default function GenerateForm({ onJobComplete, prefillTopic, prefillTrend
                 <span className="text-[10px] opacity-60">{item.hint}</span>
               </span>
               <span
-                className={`relative w-9 h-5 rounded-full transition shrink-0 ${item.on ? 'bg-purple-600' : 'bg-[var(--bg-surface-hover)]'}`}
+                className={`relative w-9 h-5 rounded-full transition shrink-0 ${item.on ? 'bg-coral' : 'bg-[var(--bg-surface-hover)]'}`}
               >
                 <span
                   className="absolute top-0.5 w-4 h-4 rounded-full bg-white transition-all"
@@ -325,7 +325,7 @@ export default function GenerateForm({ onJobComplete, prefillTopic, prefillTrend
                 disabled={generating}
                 rows={6}
                 placeholder={"O oceano profundo esconde segredos incriveis.\nVoce sabia que existem criaturas bioluminescentes?\n\nA fossa das Marianas tem mais de 11 mil metros.\nNenhum raio de sol chega ate la."}
-                className="w-full px-4 py-3 text-sm rounded-xl border border-[var(--border-default)] bg-[var(--bg-surface)] text-[var(--text-primary)] placeholder:text-[var(--text-tertiary)] outline-none focus:border-purple-500/50 transition disabled:opacity-50 resize-y font-mono"
+                className="w-full px-4 py-3 text-sm rounded-xl border border-[var(--border-default)] bg-[var(--bg-surface)] text-[var(--text-primary)] placeholder:text-[var(--text-tertiary)] outline-none focus:border-coral/50 transition disabled:opacity-50 resize-y font-mono"
               />
             </div>
 
@@ -348,18 +348,18 @@ export default function GenerateForm({ onJobComplete, prefillTopic, prefillTrend
 
       {/* Progress */}
       {activeJob && generating && (
-        <div className="p-4 rounded-xl bg-[var(--bg-surface)] border border-purple-500/20 mb-4">
+        <div className="p-4 rounded-xl bg-[var(--bg-surface)] border border-coral/20 mb-4">
           <div className="flex justify-between mb-2">
             <span className="text-xs text-gray-300">
               {activeJob.current_step ? STEP_LABELS[activeJob.current_step] || activeJob.current_step : 'Iniciando...'}
             </span>
-            <span className="text-xs text-purple-400 font-semibold">
+            <span className="text-xs text-coral font-semibold">
               {Math.round(activeJob.progress * 100)}%
             </span>
           </div>
           <div className="h-1.5 rounded-full overflow-hidden" style={{ background: 'var(--bg-surface-hover)' }}>
             <div
-              className="h-full bg-purple-600 rounded-full transition-all duration-500 ease-out"
+              className="h-full bg-coral rounded-full transition-all duration-500 ease-out"
               style={{ width: `${Math.max(5, activeJob.progress * 100)}%` }}
             />
           </div>
@@ -381,7 +381,7 @@ export default function GenerateForm({ onJobComplete, prefillTopic, prefillTrend
               }
               handleGenerate()
             }}
-            className="shrink-0 rounded-lg bg-purple-600 px-3 py-1.5 text-[11px] font-semibold text-white"
+            className="shrink-0 rounded-lg bg-coral px-3 py-1.5 text-[11px] font-semibold text-white"
           >
             Tentar novamente
           </button>
@@ -395,7 +395,7 @@ export default function GenerateForm({ onJobComplete, prefillTopic, prefillTrend
         className={`w-full py-3.5 rounded-xl border-none text-base font-semibold transition cursor-pointer ${
           generating || topic.trim().length < 10
             ? 'bg-[var(--bg-surface-hover)] text-[var(--text-tertiary)] cursor-not-allowed'
-            : 'bg-gradient-to-r from-purple-600 to-blue-600 text-white hover:opacity-90'
+            : 'bg-gradient-to-r from-coral to-azure text-white hover:opacity-90'
         }`}
       >
         {generating ? strings.dashboard.generate.loading : 'Gerar Vídeo'}
@@ -418,7 +418,7 @@ export default function GenerateForm({ onJobComplete, prefillTopic, prefillTrend
             <p className="text-xs text-[var(--text-tertiary)] mb-6">Este template consome {creditCost} crédito{creditCost > 1 ? 's' : ''}</p>
             <a
               href="/dashboard/credits"
-              className="block w-full py-3 rounded-xl bg-purple-600 text-white font-medium text-sm hover:bg-purple-500 transition mb-3"
+              className="block w-full py-3 rounded-xl bg-coral text-white font-medium text-sm hover:bg-coral transition mb-3"
             >
               Comprar créditos
             </a>

@@ -44,7 +44,7 @@ export default function DashboardPage() {
     <div className="max-w-6xl mx-auto px-4 py-12">
       <div className="mb-10">
         <h1 className="text-2xl sm:text-3xl md:text-4xl font-display font-bold text-white mb-2 tracking-tight">
-          <span className="text-purple-400">{timeGreeting}.</span> {greeting} Pronto para criar?
+          <span className="text-coral">{timeGreeting}.</span> {greeting} Pronto para criar?
         </h1>
         <p className="text-slate-400 text-lg">Transforme suas ideias em vídeos com apenas um clique.</p>
       </div>
@@ -78,7 +78,7 @@ export default function DashboardPage() {
       {/* Studio-like Generate Form Wrapper */}
       <div ref={formRef} className="relative rounded-3xl bg-[#110d1a] border border-white/5 overflow-hidden p-6 md:p-10 shadow-2xl mb-16">
         <div className="absolute inset-0 bg-[url(/noise.svg)] opacity-20 pointer-events-none mix-blend-overlay"></div>
-        <div className="absolute -top-40 -right-40 w-96 h-96 bg-purple-600/20 blur-[120px] rounded-full pointer-events-none"></div>
+        <div className="absolute -top-40 -right-40 w-96 h-96 bg-coral/20 blur-[120px] rounded-full pointer-events-none"></div>
         <div className="relative z-10">
           <GenerateForm
             onJobComplete={loadJobs}

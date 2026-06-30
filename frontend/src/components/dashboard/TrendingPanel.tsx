@@ -50,8 +50,8 @@ export default function TrendingPanel({ onSelect }: TrendingPanelProps) {
           onClick={() => setNiche(null)}
           className={`px-3 py-1.5 rounded-full text-xs font-medium border transition cursor-pointer ${
             niche === null
-              ? 'border-purple-500/50 bg-purple-500/10 text-purple-300'
-              : 'border-white/10 bg-white/5 text-slate-400 hover:border-purple-500/30'
+              ? 'border-coral/50 bg-coral/10 text-coral'
+              : 'border-white/10 bg-white/5 text-slate-400 hover:border-coral/30'
           }`}
         >
           🌎 Geral
@@ -63,8 +63,8 @@ export default function TrendingPanel({ onSelect }: TrendingPanelProps) {
             onClick={() => setNiche(n.slug)}
             className={`px-3 py-1.5 rounded-full text-xs font-medium border transition cursor-pointer ${
               niche === n.slug
-                ? 'border-purple-500/50 bg-purple-500/10 text-purple-300'
-                : 'border-white/10 bg-white/5 text-slate-400 hover:border-purple-500/30'
+                ? 'border-coral/50 bg-coral/10 text-coral'
+                : 'border-white/10 bg-white/5 text-slate-400 hover:border-coral/30'
             }`}
           >
             {n.emoji} {n.label}
@@ -87,7 +87,7 @@ export default function TrendingPanel({ onSelect }: TrendingPanelProps) {
           {trends.map((t, i) => (
             <div
               key={`${t.url}-${i}`}
-              className="group flex items-start justify-between gap-3 rounded-xl border border-white/5 bg-white/[0.03] p-3 hover:border-purple-500/30 transition"
+              className="group flex items-start justify-between gap-3 rounded-xl border border-white/5 bg-white/[0.03] p-3 hover:border-coral/30 transition"
             >
               <div className="min-w-0">
                 <p className="text-sm text-slate-200 line-clamp-2">{t.title}</p>
@@ -101,7 +101,7 @@ export default function TrendingPanel({ onSelect }: TrendingPanelProps) {
               <button
                 type="button"
                 onClick={() => onSelect(t.title, trendContextOf(t))}
-                className="shrink-0 self-center rounded-lg bg-purple-600/90 px-3 py-1.5 text-[11px] font-semibold text-white hover:bg-purple-500 transition cursor-pointer"
+                className="shrink-0 self-center rounded-lg bg-coral/90 px-3 py-1.5 text-[11px] font-semibold text-white hover:bg-coral transition cursor-pointer"
               >
                 Gerar
               </button>

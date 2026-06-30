@@ -98,7 +98,7 @@ export default function SettingsPage() {
               value={name}
               onChange={(e) => setName(e.target.value)}
               required
-              className="w-full px-4 py-2.5 rounded-lg bg-white/5 border border-white/10 text-white focus:outline-none focus:border-purple-500/50"
+              className="w-full px-4 py-2.5 rounded-lg bg-white/5 border border-white/10 text-white focus:outline-none focus:border-coral/50"
             />
           </div>
           <div>
@@ -127,7 +127,7 @@ export default function SettingsPage() {
             onChange={(e) => setCurrentPassword(e.target.value)}
             placeholder="Senha atual"
             required
-            className="w-full px-4 py-2.5 rounded-lg bg-white/5 border border-white/10 text-white focus:outline-none focus:border-purple-500/50"
+            className="w-full px-4 py-2.5 rounded-lg bg-white/5 border border-white/10 text-white focus:outline-none focus:border-coral/50"
           />
           <input
             type="password"
@@ -136,7 +136,7 @@ export default function SettingsPage() {
             placeholder="Nova senha"
             minLength={6}
             required
-            className="w-full px-4 py-2.5 rounded-lg bg-white/5 border border-white/10 text-white focus:outline-none focus:border-purple-500/50"
+            className="w-full px-4 py-2.5 rounded-lg bg-white/5 border border-white/10 text-white focus:outline-none focus:border-coral/50"
           />
           <button type="submit" disabled={passwordSaving} className="btn-primary px-4 py-2 rounded-lg">
             {passwordSaving ? "Atualizando..." : "Atualizar senha"}

@@ -69,7 +69,7 @@ export default function TemplateSelector({ selected, onSelect, disabled, templat
             disabled={disabled}
             className={`flex items-start gap-3 p-3 sm:p-4 rounded-xl border text-left transition cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed ${
               selected === t.id
-                ? 'bg-purple-500/10 border-purple-500/60'
+                ? 'bg-coral/10 border-coral/60'
                 : 'bg-[var(--bg-surface)] border-[var(--border-default)] hover:border-[var(--border-hover)]'
             }`}
           >
@@ -78,7 +78,7 @@ export default function TemplateSelector({ selected, onSelect, disabled, templat
               <div className="flex flex-wrap items-center gap-2 text-sm font-semibold" style={{ color: selected === t.id ? 'var(--text-primary)' : 'var(--text-secondary)' }}>
                 <span>{t.name}</span>
                 {t.media_source === 'ai_image' && (
-                  <span className="rounded-full border border-purple-400/30 bg-purple-500/10 px-2 py-0.5 text-[10px] font-semibold text-purple-200">
+                  <span className="rounded-full border border-coral/30 bg-coral/10 px-2 py-0.5 text-[10px] font-semibold text-coral">
                     Imagem IA
                   </span>
                 )}

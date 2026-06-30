@@ -36,14 +36,14 @@ export default function CreditPackageCard({ pkg, highlight, badge }: CreditPacka
       className="relative flex flex-col items-center p-6 rounded-2xl transition-all duration-200"
       style={{
         background: 'var(--bg-surface)',
-        border: highlight ? '2px solid var(--accent-primary, #a855f7)' : '1px solid var(--border-subtle)',
+        border: highlight ? '2px solid var(--accent-primary, #ff5638)' : '1px solid var(--border-subtle)',
       }}
     >
       {badge && (
         <span
           className="absolute -top-3 left-1/2 -translate-x-1/2 px-3 py-0.5 rounded-full text-xs font-semibold"
           style={{
-            background: 'linear-gradient(135deg, #a855f7, #6366f1)',
+            background: 'linear-gradient(135deg, #ff5638, #6366f1)',
             color: '#fff',
           }}
         >
@@ -62,7 +62,7 @@ export default function CreditPackageCard({ pkg, highlight, badge }: CreditPacka
       </div>
 
       <div className="mt-2 text-center">
-        <span className="text-2xl font-bold" style={{ color: 'var(--accent-primary, #a855f7)' }}>
+        <span className="text-2xl font-bold" style={{ color: 'var(--accent-primary, #ff5638)' }}>
           {pkg.credits}
         </span>
         <span className="text-sm ml-1" style={{ color: 'var(--text-secondary)' }}>créditos</span>
@@ -78,7 +78,7 @@ export default function CreditPackageCard({ pkg, highlight, badge }: CreditPacka
         className="mt-6 w-full py-2.5 rounded-xl text-sm font-semibold transition-all duration-200 cursor-pointer disabled:opacity-50"
         style={{
           background: highlight
-            ? 'linear-gradient(135deg, #a855f7, #6366f1)'
+            ? 'linear-gradient(135deg, #ff5638, #6366f1)'
             : 'var(--bg-raised)',
           color: '#fff',
           border: highlight ? 'none' : '1px solid var(--border-subtle)',

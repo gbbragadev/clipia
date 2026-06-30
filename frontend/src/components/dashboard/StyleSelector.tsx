@@ -25,7 +25,7 @@ export default function StyleSelector({ selected, onSelect, disabled }: StyleSel
           disabled={disabled}
           className={`p-2.5 rounded-xl border text-center transition cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed ${
             selected === s.value
-              ? 'bg-purple-500/15 border-purple-500'
+              ? 'bg-coral/15 border-coral'
               : 'bg-[var(--bg-surface)] border-[var(--border-default)] hover:border-[var(--border-hover)]'
           }`}
         >

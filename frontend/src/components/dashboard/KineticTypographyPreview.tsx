@@ -167,7 +167,7 @@ export default function KineticTypographyPreview({ text, speed = 2 }: KineticTyp
           computePositions()
           setPlaying(!playing)
         }}
-        className="px-4 py-1.5 rounded-lg text-xs font-medium bg-purple-600/20 text-purple-300 hover:bg-purple-600/30 transition cursor-pointer"
+        className="px-4 py-1.5 rounded-lg text-xs font-medium bg-coral/20 text-coral hover:bg-coral/30 transition cursor-pointer"
       >
         {playing ? 'Pausar' : 'Play'}
       </button>

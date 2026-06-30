@@ -84,7 +84,7 @@ export default function PurchaseHistory() {
               <tr key={p.id} style={{ borderTop: '1px solid var(--border-subtle)' }}>
                 <td className="px-4 py-3" style={{ color: 'var(--text-primary)' }}>{date}</td>
                 <td className="px-4 py-3 capitalize" style={{ color: 'var(--text-primary)' }}>{p.package_name}</td>
-                <td className="px-4 py-3 text-center" style={{ color: 'var(--accent-primary, #a855f7)' }}>{p.credits_amount}</td>
+                <td className="px-4 py-3 text-center" style={{ color: 'var(--accent-primary, #ff5638)' }}>{p.credits_amount}</td>
                 <td className="px-4 py-3 text-right" style={{ color: 'var(--text-primary)' }}>{price}</td>
                 <td className="px-4 py-3 text-center">
                   <span

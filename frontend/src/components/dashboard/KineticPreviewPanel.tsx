@@ -30,7 +30,7 @@ export default function KineticPreviewPanel({ script }: KineticPreviewPanelProps
               onClick={() => setSelectedScene(i)}
               className={`px-2.5 py-1 rounded-md text-[11px] font-medium transition cursor-pointer ${
                 i === safeIndex
-                  ? 'bg-purple-600/30 text-purple-300'
+                  ? 'bg-coral/30 text-coral'
                   : 'bg-[var(--bg-surface-hover)] text-[var(--text-tertiary)] hover:text-[var(--text-secondary)]'
               }`}
             >
@@ -53,7 +53,7 @@ export default function KineticPreviewPanel({ script }: KineticPreviewPanelProps
           step={0.5}
           value={speed}
           onChange={(e) => setSpeed(Number(e.target.value))}
-          className="w-full accent-purple-600"
+          className="w-full accent-coral"
         />
       </div>
     </div>

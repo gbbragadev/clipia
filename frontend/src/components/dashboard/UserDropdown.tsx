@@ -33,7 +33,7 @@ export default function UserDropdown({ name, plan, onLogout }: UserDropdownProps
         onClick={() => setOpen(!open)}
         className="h-11 w-11 rounded-full flex items-center justify-center hover:opacity-90 transition cursor-pointer"
       >
-        <div className="w-9 h-9 rounded-full bg-gradient-to-br from-purple-600 to-blue-600 flex items-center justify-center text-white text-sm font-semibold">
+        <div className="w-9 h-9 rounded-full bg-gradient-to-br from-coral to-azure flex items-center justify-center text-white text-sm font-semibold">
           {initial}
         </div>
       </button>

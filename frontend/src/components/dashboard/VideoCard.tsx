@@ -7,7 +7,7 @@ import { downloadAuthenticatedFile, fetchAuthenticatedBlobUrl } from '@/lib/down
 import { GlowCard } from '@/components/ui/GlowCard'
 
 const STYLE_GRADIENTS: Record<string, string> = {
-  educational: 'from-purple-900/40 to-blue-900/40',
+  educational: 'from-coral/40 to-azure/40',
   storytelling: 'from-indigo-900/40 to-violet-900/40',
   news: 'from-slate-800/40 to-gray-900/40',
   comedy: 'from-rose-900/40 to-amber-900/40',
@@ -29,7 +29,7 @@ function statusBadge(status: string) {
     case 'error':
       return { label: 'Erro', classes: 'bg-red-500/20 text-red-400 border border-red-500/30' }
     case 'processing':
-      return { label: strings.dashboard.generate.loading, classes: 'bg-purple-500/20 text-purple-400 animate-pulse border border-purple-500/30' }
+      return { label: strings.dashboard.generate.loading, classes: 'bg-coral/20 text-coral animate-pulse border border-coral/30' }
     case 'queued':
       return { label: 'Na fila', classes: 'bg-gray-500/20 text-gray-400 border border-gray-500/30' }
     default:
@@ -154,7 +154,7 @@ export default function VideoCard({ job, onEdit }: VideoCardProps) {
               {canEdit && (
                 <button
                   onClick={() => onEdit(job.job_id)}
-                  className="flex-1 flex items-center justify-center gap-1.5 py-3 sm:py-2.5 rounded-lg bg-purple-600 text-white text-sm font-bold hover:bg-purple-500 active:scale-[0.97] transition"
+                  className="flex-1 flex items-center justify-center gap-1.5 py-3 sm:py-2.5 rounded-lg bg-coral text-white text-sm font-bold hover:bg-coral active:scale-[0.97] transition"
                 >
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
                   {strings.dashboard.videos.edit}

@@ -67,7 +67,7 @@ export default function CreditsPage() {
               Meus Créditos
             </h1>
             <div className="mt-3 inline-flex items-center gap-2 px-4 py-2 rounded-full" style={{ background: 'var(--bg-surface)' }}>
-              <span className="text-3xl font-bold" style={{ color: 'var(--accent-primary, #a855f7)' }}>
+              <span className="text-3xl font-bold" style={{ color: 'var(--accent-primary, #ff5638)' }}>
                 {user?.credits ?? 0}
               </span>
               <span style={{ color: 'var(--text-secondary)' }}>créditos disponíveis</span>

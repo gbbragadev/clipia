@@ -12,10 +12,10 @@ export default function CreditsBadge({ credits }: CreditsBadgeProps) {
       className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium ${
         isEmpty
           ? 'bg-red-500/15 text-red-400'
-          : 'bg-purple-500/15 text-purple-300'
+          : 'bg-coral/15 text-coral'
       }`}
     >
-      <span className={`font-semibold ${isEmpty ? 'text-red-300' : 'text-purple-200'}`}>
+      <span className={`font-semibold ${isEmpty ? 'text-red-300' : 'text-coral'}`}>
         {credits}
       </span>
       créditos

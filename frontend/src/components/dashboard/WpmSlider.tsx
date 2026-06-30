@@ -22,7 +22,7 @@ export default function WpmSlider({ value, onChange, disabled }: WpmSliderProps)
         value={value}
         onChange={(e) => onChange(Number(e.target.value))}
         disabled={disabled}
-        className="w-full accent-purple-600"
+        className="w-full accent-coral"
       />
       <div className="flex justify-between text-[10px] text-[var(--text-tertiary)] mt-0.5">
         <span>120 (lento)</span>
