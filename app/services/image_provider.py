@@ -36,7 +36,9 @@ class OpenAIImageProvider:
         max_retries: int = 3,
         timeout_s: float = 60.0,
     ) -> None:
-        self.api_key = api_key or settings.OPENAI_API_KEY
+        # Usa a chave do LLM (sk-proj, validada na cascata) por padrao; a OPENAI_API_KEY antiga
+        # estava dando 401 em gpt-image. Fallback p/ ela se LLM_OPENAI_KEY nao estiver setada.
+        self.api_key = api_key or settings.LLM_OPENAI_KEY or settings.OPENAI_API_KEY
         self.model = model or settings.GPT_IMAGE_MODEL
         self.quality = quality or settings.GPT_IMAGE_QUALITY
         self.size = size
