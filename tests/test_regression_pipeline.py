@@ -126,6 +126,8 @@ def test_composition_endpoint_unchanged(tmp_path, monkeypatch):
         "width",
         "height",
         "pending_credits",
+        "music_url",
+        "music_volume",
     }
 
 

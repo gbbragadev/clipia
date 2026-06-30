@@ -227,18 +227,20 @@ async def generate(
 
     job_id = str(job.id)
 
-    _redis.hset(
-        f"job:{job_id}",
-        mapping={
-            "status": "queued",
-            "progress": "0",
-            "current_step": "",
-            "error": "",
-            "detail": "",
-            "template_id": req.template_id,
-            "created_at": datetime.now(timezone.utc).isoformat(),
-        },
-    )
+    job_meta = {
+        "status": "queued",
+        "progress": "0",
+        "current_step": "",
+        "error": "",
+        "detail": "",
+        "template_id": req.template_id,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    if req.sfx_enabled is not None:
+        job_meta["sfx_enabled"] = "1" if req.sfx_enabled else "0"
+    if req.music_enabled is not None:
+        job_meta["music_enabled"] = "1" if req.music_enabled else "0"
+    _redis.hset(f"job:{job_id}", mapping=job_meta)
 
     dispatch_pipeline(
         job_id,
@@ -673,6 +675,11 @@ async def get_composition(
 
     job_template_id = getattr(job, "template_id", "stock_narration")
     tmpl = get_template(job_template_id)
+    from app.job_config import resolve_job_flag
+    from app.services.music import auto_music_url
+
+    music_on = resolve_job_flag(_redis, job_id, "music_enabled", settings.AUTO_MUSIC_ENABLED)
+    default_music_url = auto_music_url(job_template_id) if music_on else None
 
     return CompositionResponse(
         job_id=job_id,
@@ -694,6 +701,8 @@ async def get_composition(
         template_id=job_template_id,
         layout_type=tmpl.layout.type,
         pending_credits=job.pending_credits if job else 0.0,
+        music_url=default_music_url,
+        music_volume=settings.AUTO_MUSIC_VOLUME,
     )
 
 

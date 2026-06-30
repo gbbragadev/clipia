@@ -6,6 +6,7 @@ interface PretextHeadingProps {
   text: string
   animation?: 'blur-focus' | 'pop' | 'typewriter' | 'karaoke'
   color?: string
+  align?: 'left' | 'center'
   triggerOnView?: boolean
   className?: string
 }
@@ -14,6 +15,7 @@ export function PretextHeading({
   text,
   animation = 'blur-focus',
   color = '#ffffff',
+  align = 'left',
   triggerOnView = true,
   className = ''
 }: PretextHeadingProps) {
@@ -81,7 +83,8 @@ export function PretextHeading({
 
       for (const line of layoutResult.lines) {
         const words = line.text.split(' ')
-        let xOffset = 0
+        const lineWidth = ctx.measureText(line.text).width
+        let xOffset = align === 'center' ? Math.max(0, (width - lineWidth) / 2) : 0
         for (let i = 0; i < words.length; i++) {
           const word = words[i]
           const wordWidth = ctx.measureText(word + ' ').width
@@ -135,7 +138,7 @@ export function PretextHeading({
       window.removeEventListener('resize', handleResize)
       if (frameRef.current) cancelAnimationFrame(frameRef.current)
     }
-  }, [isVisible, text, animation, color])
+  }, [isVisible, text, animation, color, align])
 
   return (
     <div ref={containerRef} className={`w-full ${className}`}>

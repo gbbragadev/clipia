@@ -13,7 +13,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 
 from app.api.routes import router
 from app.auth.routes import router as auth_router
-from app.config import settings
+from app.config import BASE_DIR, settings
 from app.db.engine import engine
 from app.errors import (
     ErrorMessages,
@@ -112,6 +112,13 @@ def create_app() -> FastAPI:
     showcase_dir = settings.STORAGE_DIR / "showcase"
     showcase_dir.mkdir(parents=True, exist_ok=True)
     app.mount("/storage/showcase", StaticFiles(directory=str(showcase_dir)), name="showcase_files")
+
+    # Trilhas de musica (frontend/public/music) servidas tambem pelo backend, para que o
+    # render server-side do Remotion baixe a musica via URL absoluta (igual audio/midia). O
+    # preview no editor continua usando o /music/*.mp3 servido pelo Next em frontend/public.
+    music_dir = BASE_DIR / "frontend" / "public" / "music"
+    if music_dir.exists():
+        app.mount("/music", StaticFiles(directory=str(music_dir)), name="music_files")
 
     @app.get(
         "/health",

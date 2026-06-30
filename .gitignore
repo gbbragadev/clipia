@@ -27,3 +27,12 @@ nul
 
 # Superpowers brainstorm (visual companion mockups)
 .superpowers/
+
+# claude-mem: instrucoes privadas por-diretorio, nunca versionadas (poluiam git status em todo worktree)
+CLAUDE.local.md
+**/CLAUDE.local.md
+
+# pytest basetemp / temporarios (davam "Permission denied" no git status)
+.pytest-basetemp-*/
+pytestbasetemp-current/
+.tmp/
