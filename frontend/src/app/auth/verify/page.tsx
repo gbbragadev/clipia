@@ -132,7 +132,7 @@ function VerifyForm() {
                 value={digit}
                 onChange={(e) => handleChange(i, e.target.value)}
                 onKeyDown={(e) => handleKeyDown(i, e)}
-                className="w-10 h-12 sm:w-12 sm:h-14 text-center text-2xl font-bold rounded-lg bg-white/5 border border-white/10 text-white focus:outline-none focus:border-purple-500/50"
+                className="w-10 h-12 sm:w-12 sm:h-14 text-center text-2xl font-bold rounded-lg bg-white/5 border border-white/10 text-white focus:outline-none focus:border-coral/50"
               />
             ))}
           </div>
@@ -150,7 +150,7 @@ function VerifyForm() {
           <button
             onClick={handleResend}
             disabled={resending || resendCooldown > 0}
-            className="text-sm text-purple-400 hover:text-purple-300 disabled:text-slate-500 disabled:cursor-not-allowed"
+            className="text-sm text-coral hover:text-coral disabled:text-slate-500 disabled:cursor-not-allowed"
           >
             {resendCooldown > 0
               ? `Reenviar codigo em ${resendCooldown}s`

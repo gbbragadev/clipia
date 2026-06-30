@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
 import { cn } from "@/components/landing/utils/cn";
-import { Logo } from "@/components/landing/Logo";
+import Logo from "@/components/brand/Logo";
 import { Button } from "@/components/landing/ui/Button";
 import { Icon } from "@/components/landing/icons";
 import { NAV_LINKS, SITE } from "@/components/landing/lib/data";

@@ -1,6 +1,6 @@
 "use client";
 import { Container } from "@/components/landing/ui/Container";
-import { Logo } from "@/components/landing/Logo";
+import Logo from "@/components/brand/Logo";
 import { FOOTER_COLS, SITE } from "@/components/landing/lib/data";
 
 export function Footer() {

@@ -110,7 +110,7 @@ body::before {
 }
 .card:hover {
   background: var(--card-bg-hover);
-  border-color: rgba(139, 92, 246, 0.2);
+  border-color: rgba(255, 86, 56, 0.25);
 }
 [data-theme="light"] .card:hover {
   box-shadow: 0 4px 12px rgba(139, 92, 246, 0.08), 0 2px 4px rgba(0, 0, 0, 0.04);
@@ -118,7 +118,7 @@ body::before {
 
 /* Buttons */
 .btn-primary {
-  background: linear-gradient(135deg, #7c3aed, #3b82f6);
+  background: linear-gradient(135deg, #ff5638, #3e9bff);
   color: white;
   font-weight: 600;
   padding: 14px 28px;

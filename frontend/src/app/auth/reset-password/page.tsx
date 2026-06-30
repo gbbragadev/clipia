@@ -112,7 +112,7 @@ function ResetPasswordForm() {
                 value={digit}
                 onChange={(e) => handleChange(i, e.target.value)}
                 onKeyDown={(e) => handleKeyDown(i, e)}
-                className="w-10 h-12 sm:w-12 sm:h-14 text-center text-2xl font-bold rounded-lg bg-white/5 border border-white/10 text-white focus:outline-none focus:border-purple-500/50"
+                className="w-10 h-12 sm:w-12 sm:h-14 text-center text-2xl font-bold rounded-lg bg-white/5 border border-white/10 text-white focus:outline-none focus:border-coral/50"
               />
             ))}
           </div>
@@ -129,7 +129,7 @@ function ResetPasswordForm() {
                 onChange={(e) => setPassword(e.target.value)}
                 minLength={6}
                 required
-                className="w-full px-4 py-2.5 pr-12 rounded-lg bg-white/5 border border-white/10 text-white placeholder-slate-500 focus:outline-none focus:border-purple-500/50"
+                className="w-full px-4 py-2.5 pr-12 rounded-lg bg-white/5 border border-white/10 text-white placeholder-slate-500 focus:outline-none focus:border-coral/50"
                 placeholder="Mínimo 6 caracteres"
               />
               <button
@@ -153,7 +153,7 @@ function ResetPasswordForm() {
         </form>
 
         <p className="text-center text-sm text-slate-400 mt-6">
-          <Link href="/auth/login" className="text-purple-400 hover:text-purple-300">
+          <Link href="/auth/login" className="text-coral hover:text-coral">
             Voltar para o login
           </Link>
         </p>

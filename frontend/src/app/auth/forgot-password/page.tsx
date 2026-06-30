@@ -59,7 +59,7 @@ export default function ForgotPasswordPage() {
               onChange={(e) => setEmail(e.target.value)}
               required
               autoFocus
-              className="w-full px-4 py-2.5 rounded-lg bg-white/5 border border-white/10 text-white placeholder-slate-500 focus:outline-none focus:border-purple-500/50"
+              className="w-full px-4 py-2.5 rounded-lg bg-white/5 border border-white/10 text-white placeholder-slate-500 focus:outline-none focus:border-coral/50"
               placeholder="seu@email.com"
             />
           </div>
@@ -74,7 +74,7 @@ export default function ForgotPasswordPage() {
         </form>
 
         <p className="text-center text-sm text-slate-400 mt-6">
-          <Link href="/auth/login" className="text-purple-400 hover:text-purple-300">
+          <Link href="/auth/login" className="text-coral hover:text-coral">
             Voltar para o login
           </Link>
         </p>

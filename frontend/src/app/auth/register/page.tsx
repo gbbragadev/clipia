@@ -89,11 +89,11 @@ export default function RegisterPage() {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center px-4 relative overflow-hidden bg-[#0f0b1a]">
+    <div className="min-h-screen flex items-center justify-center px-4 relative overflow-hidden bg-[#08090f]">
       <FilmstripBackground speed={35} opacity={0.05} />
-      <div className="absolute top-1/3 right-1/4 w-72 h-72 sm:w-[500px] sm:h-[500px] bg-purple-600/20 blur-[150px] rounded-full pointer-events-none"></div>
+      <div className="absolute top-1/3 right-1/4 w-72 h-72 sm:w-[500px] sm:h-[500px] bg-coral/20 blur-[150px] rounded-full pointer-events-none"></div>
 
-      <div className="card w-full max-w-md p-8 relative z-10 bg-[#1a1425]/80 backdrop-blur-xl border border-white/10 shadow-2xl">
+      <div className="card w-full max-w-md p-8 relative z-10 bg-[#11141d]/80 backdrop-blur-xl border border-white/10 shadow-2xl">
         <div className="flex justify-center mb-6">
           <Logo size="lg" />
         </div>
@@ -122,7 +122,7 @@ export default function RegisterPage() {
               onChange={(e) => setName(e.target.value)}
               required
               autoFocus
-              className="w-full px-4 py-3 rounded-xl bg-white/5 border border-white/10 text-white placeholder-slate-500 focus:outline-none focus:border-purple-500/50 focus:bg-white/10 transition-colors"
+              className="w-full px-4 py-3 rounded-xl bg-white/5 border border-white/10 text-white placeholder-slate-500 focus:outline-none focus:border-coral/50 focus:bg-white/10 transition-colors"
               placeholder="Seu nome"
             />
           </div>
@@ -137,7 +137,7 @@ export default function RegisterPage() {
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               required
-              className="w-full px-4 py-3 rounded-xl bg-white/5 border border-white/10 text-white placeholder-slate-500 focus:outline-none focus:border-purple-500/50 focus:bg-white/10 transition-colors"
+              className="w-full px-4 py-3 rounded-xl bg-white/5 border border-white/10 text-white placeholder-slate-500 focus:outline-none focus:border-coral/50 focus:bg-white/10 transition-colors"
               placeholder="seu@email.com"
             />
           </div>
@@ -154,7 +154,7 @@ export default function RegisterPage() {
                 onChange={(e) => setPassword(e.target.value)}
                 required
                 minLength={8}
-                className="w-full px-4 py-3 pr-12 rounded-xl bg-white/5 border border-white/10 text-white placeholder-slate-500 focus:outline-none focus:border-purple-500/50 focus:bg-white/10 transition-colors"
+                className="w-full px-4 py-3 pr-12 rounded-xl bg-white/5 border border-white/10 text-white placeholder-slate-500 focus:outline-none focus:border-coral/50 focus:bg-white/10 transition-colors"
                 placeholder="Minimo 8 caracteres"
               />
               <button
@@ -174,7 +174,7 @@ export default function RegisterPage() {
           <button
             type="submit"
             disabled={loading}
-            className="w-full py-3.5 rounded-xl bg-gradient-to-r from-purple-600 to-blue-600 text-white font-bold disabled:opacity-50 hover:opacity-90 transition shadow-lg shadow-purple-500/25 mt-2"
+            className="w-full py-3.5 rounded-xl bg-gradient-to-r from-coral to-azure text-white font-bold disabled:opacity-50 hover:opacity-90 transition shadow-lg shadow-coral/25 mt-2"
           >
             {loading ? strings.auth.register.loading : strings.auth.register.submit}
           </button>
@@ -182,7 +182,7 @@ export default function RegisterPage() {
 
         <p className="text-center text-sm text-slate-400 mt-8">
           {strings.auth.register.hasAccount}{" "}
-          <Link href="/auth/login" className="text-white font-semibold hover:text-purple-300 transition border-b border-white/20 pb-0.5">
+          <Link href="/auth/login" className="text-white font-semibold hover:text-coral transition border-b border-white/20 pb-0.5">
             {strings.auth.login.submit}
           </Link>
         </p>
