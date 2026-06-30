@@ -140,7 +140,14 @@ export const ShortVideoComposition: React.FC<CompositionData> = ({
 
           elements.push(
             <TransitionSeries.Sequence key={`seq-${i}`} durationInFrames={sf.duration}>
-              {i < mediaUrls.length && <SceneClip mediaUrl={mediaUrls[i]} sceneIndex={i} durationInFrames={sf.duration} />}
+              {i < mediaUrls.length ? (
+                <SceneClip mediaUrl={mediaUrls[i]} sceneIndex={i} durationInFrames={sf.duration} />
+              ) : (
+                // Sem mídia (ex.: template ai_video sem media_urls): placeholder grafite.
+                // A Sequence PRECISA de um filho, senão o Remotion lanca
+                // "Sequence detected to not have any children".
+                <AbsoluteFill style={{ background: 'linear-gradient(135deg, #11141d, #08090f)' }} />
+              )}
             </TransitionSeries.Sequence>
           )
 

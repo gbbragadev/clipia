@@ -11,6 +11,8 @@ export interface Scene {
   keywords_en: string[]
   duration_hint: number
   transition?: TransitionType
+  /** Templates de IA (ai_video/novelinha) trazem visual_hint em vez de keywords_en. */
+  visual_hint?: string
 }
 
 export type CaptionStylePreset = 'tiktok' | 'impact' | 'minimal' | 'karaoke' | 'boxed'

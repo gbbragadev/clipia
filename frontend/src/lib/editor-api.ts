@@ -1,4 +1,4 @@
-import type { CompositionData } from '@/remotion/types'
+import type { CompositionData, TransitionType } from '@/remotion/types'
 import { DEFAULT_SUBTITLE_STYLE, DEFAULT_VOICE_CONFIG } from '@/remotion/types'
 import { getToken } from '@/lib/auth'
 import { fetchAuthenticatedBlobUrl } from '@/lib/download'
@@ -18,7 +18,7 @@ function getAuthHeaders(): Record<string, string> {
 export async function fetchComposition(jobId: string): Promise<CompositionData> {
   const data = await fetchJSON<{
     job_id: string
-    script: { title: string; scenes: Array<{ text: string; keywords_en: string[]; duration_hint: number }>; narration: string }
+    script: { title: string; scenes: Array<{ text: string; keywords_en?: string[]; visual_hint?: string; duration_hint: number; transition?: string }>; narration: string }
     words: Array<{ word: string; start: number; end: number }>
     audio_url: string
     media_urls: string[]
@@ -41,8 +41,15 @@ export async function fetchComposition(jobId: string): Promise<CompositionData> 
 
   return {
     title: data.script.title || '',
-    scenes: data.script.scenes,
-    words: data.words,
+    // Normaliza cenas: templates de IA (ai_video/novelinha) vem com visual_hint e
+    // SEM keywords_en — o editor (SceneGrid/ScriptEditor) faz .map/.join em keywords_en
+    // e crashava ("Cannot read properties of undefined (reading 'map')"). Garante array.
+    scenes: (data.script.scenes ?? []).map((s) => ({
+      ...s,
+      keywords_en: s.keywords_en ?? [],
+      transition: s.transition as TransitionType | undefined,
+    })),
+    words: data.words ?? [],
     audioUrl: data.audio_url,
     mediaUrls: data.media_urls,
     subtitleStyle: {
