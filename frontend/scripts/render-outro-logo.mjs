@@ -8,26 +8,22 @@ import { fileURLToPath } from 'node:url'
 const here = dirname(fileURLToPath(import.meta.url))
 const OUT = resolve(here, '../../app/assets/outro/logo.png')
 
-const SVG = `<svg width="360" height="360" viewBox="0 0 40 40" xmlns="http://www.w3.org/2000/svg">
+// Logo unico ClipIA (identidade coral/grafite) — espelha components/brand/Logo.
+// Mark: quadrado grafite arredondado + gradiente coral/azure + play coral + ponto mint.
+// Visivel sobre o fundo escuro/borrado do selo de outro.
+const SVG = `<svg width="512" height="512" viewBox="0 0 40 40" xmlns="http://www.w3.org/2000/svg">
   <defs>
     <linearGradient id="g" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#8b5cf6"/><stop offset="50%" stop-color="#7c3aed"/><stop offset="100%" stop-color="#3b82f6"/>
-    </linearGradient>
-    <linearGradient id="s" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#c4b5fd"/><stop offset="100%" stop-color="#93c5fd"/>
+      <stop offset="0%" stop-color="#ff5638" stop-opacity="0.30"/>
+      <stop offset="55%" stop-color="#ff5638" stop-opacity="0.05"/>
+      <stop offset="100%" stop-color="#3e9bff" stop-opacity="0.20"/>
     </linearGradient>
   </defs>
-  <rect x="3" y="3" width="34" height="34" rx="8" fill="url(#g)"/>
-  <rect x="6" y="9" width="3" height="4" rx="1" fill="#0a0a12" opacity="0.4"/>
-  <rect x="6" y="18" width="3" height="4" rx="1" fill="#0a0a12" opacity="0.4"/>
-  <rect x="6" y="27" width="3" height="4" rx="1" fill="#0a0a12" opacity="0.4"/>
-  <rect x="31" y="9" width="3" height="4" rx="1" fill="#0a0a12" opacity="0.4"/>
-  <rect x="31" y="18" width="3" height="4" rx="1" fill="#0a0a12" opacity="0.4"/>
-  <rect x="31" y="27" width="3" height="4" rx="1" fill="#0a0a12" opacity="0.4"/>
-  <polygon points="16,12 16,28 28,20" fill="white" opacity="0.95"/>
-  <circle cx="32" cy="8" r="3" fill="url(#s)" opacity="0.9"/>
-  <line x1="32" y1="4" x2="32" y2="12" stroke="white" stroke-width="1" opacity="0.6"/>
-  <line x1="28" y1="8" x2="36" y2="8" stroke="white" stroke-width="1" opacity="0.6"/>
+  <rect x="2" y="2" width="36" height="36" rx="10" fill="#11141d"/>
+  <rect x="2" y="2" width="36" height="36" rx="10" fill="url(#g)"/>
+  <rect x="2.5" y="2.5" width="35" height="35" rx="9.5" fill="none" stroke="#ffffff" stroke-opacity="0.14" stroke-width="0.6"/>
+  <path d="M15 12.5 L28 20 L15 27.5 Z" fill="#ff5638"/>
+  <circle cx="29.5" cy="29.5" r="2.6" fill="#43e0ad"/>
 </svg>`
 
 await mkdir(dirname(OUT), { recursive: true })
