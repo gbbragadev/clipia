@@ -5,8 +5,10 @@ import Logo from "@/components/brand/Logo";
 import { Button } from "@/components/landing/ui/Button";
 import { Icon } from "@/components/landing/icons";
 import { NAV_LINKS, SITE } from "@/components/landing/lib/data";
+import { useAuth } from "@/contexts/AuthContext";
 
 export function Nav() {
+  const { user } = useAuth();
   const [scrolled, setScrolled] = useState(false);
   const [open, setOpen] = useState(false);
 
@@ -51,12 +53,20 @@ export function Nav() {
         </div>
 
         <div className="hidden items-center gap-2 lg:flex">
-          <Button href={SITE.login} variant="ghost" size="sm">
-            Entrar
-          </Button>
-          <Button href={SITE.signup} variant="primary" size="sm" iconRight="arrowRight">
-            Criar 2 vídeos grátis
-          </Button>
+          {user ? (
+            <Button href={SITE.dashboard} variant="primary" size="sm" iconRight="arrowRight">
+              Meu painel
+            </Button>
+          ) : (
+            <>
+              <Button href={SITE.login} variant="ghost" size="sm">
+                Entrar
+              </Button>
+              <Button href={SITE.signup} variant="primary" size="sm" iconRight="arrowRight">
+                Criar 2 vídeos grátis
+              </Button>
+            </>
+          )}
         </div>
 
         <button
@@ -91,12 +101,20 @@ export function Nav() {
             </a>
           ))}
           <div className="grid gap-2 pt-3">
-            <Button href={SITE.signup} variant="primary" size="lg" fullWidth iconRight="arrowRight">
-              Criar meus 2 vídeos grátis
-            </Button>
-            <Button href={SITE.login} variant="secondary" size="md" fullWidth>
-              Entrar
-            </Button>
+            {user ? (
+              <Button href={SITE.dashboard} variant="primary" size="lg" fullWidth iconRight="arrowRight">
+                Ir para meu painel
+              </Button>
+            ) : (
+              <>
+                <Button href={SITE.signup} variant="primary" size="lg" fullWidth iconRight="arrowRight">
+                  Criar meus 2 vídeos grátis
+                </Button>
+                <Button href={SITE.login} variant="secondary" size="md" fullWidth>
+                  Entrar
+                </Button>
+              </>
+            )}
           </div>
         </div>
       </div>

@@ -5,6 +5,7 @@ export const SITE = {
   url: "https://www.clipia.com.br",
   signup: "/auth/register",
   login: "/auth/login",
+  dashboard: "/dashboard",
   tagline: "Do tema ao vídeo vertical com IA",
 };
 
