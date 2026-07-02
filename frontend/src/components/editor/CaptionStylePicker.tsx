@@ -140,7 +140,7 @@ export function CaptionStylePicker() {
                 height: 56,
                 borderRadius: 8,
                 border: isSelected
-                  ? '2px solid #6C5CE7'
+                  ? '2px solid var(--color-coral)'
                   : '1px solid rgba(255, 255, 255, 0.1)',
                 background: 'linear-gradient(135deg, #1a1a2e, #16213e)',
                 display: 'flex',
@@ -166,7 +166,7 @@ export function CaptionStylePicker() {
               <span
                 style={{
                   fontSize: 9,
-                  color: isSelected ? '#c4b5fd' : 'rgba(255, 255, 255, 0.5)',
+                  color: isSelected ? 'var(--color-coral-soft)' : 'rgba(255, 255, 255, 0.5)',
                   fontWeight: isSelected ? 600 : 400,
                 }}
               >

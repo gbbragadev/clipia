@@ -224,11 +224,11 @@ export function AIAssistant() {
               fontSize: 13,
               lineHeight: 1.5,
               background: msg.role === 'user'
-                ? 'rgba(108,92,231,0.15)'
+                ? 'rgba(255,86,56,0.15)'
                 : '#2A2A2A',
               color: '#E8E8E8',
               border: msg.role === 'user'
-                ? '1px solid rgba(108,92,231,0.25)'
+                ? '1px solid rgba(255,86,56,0.25)'
                 : '1px solid rgba(255,255,255,0.06)',
             }}>
               {msg.content}
@@ -252,13 +252,13 @@ export function AIAssistant() {
                       style={{
                         padding: 10,
                         borderRadius: 8,
-                        border: '1px solid rgba(108,92,231,0.2)',
+                        border: '1px solid rgba(255,86,56,0.2)',
                         background: '#252525',
                       }}
                     >
                       <div style={{
                         fontSize: 11,
-                        color: '#6C5CE7',
+                        color: 'var(--color-coral)',
                         fontWeight: 600,
                         marginBottom: 4,
                       }}>
@@ -289,7 +289,7 @@ export function AIAssistant() {
                           fontWeight: 600,
                           borderRadius: 6,
                           border: 'none',
-                          background: applied ? '#10b981' : applying ? 'rgba(108,92,231,0.5)' : '#6C5CE7',
+                          background: applied ? '#10b981' : applying ? 'rgba(255,86,56,0.5)' : 'var(--color-coral)',
                           color: '#fff',
                           cursor: applied || applying ? 'default' : 'pointer',
                           opacity: (applyingKey !== null && !applying) ? 0.5 : 1,
@@ -326,7 +326,7 @@ export function AIAssistant() {
             <style>{`
               .ai-dot {
                 width: 6px; height: 6px; border-radius: 50%;
-                background: #6C5CE7; display: inline-block;
+                background: var(--color-coral); display: inline-block;
                 animation: aiBounce 1.2s infinite ease-in-out;
               }
               .ai-dot--2 { animation-delay: 0.15s; }
@@ -376,7 +376,7 @@ export function AIAssistant() {
             padding: '8px 14px',
             borderRadius: 8,
             border: 'none',
-            background: loading || !input.trim() ? '#333' : '#6C5CE7',
+            background: loading || !input.trim() ? '#333' : 'var(--color-coral)',
             color: loading || !input.trim() ? 'rgba(255,255,255,0.3)' : '#fff',
             cursor: loading || !input.trim() ? 'not-allowed' : 'pointer',
             fontSize: 13,

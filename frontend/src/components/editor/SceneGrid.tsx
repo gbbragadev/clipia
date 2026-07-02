@@ -32,7 +32,7 @@ function SceneThumbnail({ videoUrl }: { videoUrl: string | undefined }) {
     return (
       <div style={{
         width: '100%', aspectRatio: '9/16',
-        background: 'linear-gradient(135deg, rgba(124,58,237,0.15), rgba(59,130,246,0.1))',
+        background: 'linear-gradient(135deg, rgba(255,86,56,0.15), rgba(62,155,255,0.1))',
         borderRadius: 6,
         display: 'flex', alignItems: 'center', justifyContent: 'center',
         fontSize: 20, color: 'rgba(255,255,255,0.2)',
@@ -145,9 +145,9 @@ export function SceneGrid() {
                       onClick={(e) => { e.stopPropagation(); updateScene(i, { transition: t }) }}
                       className="editor-btn-sm"
                       style={{
-                        background: (scene.transition || 'none') === t ? 'rgba(108,92,231,0.2)' : undefined,
-                        color: (scene.transition || 'none') === t ? '#6C5CE7' : undefined,
-                        borderColor: (scene.transition || 'none') === t ? 'rgba(108,92,231,0.3)' : undefined,
+                        background: (scene.transition || 'none') === t ? 'rgba(255,86,56,0.2)' : undefined,
+                        color: (scene.transition || 'none') === t ? 'var(--color-coral)' : undefined,
+                        borderColor: (scene.transition || 'none') === t ? 'rgba(255,86,56,0.3)' : undefined,
                         fontSize: 9, padding: '2px 6px',
                       }}
                     >

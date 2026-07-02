@@ -117,7 +117,7 @@ export function VoiceSelector() {
       >
         <div style={{
           width: 32, height: 32, borderRadius: '50%', flexShrink: 0,
-          background: isSelected ? 'linear-gradient(135deg,#7c3aed,#3b82f6)' : 'rgba(255,255,255,0.05)',
+          background: isSelected ? 'linear-gradient(135deg,var(--color-coral),var(--color-azure))' : 'rgba(255,255,255,0.05)',
           display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13,
         }}>
           {v.is_clone ? '🎤' : v.gender === 'male' ? '♂' : v.gender === 'female' ? '♀' : '🔊'}
@@ -126,7 +126,7 @@ export function VoiceSelector() {
           <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
             <span style={{ fontSize: 12, fontWeight: 600, color: isSelected ? '#e2e8f0' : 'rgba(255,255,255,0.55)' }}>{v.name}</span>
             {v.is_clone && (
-              <span style={{ fontSize: 8, padding: '1px 4px', borderRadius: 3, background: 'rgba(59,130,246,0.15)', color: '#93c5fd' }}>Clonada</span>
+              <span style={{ fontSize: 8, padding: '1px 4px', borderRadius: 3, background: 'rgba(62,155,255,0.15)', color: 'var(--color-azure)' }}>Clonada</span>
             )}
           </div>
           <div style={{ fontSize: 10, color: 'rgba(255,255,255,0.3)', marginTop: 1 }}>{v.language}</div>
@@ -137,8 +137,8 @@ export function VoiceSelector() {
             onClick={(e) => { e.stopPropagation(); handlePreview(v) }}
             style={{
               width: 24, height: 24, borderRadius: '50%', border: 'none', flexShrink: 0,
-              background: previewPlaying === v.id ? 'rgba(124,58,237,0.3)' : 'rgba(255,255,255,0.05)',
-              color: previewPlaying === v.id ? '#c4b5fd' : 'rgba(255,255,255,0.3)',
+              background: previewPlaying === v.id ? 'rgba(255,86,56,0.3)' : 'rgba(255,255,255,0.05)',
+              color: previewPlaying === v.id ? 'var(--color-coral-soft)' : 'rgba(255,255,255,0.3)',
               cursor: 'pointer', fontSize: 10, display: 'flex', alignItems: 'center', justifyContent: 'center',
             }}
           >
@@ -164,8 +164,8 @@ export function VoiceSelector() {
             style={{
               flex: 1, padding: '6px 0', fontSize: 11, fontWeight: 600, border: 'none', borderRadius: 6,
               cursor: 'pointer', transition: 'all 0.15s',
-              background: activeTab === tab ? 'rgba(124,58,237,0.2)' : 'transparent',
-              color: activeTab === tab ? '#c4b5fd' : 'rgba(255,255,255,0.35)',
+              background: activeTab === tab ? 'rgba(255,86,56,0.2)' : 'transparent',
+              color: activeTab === tab ? 'var(--color-coral-soft)' : 'rgba(255,255,255,0.35)',
             }}
           >
             {TAB_LABELS[tab]}
@@ -238,7 +238,7 @@ export function VoiceSelector() {
         disabled={regenerating}
         style={{
           padding: '9px 0',
-          background: regenerating ? 'rgba(124,58,237,0.4)' : 'linear-gradient(135deg,#7c3aed,#3b82f6)',
+          background: regenerating ? 'rgba(255,86,56,0.4)' : 'linear-gradient(135deg,var(--color-coral),var(--color-azure))',
           border: 'none', borderRadius: 7, color: 'white', fontWeight: 600, fontSize: 12,
           cursor: regenerating ? 'not-allowed' : 'pointer',
           opacity: regenerating ? 0.7 : 1,

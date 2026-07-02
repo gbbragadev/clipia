@@ -54,7 +54,7 @@ export default function AudioRecorder({ onRecordingComplete, maxDuration = 180, 
       ctx.fillRect(0, 0, canvas.width, canvas.height)
 
       ctx.lineWidth = 2
-      ctx.strokeStyle = '#7c3aed'
+      ctx.strokeStyle = '#ff5638'
       ctx.beginPath()
 
       const sliceWidth = canvas.width / bufferLength

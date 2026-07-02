@@ -54,7 +54,7 @@ export const EndScreen: React.FC<EndScreenProps> = ({ config }) => {
           height: 80,
           borderRadius: '50%',
           border: '3px solid white',
-          background: '#6C5CE7',
+          background: 'var(--color-coral)',
           opacity: circle.opacity,
           transform: `scale(${circle.scale})`,
         }}

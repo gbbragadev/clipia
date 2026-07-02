@@ -145,7 +145,7 @@ export function ExportPanel({ onClose }: { onClose: () => void }) {
             <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
               <button
                 onClick={() => { setActivePanel('voice'); onClose() }}
-                style={{ background: '#6C5CE7', color: '#fff', border: 'none', borderRadius: 6, padding: '6px 12px', fontSize: 12, cursor: 'pointer' }}
+                style={{ background: 'var(--color-coral)', color: '#fff', border: 'none', borderRadius: 6, padding: '6px 12px', fontSize: 12, cursor: 'pointer' }}
               >
                 Regenerar narração primeiro
               </button>
@@ -190,14 +190,14 @@ export function ExportPanel({ onClose }: { onClose: () => void }) {
         <div style={{
           padding: '8px 12px', borderRadius: 8, marginBottom: 20,
           fontSize: 13, display: 'flex', alignItems: 'center', gap: 8,
-          background: rendering ? 'rgba(108,92,231,0.1)' : renderStatus === 'updated' ? 'rgba(16,185,129,0.1)' : renderStatus === 'error' ? 'rgba(239,68,68,0.1)' : 'rgba(255,255,255,0.03)',
-          border: `1px solid ${rendering ? 'rgba(108,92,231,0.2)' : renderStatus === 'updated' ? 'rgba(16,185,129,0.2)' : renderStatus === 'error' ? 'rgba(239,68,68,0.2)' : 'rgba(255,255,255,0.06)'}`,
+          background: rendering ? 'rgba(255,86,56,0.1)' : renderStatus === 'updated' ? 'rgba(16,185,129,0.1)' : renderStatus === 'error' ? 'rgba(239,68,68,0.1)' : 'rgba(255,255,255,0.03)',
+          border: `1px solid ${rendering ? 'rgba(255,86,56,0.2)' : renderStatus === 'updated' ? 'rgba(16,185,129,0.2)' : renderStatus === 'error' ? 'rgba(239,68,68,0.2)' : 'rgba(255,255,255,0.06)'}`,
         }}>
           {rendering && (
             <>
               <div style={{
                 width: 8, height: 8, borderRadius: '50%',
-                background: '#6C5CE7',
+                background: 'var(--color-coral)',
                 animation: 'pulse 1.5s ease-in-out infinite',
               }} />
               <span style={{ color: '#a78bfa' }}>Atualizando com suas edições... (~2 min)</span>
@@ -216,7 +216,7 @@ export function ExportPanel({ onClose }: { onClose: () => void }) {
               <button
                 onClick={handleRender}
                 style={{
-                  marginLeft: 'auto', background: '#6C5CE7', color: '#fff',
+                  marginLeft: 'auto', background: 'var(--color-coral)', color: '#fff',
                   border: 'none', borderRadius: 6, padding: '4px 10px',
                   fontSize: 12, cursor: 'pointer',
                 }}
@@ -241,7 +241,7 @@ export function ExportPanel({ onClose }: { onClose: () => void }) {
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                   <span style={{
-                    background: '#6C5CE7', color: '#fff',
+                    background: 'var(--color-coral)', color: '#fff',
                     fontSize: 11, fontWeight: 700, padding: '3px 6px', borderRadius: 4,
                   }}>
                     {item.icon}
@@ -251,7 +251,7 @@ export function ExportPanel({ onClose }: { onClose: () => void }) {
                 <button
                   onClick={() => copyToClipboard(item.caption, i)}
                   style={{
-                    background: copiedIndex === i ? '#10b981' : '#6C5CE7',
+                    background: copiedIndex === i ? '#10b981' : 'var(--color-coral)',
                     color: '#fff', border: 'none', borderRadius: 6,
                     padding: '4px 10px', fontSize: 12, cursor: 'pointer', fontWeight: 500,
                   }}

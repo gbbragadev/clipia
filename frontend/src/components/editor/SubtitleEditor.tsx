@@ -127,7 +127,7 @@ export function SubtitleEditor() {
               style={{
                 background: style.position === pos ? 'rgba(124, 58, 237, 0.2)' : undefined,
                 borderColor: style.position === pos ? 'rgba(124, 58, 237, 0.4)' : undefined,
-                color: style.position === pos ? '#c4b5fd' : undefined,
+                color: style.position === pos ? 'var(--color-coral-soft)' : undefined,
               }}
             >
               {pos === 'bottom' ? 'Inferior' : 'Central'}
@@ -146,9 +146,9 @@ export function SubtitleEditor() {
               onClick={() => updateSubtitleStyle({ animationStyle: opt.value as 'pop' | 'fade' | 'slideUp' | 'none' })}
               className="editor-btn-sm"
               style={{
-                background: style.animationStyle === opt.value ? 'rgba(124,58,237,0.2)' : undefined,
-                color: style.animationStyle === opt.value ? '#c4b5fd' : undefined,
-                borderColor: style.animationStyle === opt.value ? 'rgba(124,58,237,0.4)' : undefined,
+                background: style.animationStyle === opt.value ? 'rgba(255,86,56,0.2)' : undefined,
+                color: style.animationStyle === opt.value ? 'var(--color-coral-soft)' : undefined,
+                borderColor: style.animationStyle === opt.value ? 'rgba(255,86,56,0.4)' : undefined,
               }}
             >
               {opt.label}

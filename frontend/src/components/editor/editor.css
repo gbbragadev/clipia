@@ -17,7 +17,7 @@
 }
 .editor-loading__spinner {
   width: 28px; height: 28px;
-  border: 3px solid rgba(108,92,231,0.2); border-top-color: #6C5CE7;
+  border: 3px solid rgba(255,86,56,0.2); border-top-color: var(--color-coral);
   border-radius: 50%; animation: spin 0.7s linear infinite;
 }
 .editor-loading__title { font-size: 16px; font-weight: 600; }
@@ -33,7 +33,7 @@
 .editor-header__left { display: flex; align-items: center; gap: 8px; }
 .editor-header__logo {
   font-weight: 800; font-size: 15px;
-  background: linear-gradient(135deg,#6C5CE7,#00D4FF);
+  background: linear-gradient(135deg,var(--color-coral),var(--color-azure));
   -webkit-background-clip: text; -webkit-text-fill-color: transparent;
   text-decoration: none;
 }
@@ -45,7 +45,7 @@
 .editor-header__status--dirty { color: #f59e0b; background: rgba(245,158,11,0.08); }
 .editor-header__status--saved { color: #10b981; background: rgba(16,185,129,0.08); }
 .editor-header__export {
-  padding: 6px 16px; background: #6C5CE7;
+  padding: 6px 16px; background: var(--color-coral);
   border: none; border-radius: 7px; color: white; font-weight: 600; font-size: 12px;
   cursor: pointer; transition: opacity 0.15s;
 }
@@ -79,7 +79,7 @@
 /* Glow behind player */
 .editor-player-glow {
   position: absolute; inset: -16px;
-  background: radial-gradient(ellipse at center, rgba(108,92,231,0.06) 0%, transparent 65%);
+  background: radial-gradient(ellipse at center, rgba(255,86,56,0.06) 0%, transparent 65%);
   border-radius: 32px; filter: blur(16px); pointer-events: none; z-index: -1;
 }
 
@@ -118,7 +118,7 @@
   text-transform: uppercase; letter-spacing: 0.05em;
 }
 .editor-tab:hover { color: #999999; background: rgba(255,255,255,0.02); }
-.editor-tab--active { color: #6C5CE7; border-bottom-color: #6C5CE7; background: rgba(108,92,231,0.15); }
+.editor-tab--active { color: var(--color-coral); border-bottom-color: var(--color-coral); background: rgba(255,86,56,0.15); }
 .editor-tab__icon { font-size: 15px; }
 .editor-tab__label { font-size: 9px; }
 
@@ -168,15 +168,15 @@
 /* Playhead */
 .editor-timeline__playhead {
   position: absolute; top: 0; bottom: 0; width: 2px;
-  background: #00D4FF; box-shadow: 0 0 6px rgba(0,212,255,0.5);
+  background: var(--color-azure); box-shadow: 0 0 6px rgba(62,155,255,0.5);
   border-radius: 1px; pointer-events: none; z-index: 5;
   transition: left 0.08s linear;
 }
 .editor-timeline__playhead::before {
   content: ''; position: absolute; top: -3px; left: -4px;
   width: 10px; height: 10px;
-  background: #00D4FF; border-radius: 50%;
-  box-shadow: 0 0 4px rgba(0,212,255,0.4);
+  background: var(--color-azure); border-radius: 50%;
+  box-shadow: 0 0 4px rgba(62,155,255,0.4);
 }
 
 /* Transport controls */
@@ -190,7 +190,7 @@
   transition: all 0.12s;
 }
 .editor-timeline__transport-btn:hover { color: #E8E8E8; background: rgba(255,255,255,0.06); }
-.editor-timeline__transport-btn--active { color: #6C5CE7; }
+.editor-timeline__transport-btn--active { color: var(--color-coral); }
 .editor-timeline__time {
   font-size: 11px; color: #999999; font-variant-numeric: tabular-nums;
 }
@@ -206,7 +206,7 @@
   border-radius: 8px; padding: 10px; transition: all 0.15s ease;
 }
 .editor-card:hover { background: #333333; }
-.editor-card--selected { background: rgba(108,92,231,0.15); border-color: rgba(108,92,231,0.25); }
+.editor-card--selected { background: rgba(255,86,56,0.15); border-color: rgba(255,86,56,0.25); }
 
 .editor-section-header {
   font-size: 10px; font-weight: 700; color: #666666;
@@ -219,7 +219,7 @@
 }
 .editor-slider::-webkit-slider-thumb {
   -webkit-appearance: none; width: 14px; height: 14px;
-  background: #6C5CE7; border-radius: 50%; cursor: pointer; border: 2px solid #222222;
+  background: var(--color-coral); border-radius: 50%; cursor: pointer; border: 2px solid #222222;
 }
 
 .editor-color-swatch {
@@ -234,7 +234,7 @@
   border: 1px solid rgba(255,255,255,0.08); border-radius: 6px;
   color: #E8E8E8; font-size: 12px; cursor: pointer;
 }
-.editor-select:focus { border-color: rgba(108,92,231,0.4); outline: none; }
+.editor-select:focus { border-color: rgba(255,86,56,0.4); outline: none; }
 
 .editor-btn-sm {
   padding: 5px 10px; background: #2A2A2A;
@@ -330,7 +330,7 @@
     gap: 6px;
     padding: 6px 14px;
     border-radius: 999px;
-    background: rgba(108,92,231,0.9);
+    background: rgba(255,86,56,0.9);
     color: #fff;
     border: none;
     font-size: 12px;

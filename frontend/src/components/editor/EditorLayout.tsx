@@ -113,7 +113,7 @@ export function EditorLayout() {
             {activePanel === 'elements' && (
               <>
                 <OverlayPicker />
-                <div style={{ borderTop: '1px solid #333', margin: '16px 0' }} />
+                <div style={{ borderTop: '1px solid var(--border-default)', margin: '16px 0' }} />
                 <MusicSelector />
               </>
             )}

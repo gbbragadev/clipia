@@ -24,7 +24,7 @@ const TRACKS: MusicTrack[] = [
 ]
 
 const MOOD_COLORS: Record<string, string> = {
-  Relaxante: '#6C5CE7',
+  Relaxante: 'var(--color-coral)',
   Energetico: '#f59e0b',
   Dramatico: '#ef4444',
   Tranquilo: '#10b981',
@@ -95,8 +95,8 @@ export function MusicSelector() {
           width: '100%',
           padding: '10px 12px',
           borderRadius: 8,
-          border: selectedUrl === null ? '1px solid #6C5CE7' : '1px solid #333',
-          background: selectedUrl === null ? 'rgba(108, 92, 231, 0.15)' : '#2A2A2A',
+          border: selectedUrl === null ? '1px solid var(--color-coral)' : '1px solid #333',
+          background: selectedUrl === null ? 'rgba(255, 86, 56, 0.15)' : '#2A2A2A',
           color: '#E8E8E8',
           cursor: 'pointer',
           fontSize: 13,
@@ -111,7 +111,7 @@ export function MusicSelector() {
         {TRACKS.map((track) => {
           const isSelected = selectedUrl === track.url
           const isPreviewing = previewId === track.id
-          const moodColor = MOOD_COLORS[track.mood] || '#6C5CE7'
+          const moodColor = MOOD_COLORS[track.mood] || 'var(--color-coral)'
 
           return (
             <div

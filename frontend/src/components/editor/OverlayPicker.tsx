@@ -84,7 +84,7 @@ const labelStyle: React.CSSProperties = {
 
 const sliderStyle: React.CSSProperties = {
   width: '100%',
-  accentColor: '#6C5CE7',
+  accentColor: 'var(--color-coral)',
   cursor: 'pointer',
   height: 4,
 }
@@ -197,7 +197,7 @@ function OverlayEditFields({
       }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <span style={{ fontSize: 11, color: 'rgba(232,232,232,0.6)' }}>Timing</span>
-          <span style={{ fontSize: 11, color: '#6C5CE7', fontWeight: 600 }}>
+          <span style={{ fontSize: 11, color: 'var(--color-coral)', fontWeight: 600 }}>
             {startSec.toFixed(1)}s - {endSec.toFixed(1)}s
           </span>
         </div>
