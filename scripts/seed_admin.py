@@ -28,7 +28,7 @@ from app.db.models import User
 
 ADMIN_EMAIL = "gbbraga.dev@gmail.com"
 ADMIN_NAME = "admin@gui"
-ADMIN_CREDITS = 999_999
+ADMIN_CREDITS = 100
 CREDENTIALS_PATH = Path(__file__).resolve().parent.parent / ".admin-credentials.local"
 
 
