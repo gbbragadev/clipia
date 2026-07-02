@@ -8,7 +8,7 @@ param(
 $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $PSScriptRoot
 $backupDir = Join-Path $root "storage\backups"
-$container = "auto-shorts-postgres-1"
+$container = "clipia-postgres-1"
 $date = Get-Date -Format "yyyy-MM-dd_HHmm"
 $file = Join-Path $backupDir "clipia_$date.sql.gz"
 

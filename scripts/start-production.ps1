@@ -68,11 +68,19 @@ foreach ($l in $launchers) {
     Start-Sleep -Seconds 2
 }
 
+function Test-Endpoint($url, $timeout) {
+    for ($i = 1; $i -le 3; $i++) {
+        try { if ((Invoke-WebRequest $url -UseBasicParsing -TimeoutSec $timeout).StatusCode -eq 200) { return $true } } catch {}
+        if ($i -lt 3) { Start-Sleep -Seconds 10 }
+    }
+    return $false
+}
 # 5. Verificacao
 Start-Sleep -Seconds 15
 $backendOk = $false
-try { $backendOk = (Invoke-WebRequest 'http://127.0.0.1:8005/health' -UseBasicParsing -TimeoutSec 10).StatusCode -eq 200 } catch {}
+$backendOk = Test-Endpoint 'http://127.0.0.1:8005/health' 10
 $frontOk = $false
-try { $frontOk = (Invoke-WebRequest 'http://localhost:3003' -UseBasicParsing -TimeoutSec 15).StatusCode -eq 200 } catch {}
+$frontOk = Test-Endpoint 'http://localhost:3003' 15
+if (-not $backendOk -or -not $frontOk) { Log "ALERTA: verificacao falhou apos 3 tentativas. Cheque storage\backend.log e storage\frontend.log." }
 Log "Verificacao: backend=$backendOk frontend=$frontOk"
 Log "=== start-production: fim ==="
