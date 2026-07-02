@@ -165,6 +165,16 @@ def _init_stripe() -> None:
     stripe.api_key = settings.STRIPE_SECRET_KEY
 
 
+def _to_plain(obj) -> dict:
+    """SDK stripe>=15: Session/Charge/Event não são dict nem têm .get, e dict(obj) quebra
+    (KeyError). Normaliza pra dict Python. Aceita dict (mocks/testes) sem alterar."""
+    if isinstance(obj, dict):
+        return obj
+    if hasattr(obj, "to_dict"):
+        return obj.to_dict()
+    return dict(obj)
+
+
 async def create_checkout_stripe(user: User, package_key: str, db: AsyncSession) -> tuple[str, UUID]:
     """Cria uma Stripe Checkout Session e retorna (checkout_url, purchase_id)."""
     if not settings.STRIPE_SECRET_KEY:
@@ -225,13 +235,13 @@ async def verify_stripe_event_via_api(parsed: dict) -> dict | None:
             if not sid:
                 return None
             session = await asyncio.to_thread(stripe.checkout.Session.retrieve, sid)
-            return {"type": etype, "data": {"object": dict(session)}}
+            return {"type": etype, "data": {"object": _to_plain(session)}}
         if etype == "charge.refunded":
             cid = obj.get("id")
             if not cid:
                 return None
             charge = await asyncio.to_thread(stripe.Charge.retrieve, cid)
-            return {"type": etype, "data": {"object": dict(charge)}}
+            return {"type": etype, "data": {"object": _to_plain(charge)}}
     except Exception as e:  # noqa: BLE001
         logger.warning("Stripe verify via API falhou: %s", e)
         return None
@@ -243,6 +253,8 @@ async def process_webhook_stripe(event: dict, db: AsyncSession) -> bool:
 
     Credita na conclusão do pagamento (idempotente) e reverte em estorno. Pix é assíncrono:
     só credita quando payment_status == 'paid' (no completed ou no async_payment_succeeded)."""
+    # SDK stripe>=15: construct_event devolve StripeObject (sem .get / dict() quebra). Normaliza.
+    event = _to_plain(event)
     etype = event.get("type")
     obj = event.get("data", {}).get("object", {})
 

@@ -195,3 +195,45 @@ async def test_stripe_refund_reverts_credits(client, db_session, purchase_factor
     refreshed_user = await db_session.get(User, verified_user.id)
     assert refreshed_purchase.status == "refunded"
     assert refreshed_user.credits == credits_with_purchase - purchase.credits_amount
+
+
+class _FakeStripeObj:
+    """Simula o StripeObject do SDK>=15: NÃO é dict, dict(obj) quebra, mas tem .to_dict()."""
+
+    def __init__(self, data: dict):
+        self._data = data
+
+    def to_dict(self) -> dict:
+        return dict(self._data)
+
+    def __iter__(self):
+        raise KeyError(0)  # espelha o dict(session) -> KeyError 0 do SDK real
+
+
+@pytest.mark.asyncio
+async def test_stripe_webhook_credits_when_sdk_returns_object_not_dict(
+    client, db_session, purchase_factory, verified_user, monkeypatch
+):
+    """Regressão: SDK stripe>=15 retorna objeto (não dict); dict(session) quebrava e nada creditava.
+    Só o pagamento real pegou (dict nos mocks mascarava). Handler deve normalizar via to_dict."""
+    purchase = await purchase_factory(package_name="starter", provider="stripe")
+    obj = _FakeStripeObj(
+        {
+            "id": "cs_test_obj",
+            "payment_status": "paid",
+            "client_reference_id": str(purchase.id),
+            "payment_intent": "pi_test_obj",
+        }
+    )
+    monkeypatch.setattr("app.payments.routes.settings.STRIPE_WEBHOOK_SECRET", "")
+    monkeypatch.setattr(stripe.checkout.Session, "retrieve", staticmethod(lambda _id: obj))
+
+    response = await client.post(
+        "/api/v1/webhooks/stripe",
+        json={"type": "checkout.session.completed", "data": {"object": {"id": "cs_test_obj"}}},
+    )
+
+    assert (
+        response.json()["status"] == "credited"
+    ), "SDK>=15 devolve objeto (não dict); handler deve normalizar via to_dict e creditar."
+    assert (await db_session.get(CreditPurchase, purchase.id)).status == "approved"
