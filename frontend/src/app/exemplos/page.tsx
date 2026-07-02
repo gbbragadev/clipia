@@ -23,7 +23,7 @@ export const metadata: Metadata = {
 
 export default function ExemplosPage() {
   return (
-    <div className="min-h-screen bg-[#0f0b1a]">
+    <div className="min-h-screen bg-[#0b0d15]">
       <Navbar />
 
       <main className="pt-16">

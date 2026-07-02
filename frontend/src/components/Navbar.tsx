@@ -55,23 +55,23 @@ export default function Navbar() {
               <div className="flex items-center gap-3">
                 {/* Avatar + credits */}
                 <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-surface" style={{ border: '1px solid var(--border-subtle)' }}>
-                  <span className="w-6 h-6 rounded-full bg-gradient-to-br from-purple-600 to-blue-600 flex items-center justify-center text-white text-[10px] font-semibold">
+                  <span className="w-6 h-6 rounded-full bg-gradient-to-br from-coral to-azure flex items-center justify-center text-white text-[10px] font-semibold">
                     {user.name?.charAt(0).toUpperCase() || '?'}
                   </span>
-                  <span className="text-purple-400 font-semibold text-xs">{user.credits}</span>
+                  <span className="text-coral font-semibold text-xs">{user.credits}</span>
                   <span className="text-xs text-3">créditos</span>
                 </div>
                 {/* Dashboard button */}
                 <a
                   href="/dashboard"
-                  className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-gradient-to-r from-purple-600 to-blue-600 text-white text-sm font-medium hover:opacity-90 transition"
+                  className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-gradient-to-r from-coral to-azure text-white text-sm font-medium hover:opacity-90 transition"
                 >
                   <LayoutDashboard className="w-4 h-4" />
                   Dashboard
                 </a>
               </div>
             ) : (
-              <a href="/auth/login" className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-gradient-to-r from-purple-600 to-blue-600 text-white hover:opacity-90 transition">
+              <a href="/auth/login" className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-gradient-to-r from-coral to-azure text-white hover:opacity-90 transition">
                 <LogIn className="w-4 h-4" />
                 {strings.auth.login.submit}
               </a>
@@ -113,18 +113,18 @@ export default function Navbar() {
               {user ? (
                 <>
                   <div className="flex items-center gap-2 py-3">
-                    <span className="w-7 h-7 rounded-full bg-gradient-to-br from-purple-600 to-blue-600 flex items-center justify-center text-white text-xs font-semibold">
+                    <span className="w-7 h-7 rounded-full bg-gradient-to-br from-coral to-azure flex items-center justify-center text-white text-xs font-semibold">
                       {user.name?.charAt(0).toUpperCase() || '?'}
                     </span>
-                    <span className="text-purple-400 font-semibold text-sm">{user.credits}</span>
+                    <span className="text-coral font-semibold text-sm">{user.credits}</span>
                     <span className="text-sm text-3">créditos</span>
                   </div>
-                  <a href="/dashboard" onClick={() => setOpen(false)} className="w-full text-center px-4 py-3 rounded-lg bg-gradient-to-r from-purple-600 to-blue-600 text-white font-medium">
+                  <a href="/dashboard" onClick={() => setOpen(false)} className="w-full text-center px-4 py-3 rounded-lg bg-gradient-to-r from-coral to-azure text-white font-medium">
                     Dashboard
                   </a>
                 </>
               ) : (
-                <a href="/auth/login" onClick={() => setOpen(false)} className="w-full text-center px-4 py-3 rounded-lg bg-gradient-to-r from-purple-600 to-blue-600 text-white font-medium">
+                <a href="/auth/login" onClick={() => setOpen(false)} className="w-full text-center px-4 py-3 rounded-lg bg-gradient-to-r from-coral to-azure text-white font-medium">
                   {strings.auth.login.submit}
                 </a>
               )}

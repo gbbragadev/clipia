@@ -39,11 +39,11 @@ export default async function BlogPostPage({
   if (!post) notFound();
 
   return (
-    <div className="min-h-screen bg-[#0f0b1a]">
+    <div className="min-h-screen bg-[#0b0d15]">
       <article className="max-w-3xl mx-auto px-4 py-16">
         <Link
           href="/blog"
-          className="text-sm text-purple-400 hover:text-purple-300 transition mb-8 inline-block"
+          className="text-sm text-coral hover:text-coral-soft transition mb-8 inline-block"
         >
           ← Voltar para o blog
         </Link>
@@ -60,7 +60,7 @@ export default async function BlogPostPage({
           {post.title}
         </h1>
 
-        <div className="prose prose-invert prose-purple max-w-none text-slate-300 leading-relaxed [&_h2]:text-white [&_h2]:text-2xl [&_h2]:font-bold [&_h2]:mt-10 [&_h2]:mb-4 [&_h3]:text-white [&_h3]:text-lg [&_h3]:font-bold [&_h3]:mt-8 [&_h3]:mb-3 [&_p]:mb-4 [&_ul]:mb-4 [&_ul]:space-y-2 [&_li]:text-slate-300 [&_strong]:text-white [&_a]:text-purple-400 [&_a]:underline hover:[&_a]:text-purple-300">
+        <div className="prose prose-invert max-w-none text-slate-300 leading-relaxed [&_h2]:text-white [&_h2]:text-2xl [&_h2]:font-bold [&_h2]:mt-10 [&_h2]:mb-4 [&_h3]:text-white [&_h3]:text-lg [&_h3]:font-bold [&_h3]:mt-8 [&_h3]:mb-3 [&_p]:mb-4 [&_ul]:mb-4 [&_ul]:space-y-2 [&_li]:text-slate-300 [&_strong]:text-white [&_a]:text-coral [&_a]:underline hover:[&_a]:text-coral-soft">
           {post.content.split("\n").map((line, i) => {
             const trimmed = line.trim();
             if (!trimmed) return null;
@@ -128,7 +128,7 @@ export default async function BlogPostPage({
         </div>
 
         <div className="mt-16 pt-8 border-t border-white/10">
-          <div className="rounded-2xl bg-gradient-to-r from-purple-600/20 to-blue-600/20 border border-purple-500/20 p-8 text-center">
+          <div className="rounded-2xl bg-gradient-to-r from-coral/20 to-azure/20 border border-coral/20 p-8 text-center">
             <h2 className="text-2xl font-bold text-white mb-3">
               Pronto para criar seu primeiro vídeo?
             </h2>
@@ -137,7 +137,7 @@ export default async function BlogPostPage({
             </p>
             <Link
               href="/auth/register"
-              className="inline-block px-8 py-3.5 rounded-xl bg-gradient-to-r from-purple-600 to-blue-600 text-white font-bold hover:opacity-90 transition shadow-lg shadow-purple-500/25"
+              className="inline-block px-8 py-3.5 rounded-xl bg-gradient-to-r from-coral to-azure text-white font-bold hover:opacity-90 transition shadow-lg shadow-coral/25"
             >
               Criar conta grátis →
             </Link>

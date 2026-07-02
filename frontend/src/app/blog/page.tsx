@@ -15,11 +15,11 @@ export const metadata: Metadata = {
 
 export default function BlogPage(_props: PageProps<"/blog">) {
   return (
-    <div className="min-h-screen bg-[#0f0b1a]">
+    <div className="min-h-screen bg-[#0b0d15]">
       <div className="max-w-3xl mx-auto px-4 py-16">
         <Link
           href="/"
-          className="text-sm text-purple-400 hover:text-purple-300 transition mb-8 inline-block"
+          className="text-sm text-coral hover:text-coral-soft transition mb-8 inline-block"
         >
           ← Voltar para o início
         </Link>
@@ -36,7 +36,7 @@ export default function BlogPage(_props: PageProps<"/blog">) {
             <Link
               key={post.slug}
               href={`/blog/${post.slug}`}
-              className="block group rounded-2xl bg-white/[0.03] border border-white/5 p-6 hover:bg-white/[0.06] hover:border-purple-500/20 transition-all"
+              className="block group rounded-2xl bg-white/[0.03] border border-white/5 p-6 hover:bg-white/[0.06] hover:border-coral/20 transition-all"
             >
               <time className="text-xs text-slate-500 font-mono">
                 {new Date(post.date).toLocaleDateString("pt-BR", {
@@ -45,7 +45,7 @@ export default function BlogPage(_props: PageProps<"/blog">) {
                   year: "numeric",
                 })}
               </time>
-              <h2 className="text-xl font-bold text-white mt-2 mb-2 group-hover:text-purple-300 transition">
+              <h2 className="text-xl font-bold text-white mt-2 mb-2 group-hover:text-coral-soft transition">
                 {post.title}
               </h2>
               <p className="text-slate-400 text-sm leading-relaxed">

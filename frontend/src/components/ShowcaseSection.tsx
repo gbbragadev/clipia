@@ -61,7 +61,7 @@ export function ShowcaseCard({ item, featured = false }: { item: ShowcaseVideo; 
               legenda: {item.captionStyle}
             </span>
           </div>
-          <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-[#0f0b1a] via-[#0f0b1a]/80 to-transparent p-6 pt-24">
+          <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-[#0b0d15] via-[#0b0d15]/80 to-transparent p-6 pt-24">
             <h3 className={`font-bold text-white leading-tight ${featured ? 'text-2xl' : 'text-lg'}`}>{item.title}</h3>
             {item.beforeScript && (
               <p className="mt-2 text-xs text-white/50 italic">Prompt: &ldquo;{item.beforeScript}&rdquo;</p>
@@ -121,7 +121,7 @@ export default function ShowcaseSection() {
             onClick={() => setNiche(n.id)}
             className={`shrink-0 snap-start text-sm px-4 py-2 rounded-full border transition-all ${
               niche === n.id
-                ? 'bg-purple-600/30 text-purple-200 border-purple-500/40'
+                ? 'bg-coral/30 text-coral-soft border-coral/40'
                 : 'bg-white/5 text-white/60 border-white/10 hover:bg-white/10'
             }`}
           >
@@ -152,7 +152,7 @@ export default function ShowcaseSection() {
         <div className="text-center mt-16">
           <Link
             href="/auth/register"
-            className="inline-block px-8 py-4 rounded-xl bg-purple-600/20 text-purple-300 font-semibold hover:bg-purple-600/30 border border-purple-500/30 transition-all"
+            className="inline-block px-8 py-4 rounded-xl bg-coral/20 text-coral-soft font-semibold hover:bg-coral/30 border border-coral/30 transition-all"
           >
             Criar meu primeiro vídeo
           </Link>

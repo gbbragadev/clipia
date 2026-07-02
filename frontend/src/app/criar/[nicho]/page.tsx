@@ -52,7 +52,7 @@ export default async function NichoPage({
   if (!n) notFound();
 
   return (
-    <div className="min-h-screen bg-[#0f0b1a]">
+    <div className="min-h-screen bg-[#0b0d15]">
       <Navbar />
 
       <main className="pt-16">
@@ -67,7 +67,7 @@ export default async function NichoPage({
             <div className="mt-8 flex flex-col sm:flex-row gap-3 justify-center">
               <Link
                 href={ctaHref(n.slug)}
-                className="inline-block px-8 py-3.5 rounded-xl bg-gradient-to-r from-purple-600 to-blue-600 text-white font-bold hover:opacity-90 transition shadow-lg shadow-purple-500/25"
+                className="inline-block px-8 py-3.5 rounded-xl bg-gradient-to-r from-coral to-azure text-white font-bold hover:opacity-90 transition shadow-lg shadow-coral/25"
               >
                 Criar meu vídeo grátis →
               </Link>
@@ -190,14 +190,14 @@ export default async function NichoPage({
         {/* CTA final */}
         <CinematicSection background="none" spacing="lg" className="border-t border-white/5">
           <div className="max-w-3xl mx-auto">
-            <div className="rounded-2xl bg-gradient-to-r from-purple-600/20 to-blue-600/20 border border-purple-500/20 p-8 md:p-10 text-center">
+            <div className="rounded-2xl bg-gradient-to-r from-coral/20 to-azure/20 border border-coral/20 p-8 md:p-10 text-center">
               <h2 className="text-2xl md:text-3xl font-bold text-white mb-3">
                 Pronto para criar seu vídeo de {n.label.toLowerCase()}?
               </h2>
               <p className="text-slate-400 mb-6">2 vídeos grátis. Sem cartão de crédito.</p>
               <Link
                 href={ctaHref(n.slug)}
-                className="inline-block px-8 py-3.5 rounded-xl bg-gradient-to-r from-purple-600 to-blue-600 text-white font-bold hover:opacity-90 transition shadow-lg shadow-purple-500/25"
+                className="inline-block px-8 py-3.5 rounded-xl bg-gradient-to-r from-coral to-azure text-white font-bold hover:opacity-90 transition shadow-lg shadow-coral/25"
               >
                 Criar conta grátis →
               </Link>
