@@ -12,7 +12,7 @@ interface CreditPackageCardProps {
   provider?: PaymentProvider
 }
 
-export default function CreditPackageCard({ pkg, highlight, badge, provider = 'mercadopago' }: CreditPackageCardProps) {
+export default function CreditPackageCard({ pkg, highlight, badge, provider = 'stripe' }: CreditPackageCardProps) {
   const [loading, setLoading] = useState(false)
   const { error: toastError } = useToast()
 

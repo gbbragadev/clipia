@@ -37,7 +37,7 @@ export type PaymentProvider = "mercadopago" | "stripe";
 
 export async function createCheckout(
   packageId: string,
-  provider: PaymentProvider = "mercadopago",
+  provider: PaymentProvider = "stripe",
 ): Promise<string> {
   const data = await fetchJson<{ checkout_url: string }>(`${API_BASE}/api/v1/credits/checkout`, {
     method: "POST",
