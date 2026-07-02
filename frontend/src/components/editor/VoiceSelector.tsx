@@ -6,6 +6,7 @@ import { getToken } from '@/lib/auth'
 import { readApiError } from '@/lib/http'
 import { fetchVoices, type VoiceInfo } from '@/lib/editor-api'
 import { useToast } from '@/components/ui/feedback'
+import { useAuth } from '@/contexts/AuthContext'
 
 type Tab = 'free' | 'premium' | 'custom'
 
@@ -23,13 +24,20 @@ const TAB_BADGES: Record<Tab, string> = {
 
 export function VoiceSelector() {
   const { composition, updateVoiceConfig, updateAudio, jobId } = useEditor()
-  const { error: toastError } = useToast()
+  const { success: toastSuccess, error: toastError } = useToast()
+  const { user } = useAuth()
   const [regenerating, setRegenerating] = useState(false)
   const [regenError, setRegenError] = useState<string | null>(null)
   const [activeTab, setActiveTab] = useState<Tab>('free')
   const [voices, setVoices] = useState<VoiceInfo[]>([])
   const [loadingVoices, setLoadingVoices] = useState(false)
   const [previewPlaying, setPreviewPlaying] = useState<string | null>(null)
+  const [showDesign, setShowDesign] = useState(false)
+  const [designName, setDesignName] = useState('')
+  const [designDesc, setDesignDesc] = useState('')
+  const [designText, setDesignText] = useState('')
+  const [designing, setDesigning] = useState(false)
+  const [designError, setDesignError] = useState<string | null>(null)
 
   const loadVoices = useCallback(async () => {
     setLoadingVoices(true)
@@ -70,6 +78,36 @@ export function VoiceSelector() {
     audio.onended = () => setPreviewPlaying(null)
     audio.onerror = () => setPreviewPlaying(null)
     audio.play().catch(() => setPreviewPlaying(null))
+  }
+
+  const handleDesign = async () => {
+    if (!composition || designing) return
+    const name = designName.trim()
+    const description = designDesc.trim()
+    if (!name || description.length < 20) return
+    setDesigning(true)
+    setDesignError(null)
+    try {
+      const token = getToken()
+      const res = await fetch('/api/v1/voices/design', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+        body: JSON.stringify({ name, description, text: designText.trim() || undefined }),
+      })
+      if (!res.ok) throw new Error(await readApiError(res, 'Falha ao criar voz'))
+      const data = await res.json()
+      updateVoiceConfig({ voiceId: data.voice_id, voiceProvider: 'elevenlabs' })
+      await loadVoices()
+      toastSuccess('Voz criada!', `"${data.name}" foi criada e selecionada.`)
+      setShowDesign(false)
+      setDesignName(''); setDesignDesc(''); setDesignText('')
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Erro desconhecido'
+      setDesignError(message)
+      toastError('Não foi possível criar a voz', message)
+    } finally {
+      setDesigning(false)
+    }
   }
 
   const handleRegenerate = async () => {
@@ -232,6 +270,74 @@ export function VoiceSelector() {
           </div>
         </>
       )}
+
+      {/* Voice Design — criar voz unica por descricao */}
+      <div style={{ borderTop: '1px solid var(--border-default)', paddingTop: 14, marginTop: 4, display: 'flex', flexDirection: 'column', gap: 8 }}>
+        <div className="editor-section-header">Criar voz por IA (Voice Design)</div>
+        {!showDesign ? (
+          <button
+            type="button"
+            onClick={() => { setShowDesign(true); setDesignError(null) }}
+            className="editor-btn-sm"
+            style={{ width: '100%' }}
+          >
+            + Descrever uma voz unica
+          </button>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
+            <input
+              value={designName}
+              onChange={(e) => setDesignName(e.target.value)}
+              placeholder="Nome (ex: Narrador Misterioso)"
+              maxLength={100}
+              style={{ width: '100%', padding: '7px 10px', fontSize: 12, borderRadius: 6, border: '1px solid rgba(255,255,255,0.08)', background: '#1A1A1A', color: '#E8E8E8', outline: 'none' }}
+            />
+            <textarea
+              value={designDesc}
+              onChange={(e) => setDesignDesc(e.target.value)}
+              placeholder="Descreva a voz: tom, idade, sotaque, ritmo... (min. 20 caracteres)"
+              maxLength={1000}
+              rows={3}
+              style={{ width: '100%', padding: '7px 10px', fontSize: 12, borderRadius: 6, border: '1px solid rgba(255,255,255,0.08)', background: '#1A1A1A', color: '#E8E8E8', outline: 'none', resize: 'vertical', fontFamily: 'inherit' }}
+            />
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10, color: 'rgba(255,255,255,0.4)' }}>
+              <span>{designDesc.length}/1000</span>
+              <span>Custa 5 creditos{user ? ' . voce tem ' + user.credits : ''}</span>
+            </div>
+            <textarea
+              value={designText}
+              onChange={(e) => setDesignText(e.target.value)}
+              placeholder="Texto de amostra (opcional)"
+              maxLength={1000}
+              rows={2}
+              style={{ width: '100%', padding: '7px 10px', fontSize: 12, borderRadius: 6, border: '1px solid rgba(255,255,255,0.08)', background: '#1A1A1A', color: '#E8E8E8', outline: 'none', resize: 'vertical', fontFamily: 'inherit' }}
+            />
+            <button
+              type="button"
+              onClick={handleDesign}
+              disabled={designing || !designName.trim() || designDesc.length < 20}
+              style={{
+                padding: '8px 0', background: designing ? 'rgba(255,86,56,0.5)' : 'var(--color-coral)',
+                border: 'none', borderRadius: 6, color: 'white', fontWeight: 600, fontSize: 12,
+                cursor: designing ? 'not-allowed' : 'pointer', opacity: (!designName.trim() || designDesc.length < 20) ? 0.5 : 1,
+              }}
+            >
+              {designing ? 'Criando voz...' : 'Criar voz (5 creditos)'}
+            </button>
+            {designError && (
+              <div style={{ fontSize: 10, color: '#f87171' }}>{designError}</div>
+            )}
+            <button
+              type="button"
+              onClick={() => setShowDesign(false)}
+              className="editor-btn-sm"
+              style={{ alignSelf: 'flex-start' }}
+            >
+              Cancelar
+            </button>
+          </div>
+        )}
+      </div>
 
       <button
         onClick={handleRegenerate}
