@@ -51,17 +51,24 @@ function timeAgo(dateStr: string | null) {
 interface VideoCardProps {
   job: JobSummary
   onEdit: (id: string) => void
+  onCancel?: (id: string) => void
 }
 
-export default function VideoCard({ job, onEdit }: VideoCardProps) {
+export default function VideoCard({ job, onEdit, onCancel }: VideoCardProps) {
   const canEdit = ['completed', 'editable'].includes(job.status)
+  const canCancel = onCancel ? ['processing', 'queued'].includes(job.status) : false
+  const [confirmCancel, setConfirmCancel] = useState(false)
   const badge = statusBadge(job.status)
   const gradient = STYLE_GRADIENTS[job.style] || 'from-gray-900/40 to-gray-800/40'
   const icon = STYLE_ICONS[job.style] || '🎬'
 
   // Preview do vídeo: /download é Bearer-only, então <video src> direto dava 401 (BUG-R002).
-  // Carrega como blob autenticado no mount (para aparecer sempre) e revoga no unmount.
+  // LAZY (perf): antes o blob autenticado era baixado no mount de TODOS os cards, o que
+  // puxava o MP4 inteiro de cada item só para mostrar o preview. Agora só buscamos o blob
+  // quando o usuário hover no card (preview sob demanda) — em mobile/4G isso evita N downloads
+  // pesados de uma vez. O blob fica em cache enquanto o card existe, então re-hover é instantâneo.
   const [previewSrc, setPreviewSrc] = useState<string | null>(null)
+  const [previewRequested, setPreviewRequested] = useState(false)
   const videoRef = useRef<HTMLVideoElement>(null)
   const hoveringRef = useRef(false)
 
@@ -69,17 +76,22 @@ export default function VideoCard({ job, onEdit }: VideoCardProps) {
     return () => { if (previewSrc) URL.revokeObjectURL(previewSrc) }
   }, [previewSrc])
 
-  useEffect(() => {
-    if (!job.download_url) return
-    fetchAuthenticatedBlobUrl(job.download_url)
-      .then(url => setPreviewSrc(url))
-      .catch(() => {})
-  }, [job.download_url])
-
   const handleEnter = useCallback(() => {
     hoveringRef.current = true
+    // Só dispara o download do MP4 no primeiro hover (lazy preview).
+    if (job.download_url && !previewRequested) {
+      setPreviewRequested(true)
+      fetchAuthenticatedBlobUrl(job.download_url)
+        .then((url) => {
+          setPreviewSrc(url)
+          // Toca assim que o blob estiver pronto, se o cursor ainda estiver sobre o card.
+          if (hoveringRef.current) videoRef.current?.play().catch(() => {})
+        })
+        .catch(() => {})
+      return
+    }
     if (previewSrc) videoRef.current?.play().catch(() => {})
-  }, [previewSrc])
+  }, [job.download_url, previewRequested, previewSrc])
 
   const handleLeave = useCallback(() => {
     hoveringRef.current = false
@@ -106,6 +118,7 @@ export default function VideoCard({ job, onEdit }: VideoCardProps) {
               muted
               loop
               playsInline
+              preload="none"
               onLoadedData={() => { if (hoveringRef.current) videoRef.current?.play().catch(() => {}) }}
             />
           )}
@@ -149,7 +162,7 @@ export default function VideoCard({ job, onEdit }: VideoCardProps) {
           </div>
 
           {/* Always-visible action buttons */}
-          {(canEdit || job.download_url) && (
+          {(canEdit || job.download_url || canCancel) && (
             <div className="flex gap-2 mt-auto">
               {canEdit && (
                 <button
@@ -170,6 +183,41 @@ export default function VideoCard({ job, onEdit }: VideoCardProps) {
                   {strings.dashboard.videos.download}
                 </button>
               )}
+              {canCancel && (
+                <button
+                  type="button"
+                  onClick={() => setConfirmCancel(true)}
+                  className="flex-1 flex items-center justify-center gap-1.5 py-3 sm:py-2.5 rounded-lg bg-red-500/10 border border-red-500/30 text-red-400 text-sm font-semibold hover:bg-red-500/20 active:scale-[0.97] transition"
+                >
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><rect x="6" y="6" width="12" height="12" rx="2" /></svg>
+                  Cancelar
+                </button>
+              )}
+            </div>
+          )}
+
+          {/* Confirmação de cancelamento */}
+          {confirmCancel && canCancel && (
+            <div className="mt-2 rounded-lg border border-red-500/30 bg-red-500/5 p-3">
+              <p className="text-xs text-red-200/80 mb-2">
+                Cancelar este vídeo? O crédito da geração será devolvido.
+              </p>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => { setConfirmCancel(false); onCancel!(job.job_id) }}
+                  className="flex-1 py-2 rounded-md bg-red-500 text-white text-xs font-semibold hover:bg-red-600 transition"
+                >
+                  Sim, cancelar
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setConfirmCancel(false)}
+                  className="flex-1 py-2 rounded-md bg-white/5 border border-white/10 text-white/70 text-xs font-medium hover:bg-white/10 transition"
+                >
+                  Manter
+                </button>
+              </div>
             </div>
           )}
         </div>
