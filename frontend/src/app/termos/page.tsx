@@ -4,7 +4,7 @@ export default function TermosPage() {
   return (
     <div className="max-w-3xl mx-auto px-4 py-16 prose prose-invert prose-purple">
       <h1 className="text-3xl font-bold mb-8">Termos de Uso</h1>
-      <p className="text-slate-400 mb-8">Data de vigência: 04/04/2026</p>
+      <p className="text-slate-400 mb-8">Data de vigência: 02/07/2026</p>
 
       <h2>1. Aceitação dos Termos</h2>
       <p>
@@ -23,9 +23,16 @@ export default function TermosPage() {
 
       <h2>4. Créditos e Pagamentos</h2>
       <p>
-        O uso dos serviços de geração de vídeo consome créditos. Os créditos podem ser adquiridos em pacotes através de nosso processador de pagamentos (MercadoPago).
-        Os créditos adquiridos não expiram, mas <strong>não são reembolsáveis</strong> após a compra.
+        O uso dos serviços de geração de vídeo consome créditos. Os créditos podem ser adquiridos em pacotes por meio dos nossos processadores de pagamento: <strong>Stripe</strong> (provedor primário, com suporte a cartão de crédito e Pix) e <strong>Mercado Pago</strong> (provedor secundário). A escolha do provedor pode variar conforme a disponibilidade da plataforma. O ClipIA não armazena nem tem acesso aos dados completos do seu cartão de crédito — o processamento financeiro é realizado integralmente pelos provedores acima.
       </p>
+      <p>
+        Os créditos adquiridos <strong>não expiram</strong>. Quanto a reembolsos e estornos, observamos o seguinte:
+      </p>
+      <ul>
+        <li><strong>Estorno / chargeback:</strong> caso o pagamento seja revertido pelo provedor, pelo seu banco ou por decisão do intermediador (evento de <em>refund</em> ou <em>chargeback</em> junto ao Stripe ou ao Mercado Pago), os créditos correspondentes àquela compra são <strong>automaticamente revertidos</strong> da sua conta de forma idempotente, pelo mesmo valor creditado originalmente.</li>
+        <li><strong>Uso já consumido:</strong> créditos gastos na geração de vídeos (bens digitais entregues e consumidos) <strong>não geram reembolso discricionário</strong>. Esta plataforma entrega conteúdo digital gerado sob demanda, imediatamente consumível, o que caracteriza exceção ao direito de arrependimento prevista no art. 49 do CDC para bens digitais já fornecidos e consumidos.</li>
+        <li><strong>Falha técnica:</strong> se um vídeo não for entregue em razão de falha comprovada da plataforma (job com erro do lado do ClipIA), o crédito consumido na tentativa é devolvido à sua conta automaticamente.</li>
+      </ul>
 
       <h2>5. Conteúdo Gerado e Direitos Autorais</h2>
       <p>
