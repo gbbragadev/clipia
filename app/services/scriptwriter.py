@@ -141,7 +141,7 @@ def generate_script(
     raw = strip_code_fences(raw)
     if not raw:
         raise ScriptValidationError("LLM retornou resposta vazia (reasoning pode ter estourado o max_tokens)")
-    script = json.loads(raw)
+    script = _parse_script_json(raw)
 
     # Validate and fix duration_hints
     script = _fix_durations(script, duration_target)
@@ -159,6 +159,37 @@ def generate_script(
             sc["speaker"] = "B" if str(sc.get("speaker", "A")).strip().upper() == "B" else "A"
 
     return script
+
+
+def _parse_script_json(raw: str) -> dict:
+    """Parse LLM output into a JSON dict, tolerating prose wrapping the JSON object.
+
+    Estrategia defensiva (sem dep de libs tipo json-repair):
+    1. Tenta ``json.loads`` direto (caso ideal: LLM respeitou o prompt).
+    2. Se falhar, recorta entre o primeiro ``{`` e o ultimo ``}`` (LLM costema envolver
+       o JSON em texto explicativo, ex.: "Aqui esta o roteiro:\\n{...}\\nEspero que...").
+    3. Se ainda assim nao parsear, levanta ``ScriptValidationError`` com os primeiros 200
+       chars do raw para diagnostico (nao loga o raw inteiro — aqui e so roteiro de video,
+       mas mantemos o principio de nao vazar payload desconhecido em logs).
+    """
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError:
+        pass
+
+    start = raw.find("{")
+    end = raw.rfind("}")
+    if start != -1 and end != -1 and end > start:
+        candidate = raw[start : end + 1]
+        try:
+            return json.loads(candidate)
+        except json.JSONDecodeError:
+            pass
+
+    preview = raw[:200].replace("\n", "\\n")
+    raise ScriptValidationError(
+        f"LLM retornou JSON invalido (nao foi possivel extrair um objeto JSON). " f"Primeiros 200 chars: {preview}"
+    )
 
 
 def _fix_durations(script: dict, target: int) -> dict:

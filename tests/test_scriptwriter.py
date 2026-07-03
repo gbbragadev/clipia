@@ -1,7 +1,9 @@
 import json
 from unittest.mock import patch
 
-from app.services.scriptwriter import generate_script
+import pytest
+
+from app.services.scriptwriter import ScriptValidationError, _parse_script_json, generate_script
 
 
 def test_generate_script_returns_valid_structure():
@@ -50,3 +52,29 @@ def test_generate_script_applies_default_fade_transitions():
     assert "transition" not in scenes[0] or scenes[0].get("transition") in (None, "none")
     assert scenes[1]["transition"] == "fade"
     assert scenes[2]["transition"] == "fade"
+
+
+def test_parse_script_json_accepts_clean_json():
+    raw = json.dumps({"title": "T", "scenes": [{"duration_hint": 7}]})
+    result = _parse_script_json(raw)
+    assert result == {"title": "T", "scenes": [{"duration_hint": 7}]}
+
+
+def test_parse_script_json_recovers_json_wrapped_in_prose():
+    raw = (
+        "Claro! Aqui esta o roteiro solicitado:\n"
+        '{"title": "Oceano", "narration": "texto", "scenes": [{"duration_hint": 8}]}\n'
+        "Espero que goste do resultado!"
+    )
+    result = _parse_script_json(raw)
+    assert result["title"] == "Oceano"
+    assert result["scenes"][0]["duration_hint"] == 8
+
+
+def test_parse_script_json_raises_on_completely_invalid_input():
+    with pytest.raises(ScriptValidationError) as exc_info:
+        _parse_script_json("isso nao tem nenhum objeto json valido aqui")
+
+    msg = str(exc_info.value)
+    assert "JSON invalido" in msg
+    assert "isso nao tem nenhum objeto json valido aqui" in msg

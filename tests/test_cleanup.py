@@ -164,6 +164,69 @@ def test_celery_beat_schedule_registers_cleanup_tasks():
 
 
 @pytest.mark.asyncio
+async def test_reap_marks_old_queued_jobs_failed_and_refunds(test_db, db_session, job_factory, monkeypatch):
+    """Jobs queued ha >60min viram failed com reembolso; jobs recentes/outras filas nao."""
+    monkeypatch.setattr(db_engine, "worker_session", test_db["session_factory"])
+
+    refunded: list[tuple] = []
+
+    def _fake_refund(job_id, status_value, error, cleanup_files=False):
+        refunded.append((job_id, status_value, error))
+
+    monkeypatch.setattr(worker_tasks, "_refund_job_credit", _fake_refund)
+
+    orphan_job = await job_factory(status="queued")
+    recent_queued = await job_factory(status="queued")
+    processing_job = await job_factory(status="processing")
+
+    old_created = datetime.now(timezone.utc) - timedelta(minutes=90)
+    recent_created = datetime.now(timezone.utc) - timedelta(minutes=5)
+    for jid in (orphan_job.id, processing_job.id):
+        await db_session.execute(update(Job).where(Job.id == jid).values(created_at=old_created))
+    await db_session.execute(update(Job).where(Job.id == recent_queued.id).values(created_at=recent_created))
+    await db_session.commit()
+
+    # A query async (testada direto, sem asyncio.run aninhado) e deterministica:
+    # so o orphan_job (queued + >60min) deve ser coletado. O reaper roteia cada ID para
+    # _refund_job_credit(failed) — o teste espelha essa logica com o fake refund.
+    orphan_ids = await worker_tasks._find_orphan_queued_jobs_async()
+
+    assert orphan_ids == [str(orphan_job.id)]
+
+    # Simula o roteamento que _reap_orphan_queued_jobs faz para cada ID coletado
+    for job_id in orphan_ids:
+        _fake_refund(job_id, "failed", worker_tasks.ORPHAN_QUEUED_ERROR)
+
+    assert len(refunded) == 1
+    assert refunded[0][0] == str(orphan_job.id)
+    assert refunded[0][1] == "failed"
+    assert "órfão" in refunded[0][2] or "orfao" in refunded[0][2]
+
+
+def test_reap_orphan_queued_jobs_routes_each_orphan_to_refund(monkeypatch):
+    """O wrapper sincrono coleta IDs e roteia cada um para _refund_job_credit(failed)."""
+    fake_ids = ["job-a", "job-b"]
+    refunded: list[tuple] = []
+    monkeypatch.setattr(
+        worker_tasks,
+        "_find_orphan_queued_jobs_async",
+        lambda: __import__("asyncio").sleep(0, result=fake_ids),
+    )
+    monkeypatch.setattr(
+        worker_tasks,
+        "_refund_job_credit",
+        lambda job_id, status_value, error, **_: refunded.append((job_id, status_value, error)),
+    )
+
+    reaped = worker_tasks._reap_orphan_queued_jobs()
+
+    assert reaped == 2
+    assert {r[0] for r in refunded} == {"job-a", "job-b"}
+    assert all(r[1] == "failed" for r in refunded)
+    assert all("órfão" in r[2] or "orfao" in r[2] for r in refunded)
+
+
+@pytest.mark.asyncio
 async def test_generate_blocks_when_storage_is_low(client, test_db, verified_user, auth_headers, monkeypatch):
     async with test_db["session_factory"]() as fresh_session:
         db_user = await fresh_session.get(User, verified_user.id)

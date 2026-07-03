@@ -178,7 +178,7 @@ def _handle_soft_timeout(job_id: str, task_name: str):
     _enqueue_dead_letter(job_id, f"{task_name} soft timeout")
 
 
-@celery_app.task(name="generate_images", bind=True)
+@celery_app.task(name="generate_images", bind=True, soft_time_limit=180, time_limit=210)
 def task_generate_images(self, data: dict, job_id: str, template_id: str) -> dict:
     try:
         if _check_cancelled(job_id):
@@ -251,7 +251,7 @@ def task_generate_images(self, data: dict, job_id: str, template_id: str) -> dic
         raise
 
 
-@celery_app.task(name="generate_videos", bind=True)
+@celery_app.task(name="generate_videos", bind=True, soft_time_limit=720, time_limit=780)
 def task_generate_videos(self, data: dict, job_id: str, template_id: str) -> dict:
     try:
         if _check_cancelled(job_id):
@@ -416,9 +416,50 @@ async def _cleanup_orphan_files_async() -> dict[str, int]:
     return {"removed_dirs": removed_dirs, "removed_outputs": removed_outputs, "reclaimed_bytes": total_reclaimed}
 
 
+ORPHAN_QUEUED_ERROR = "Job órfão: chain aparentemente abandonada (sem progresso há >60min)"
+
+
+async def _find_orphan_queued_jobs_async() -> list[str]:
+    """Retorna os IDs de jobs em ``queued`` ha mais de 60min (chain provavelmente morta).
+
+    Worker e concurrency=1 e um job ativo atualiza progresso no Redis; um job queued ha
+    60min sem update e orfao (a chain morreu sem marcar failed). 60min e seguro porque e
+    bem maior que qualquer intervalo de poll/update de uma task legitima em processamento.
+    """
+    from sqlalchemy import select
+
+    from app.db.engine import worker_session as async_session  # NullPool: seguro com asyncio.run() por task
+    from app.db.models import Job
+
+    cutoff = datetime.now(timezone.utc) - timedelta(minutes=60)
+    async with async_session() as session:
+        result = await session.execute(select(Job.id).where(Job.status == "queued", Job.created_at <= cutoff))
+        return [str(jid) for jid in result.scalars().all()]
+
+
+def _reap_orphan_queued_jobs() -> int:
+    """Marca jobs queued orfaos (>60min) como ``failed`` e reembolsa o credito da geracao.
+
+    Nao apaga o job (mantem para forense). Reutiliza ``_refund_job_credit`` para garantir a
+    mesma logica de reembolso/integridade de creditos do resto do pipeline (job.credit_cost
+    or 1). Idempotente: ``_refund_job_credit`` so reembolsa uma vez (status final guardado).
+    """
+    orphan_ids = asyncio.run(_find_orphan_queued_jobs_async())
+    for job_id in orphan_ids:
+        logger.warning(
+            "Reaping orphan queued job %s (no progresso ha >60min) — marcando failed e reembolsando",
+            job_id,
+        )
+        _refund_job_credit(job_id, "failed", ORPHAN_QUEUED_ERROR)
+    return len(orphan_ids)
+
+
 @celery_app.task(name="cleanup_old_jobs")
 def cleanup_old_jobs() -> dict[str, int]:
-    return asyncio.run(_cleanup_old_jobs_async())
+    reaped = _reap_orphan_queued_jobs()
+    result = asyncio.run(_cleanup_old_jobs_async())
+    result["reaped_orphan_jobs"] = reaped
+    return result
 
 
 @celery_app.task(name="cleanup_orphan_files")
@@ -426,7 +467,7 @@ def cleanup_orphan_files() -> dict[str, int]:
     return asyncio.run(_cleanup_orphan_files_async())
 
 
-@celery_app.task(name="generate_script", bind=True)
+@celery_app.task(name="generate_script", bind=True, soft_time_limit=120, time_limit=150)
 def task_generate_script(
     self,
     job_id: str,
@@ -456,14 +497,13 @@ def task_generate_script(
         _update_job(job_id, "processing", "scripting", 0.16, detail="Roteiro gerado com sucesso.")
         script["_duration_target"] = duration_target
         return script
-    except SoftTimeLimitExceeded:
-        _handle_soft_timeout(job_id, "generate_script")
-        raise
+    except SoftTimeLimitExceeded as e:
+        _retry_or_fail(self, job_id, e, "Script generation timed out (LLM demorou demais).", [10, 30])
     except Exception as e:
         _retry_or_fail(self, job_id, e, f"Script generation failed: {e}", [10, 30])
 
 
-@celery_app.task(name="synthesize_audio", bind=True)
+@celery_app.task(name="synthesize_audio", bind=True, soft_time_limit=120, time_limit=150)
 def task_synthesize_audio(self, script: dict, job_id: str, template_id: str = "stock_narration") -> str:
     try:
         if isinstance(script, dict) and script.get("cancelled"):
@@ -541,14 +581,13 @@ def task_synthesize_audio(self, script: dict, job_id: str, template_id: str = "s
         _update_job(job_id, "processing", "tts", 0.4, detail="Narracao pronta.")
         logger.info(f"TTS output: {size / 1024:.0f}KB (provider={voice_provider_name})")
         return output_path
-    except SoftTimeLimitExceeded:
-        _handle_soft_timeout(job_id, "synthesize_audio")
-        raise
+    except SoftTimeLimitExceeded as e:
+        _retry_or_fail(self, job_id, e, "TTS timed out (sintetizacao demorou demais).", [5, 15])
     except Exception as e:
         _retry_or_fail(self, job_id, e, f"TTS failed: {e}", [5, 15])
 
 
-@celery_app.task(name="transcribe_audio", bind=True)
+@celery_app.task(name="transcribe_audio", bind=True, soft_time_limit=120, time_limit=150)
 def task_transcribe_audio(self, audio_path: str, job_id: str) -> dict:
     try:
         if not audio_path or _check_cancelled(job_id):
@@ -573,7 +612,7 @@ def task_transcribe_audio(self, audio_path: str, job_id: str) -> dict:
         raise
 
 
-@celery_app.task(name="fetch_media", bind=True)
+@celery_app.task(name="fetch_media", bind=True, soft_time_limit=300, time_limit=360)
 def task_fetch_media(self, data: dict, job_id: str, template_id: str = "stock_narration") -> dict:
     try:
         if data.get("cancelled") or _check_cancelled(job_id):
@@ -686,14 +725,13 @@ def task_fetch_media(self, data: dict, job_id: str, template_id: str = "stock_na
         _update_job(job_id, "processing", "media", 0.65, detail="Midias prontas.")
         data["media_paths"] = media_paths
         return data
-    except SoftTimeLimitExceeded:
-        _handle_soft_timeout(job_id, "fetch_media")
-        raise
+    except SoftTimeLimitExceeded as e:
+        _retry_or_fail(self, job_id, e, "Media fetch timed out (downloads demoraram demais).", [10, 30, 60])
     except Exception as e:
         _retry_or_fail(self, job_id, e, f"Media fetch failed: {e}", [10, 30, 60])
 
 
-@celery_app.task(name="compose_video", bind=True)
+@celery_app.task(name="compose_video", bind=True, soft_time_limit=480, time_limit=540)
 def task_compose_video(self, data: dict, job_id: str, template_id: str = "stock_narration") -> str:
     try:
         if data.get("cancelled") or _check_cancelled(job_id):
@@ -748,7 +786,7 @@ def task_compose_video(self, data: dict, job_id: str, template_id: str = "stock_
         raise
 
 
-@celery_app.task(name="finalize", bind=True)
+@celery_app.task(name="finalize", bind=True, soft_time_limit=120, time_limit=150)
 def task_finalize(self, video_path: str, job_id: str) -> str:
     try:
         if not video_path or _check_cancelled(job_id):
