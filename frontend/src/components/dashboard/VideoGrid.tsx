@@ -12,6 +12,7 @@ interface VideoGridProps {
   jobs: JobSummary[]
   loading: boolean
   onEdit: (jobId: string) => void
+  onCancel?: (jobId: string) => void
 }
 
 type SortOrder = 'newest' | 'oldest'
@@ -29,7 +30,7 @@ function SkeletonCard() {
   )
 }
 
-export default function VideoGrid({ jobs, loading, onEdit }: VideoGridProps) {
+export default function VideoGrid({ jobs, loading, onEdit, onCancel }: VideoGridProps) {
   const reduceMotion = useReducedMotionState()
   const [sort, setSort] = useState<SortOrder>('newest')
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all')
@@ -107,7 +108,7 @@ export default function VideoGrid({ jobs, loading, onEdit }: VideoGridProps) {
       >
         {filteredJobs.map((job) => (
           <motion.div key={job.job_id} variants={fadeUp}>
-            <VideoCard job={job} onEdit={onEdit} />
+            <VideoCard job={job} onEdit={onEdit} onCancel={onCancel} />
           </motion.div>
         ))}
       </motion.div>

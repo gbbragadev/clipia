@@ -26,7 +26,6 @@ from app.models import (
     GenerateRequest,
     JobStatus,
     RegenerateTTSRequest,
-    VoiceCloneRequest,
     VoiceDesignRequest,
     WaitlistRequest,
 )
@@ -481,11 +480,22 @@ async def list_voices(
 @limiter.limit("3/hour")
 async def clone_voice(
     request: Request,
-    req: VoiceCloneRequest,
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Clone a voice from uploaded audio samples."""
+    """Clone a voice from uploaded audio samples.
+
+    Recebe ``multipart/form-data`` com:
+      - ``files``: 1+ arquivos de audio (WAV/MP3/WebM/OGG, max 10MB cada)
+      - ``name``: nome da voz (1-100 chars)
+      - ``description``: descricao opcional (max 500 chars)
+
+    Nota: ``name``/``description`` vem do proprio form multipart (NAO de um body
+    JSON do Pydantic) — misturar ``VoiceCloneRequest`` (body JSON) com
+    ``request.form()`` (multipart) e impossivel em HTTP real (422). Os testes
+    chamam ``.__wrapped__`` passando os argumentos explicitamente, por isso o
+    bug so aparecia em producao.
+    """
     if not settings.ELEVENLABS_API_KEY:
         raise HTTPException(status_code=503, detail="Voice cloning not available")
 
@@ -494,11 +504,20 @@ async def clone_voice(
     if len(result.scalars().all()) >= 5:
         raise HTTPException(status_code=400, detail="Máximo de 5 vozes clonadas por usuário")
 
-    # Get uploaded files from multipart
+    # Get uploaded files + metadata from multipart
     form = await request.form()
     files = form.getlist("files")
     if not files:
         raise HTTPException(status_code=400, detail="Envie pelo menos 1 arquivo de áudio")
+
+    name = (form.get("name") or "").strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Informe um nome para a voz")
+    if len(name) > 100:
+        raise HTTPException(status_code=400, detail="Nome muito longo (max 100 caracteres)")
+    description = (form.get("description") or "").strip()
+    if len(description) > 500:
+        raise HTTPException(status_code=400, detail="Descrição muito longa (max 500 caracteres)")
 
     audio_bytes = []
     for f in files:
@@ -515,7 +534,7 @@ async def clone_voice(
     await _debit_credits(db, user.id, cost)
     provider = ElevenLabsProvider()
     try:
-        voice_id = await provider.clone_voice(req.name, audio_bytes, req.description)
+        voice_id = await provider.clone_voice(name, audio_bytes, description)
     except Exception as e:  # noqa: BLE001
         await _refund_credits(db, user.id, cost)
         logger.warning("Voice clone falhou: %s", e)
@@ -523,7 +542,7 @@ async def clone_voice(
 
     clone = VoiceClone(
         user_id=user.id,
-        name=req.name,
+        name=name,
         provider="elevenlabs",
         external_voice_id=voice_id,
         samples_count=len(audio_bytes),
@@ -535,7 +554,7 @@ async def clone_voice(
     return {
         "clone_id": str(clone.id),
         "voice_id": voice_id,
-        "name": req.name,
+        "name": name,
     }
 
 

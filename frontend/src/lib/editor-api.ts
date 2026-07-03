@@ -2,7 +2,7 @@ import type { CompositionData, TransitionType } from '@/remotion/types'
 import { DEFAULT_SUBTITLE_STYLE, DEFAULT_VOICE_CONFIG } from '@/remotion/types'
 import { getToken } from '@/lib/auth'
 import { fetchAuthenticatedBlobUrl } from '@/lib/download'
-import { fetchJson } from '@/lib/http'
+import { fetchJson, readApiError } from '@/lib/http'
 
 const API_BASE = '/api/v1'
 
@@ -126,6 +126,43 @@ export async function fetchVoices(): Promise<VoiceInfo[]> {
   return res.json()
 }
 
+/**
+ * Clona uma voz enviando 1+ amostras de audio.
+ * Backend espera multipart/form-data com campos `files`, `name` e `description`.
+ * Custa CREDIT_COST_VOICE_CLONE creditos (5). Max 5 clones por usuario.
+ */
+export async function cloneVoice(
+  name: string,
+  files: File[],
+  description = '',
+): Promise<{ clone_id: string; voice_id: string; name: string }> {
+  const form = new FormData()
+  for (const file of files) {
+    form.append('files', file)
+  }
+  form.append('name', name)
+  if (description) form.append('description', description)
+
+  const token = getToken()
+  const res = await fetch(`${API_BASE}/voices/clone`, {
+    method: 'POST',
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+    body: form,
+  })
+  if (!res.ok) {
+    throw new Error(await readApiError(res, 'Não foi possível clonar a voz'))
+  }
+  return res.json()
+}
+
+/** Deleta uma voz clonada pelo seu clone_id. */
+export async function deleteVoice(cloneId: string): Promise<{ status: string }> {
+  return fetchJSON<{ status: string }>(`${API_BASE}/voices/${cloneId}`, {
+    method: 'DELETE',
+    headers: getAuthHeaders(),
+  })
+}
+
 export async function uploadJobAudio(
   jobId: string,
   file: File,
@@ -219,7 +256,31 @@ export interface JobStatusResponse {
 }
 
 export async function fetchJobStatus(jobId: string): Promise<JobStatusResponse> {
-  return fetchJSON(`${API_BASE}/jobs/${jobId}`, {
+  return fetchJSON<JobStatusResponse>(`${API_BASE}/jobs/${jobId}`, {
+    headers: getAuthHeaders(),
+  })
+}
+
+/**
+ * Cancela um job em andamento (processing/queued).
+ * O backend marca como "cancelling" e o worker reembolsa o credito da geracao.
+ * Retorna { status: "cancelling" }.
+ */
+export async function cancelJob(jobId: string): Promise<{ status: string }> {
+  return fetchJSON<{ status: string }>(`${API_BASE}/jobs/${jobId}/cancel`, {
+    method: 'POST',
+    headers: getAuthHeaders(),
+  })
+}
+
+/**
+ * Reseta o editor_state do job aos defaults.
+ * Custa 1 credito, zera pending_credits e limpa editor_state.
+ * Retorna { status: "reset", credits_remaining: number }.
+ */
+export async function resetJob(jobId: string): Promise<{ status: string; credits_remaining: number }> {
+  return fetchJSON<{ status: string; credits_remaining: number }>(`${API_BASE}/jobs/${jobId}/reset`, {
+    method: 'POST',
     headers: getAuthHeaders(),
   })
 }

@@ -51,12 +51,21 @@ class DummyUpload:
 
 
 class DummyForm:
-    def __init__(self, *, file: DummyUpload | None = None, files: list[DummyUpload] | None = None):
+    def __init__(
+        self,
+        *,
+        file: DummyUpload | None = None,
+        files: list[DummyUpload] | None = None,
+        fields: dict[str, str] | None = None,
+    ):
         self.file = file
         self.files = files or []
+        self.fields = fields or {}
 
     def get(self, key: str):
-        return self.file if key == "file" else None
+        if key == "file":
+            return self.file
+        return self.fields.get(key)
 
     def getlist(self, key: str):
         return self.files if key == "files" else []

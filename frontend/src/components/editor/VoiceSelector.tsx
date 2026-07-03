@@ -7,6 +7,7 @@ import { readApiError } from '@/lib/http'
 import { fetchVoices, type VoiceInfo } from '@/lib/editor-api'
 import { useToast } from '@/components/ui/feedback'
 import { useAuth } from '@/contexts/AuthContext'
+import { VoiceClonePanel } from './VoiceClonePanel'
 
 type Tab = 'free' | 'premium' | 'custom'
 
@@ -59,6 +60,7 @@ export function VoiceSelector() {
 
   const edgeVoices = voices.filter(v => v.provider === 'edge')
   const elevenVoices = voices.filter(v => v.provider === 'elevenlabs')
+  const cloneVoices = voices.filter(v => v.is_clone)
 
   const handleVoiceSelect = (voice: VoiceInfo) => {
     updateVoiceConfig({
@@ -235,16 +237,13 @@ export function VoiceSelector() {
             </div>
           )
         ) : (
-          /* Custom tab — upload/record placeholder */
-          <div style={{ textAlign: 'center', padding: '16px 8px' }}>
-            <div style={{ fontSize: 24, marginBottom: 8 }}>🎙️</div>
-            <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.5)', marginBottom: 4 }}>
-              Grave ou envie seu áudio
-            </div>
-            <div style={{ fontSize: 10, color: 'rgba(255,255,255,0.25)' }}>
-              Use a aba &quot;Minha Voz&quot; no gerador para enviar seu áudio personalizado
-            </div>
-          </div>
+          /* Custom tab — Voice Clone (gravar/upload + gerenciar clones) */
+          <VoiceClonePanel
+            clones={cloneVoices}
+            onReload={loadVoices}
+            onSelect={handleVoiceSelect}
+            selectedVoiceId={voiceConfig.voiceId}
+          />
         )}
       </div>
 

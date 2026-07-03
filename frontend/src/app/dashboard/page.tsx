@@ -4,18 +4,19 @@ import { Mail } from 'lucide-react'
 import { strings } from '@/lib/strings';
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { fetchJobs, type JobSummary } from '@/lib/editor-api'
+import { fetchJobs, cancelJob, type JobSummary } from '@/lib/editor-api'
 import { useAuth } from '@/contexts/AuthContext'
 import GenerateForm from '@/components/dashboard/GenerateForm'
 import TrendingPanel from '@/components/dashboard/TrendingPanel'
 import VideoGrid from '@/components/dashboard/VideoGrid'
 import ReferralCard from '@/components/dashboard/ReferralCard'
-import { InlineError } from '@/components/ui/feedback'
+import { InlineError, useToast } from '@/components/ui/feedback'
 import { PretextHeading } from '@/components/ui/PretextHeading'
 
 export default function DashboardPage() {
   const router = useRouter()
-  const { user } = useAuth()
+  const { user, refreshUser } = useAuth()
+  const { success: toastSuccess, error: toastError } = useToast()
   const [jobs, setJobs] = useState<JobSummary[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -35,6 +36,20 @@ export default function DashboardPage() {
   }, [])
 
   useEffect(() => { loadJobs() }, [loadJobs])
+
+  const handleCancel = useCallback(async (jobId: string) => {
+    try {
+      await cancelJob(jobId)
+      toastSuccess('Vídeo cancelado', 'O crédito da geração será devolvido.')
+      // Atualiza estado local imediatamente e recarrega a lista.
+      setJobs((prev) => prev.filter((j) => j.job_id !== jobId))
+      await Promise.all([loadJobs(), refreshUser()])
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Não foi possível cancelar o vídeo'
+      toastError('Não foi possível cancelar', message)
+      await loadJobs()
+    }
+  }, [loadJobs, refreshUser, toastSuccess, toastError])
 
   const greeting = user?.name ? `Olá, ${user.name.split(' ')[0]}.` : 'Olá.'
   const hour = new Date().getHours()
@@ -111,6 +126,7 @@ export default function DashboardPage() {
             jobs={jobs}
             loading={loading}
             onEdit={(id) => router.push(`/editor/${id}`)}
+            onCancel={handleCancel}
           />
         )}
       </section>

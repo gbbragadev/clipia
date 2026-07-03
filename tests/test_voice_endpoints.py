@@ -10,7 +10,7 @@ from fastapi.security import HTTPAuthorizationCredentials
 from app.api import routes as api_routes
 from app.auth.dependencies import get_current_user
 from app.db.models import Job, User
-from app.models import GenerateRequest, RegenerateTTSRequest, VoiceCloneRequest, VoiceDesignRequest
+from app.models import GenerateRequest, RegenerateTTSRequest, VoiceDesignRequest
 from tests.voice_test_support import (
     DummyForm,
     DummyRequest,
@@ -73,8 +73,12 @@ def test_clone_voice_success(tmp_path, monkeypatch):
     async def _case():
         async with env.session_factory() as db:
             return await api_routes.clone_voice.__wrapped__(
-                request=DummyRequest(form=DummyForm(files=[DummyUpload("sample.wav", b"wav")])),
-                req=VoiceCloneRequest(name="Minha voz", description="Amostra"),
+                request=DummyRequest(
+                    form=DummyForm(
+                        files=[DummyUpload("sample.wav", b"wav")],
+                        fields={"name": "Minha voz", "description": "Amostra"},
+                    )
+                ),
                 user=env.verified_user,
                 db=db,
             )
@@ -90,8 +94,7 @@ def test_clone_voice_no_files(tmp_path, monkeypatch):
     async def _case():
         async with env.session_factory() as db:
             return await api_routes.clone_voice.__wrapped__(
-                request=DummyRequest(),
-                req=VoiceCloneRequest(name="Minha voz"),
+                request=DummyRequest(form=DummyForm(fields={"name": "Minha voz"})),
                 user=env.verified_user,
                 db=db,
             )
@@ -110,8 +113,9 @@ def test_clone_voice_max_limit(tmp_path, monkeypatch):
     async def _case():
         async with env.session_factory() as db:
             return await api_routes.clone_voice.__wrapped__(
-                request=DummyRequest(form=DummyForm(files=[DummyUpload("sample.wav", b"wav")])),
-                req=VoiceCloneRequest(name="Excesso"),
+                request=DummyRequest(
+                    form=DummyForm(files=[DummyUpload("sample.wav", b"wav")], fields={"name": "Excesso"})
+                ),
                 user=env.verified_user,
                 db=db,
             )
@@ -144,8 +148,9 @@ def test_clone_voice_no_elevenlabs_key(tmp_path, monkeypatch):
     async def _case():
         async with env.session_factory() as db:
             return await api_routes.clone_voice.__wrapped__(
-                request=DummyRequest(form=DummyForm(files=[DummyUpload("sample.wav", b"wav")])),
-                req=VoiceCloneRequest(name="Minha voz"),
+                request=DummyRequest(
+                    form=DummyForm(files=[DummyUpload("sample.wav", b"wav")], fields={"name": "Minha voz"})
+                ),
                 user=env.verified_user,
                 db=db,
             )
@@ -507,8 +512,12 @@ def test_clone_voice_debits_credits(tmp_path, monkeypatch):
         async with env.session_factory() as db:
             before = (await db.get(User, env.verified_user.id)).credits
             await api_routes.clone_voice.__wrapped__(
-                request=DummyRequest(form=DummyForm(files=[DummyUpload("sample.wav", b"wav")])),
-                req=VoiceCloneRequest(name="Minha voz", description="Amostra"),
+                request=DummyRequest(
+                    form=DummyForm(
+                        files=[DummyUpload("sample.wav", b"wav")],
+                        fields={"name": "Minha voz", "description": "Amostra"},
+                    )
+                ),
                 user=env.verified_user,
                 db=db,
             )
@@ -531,8 +540,12 @@ def test_clone_voice_insufficient_credits_blocks_api(tmp_path, monkeypatch):
             user.credits = 1
             await db.commit()
             return await api_routes.clone_voice.__wrapped__(
-                request=DummyRequest(form=DummyForm(files=[DummyUpload("sample.wav", b"wav")])),
-                req=VoiceCloneRequest(name="Minha voz", description="Amostra"),
+                request=DummyRequest(
+                    form=DummyForm(
+                        files=[DummyUpload("sample.wav", b"wav")],
+                        fields={"name": "Minha voz", "description": "Amostra"},
+                    )
+                ),
                 user=env.verified_user,
                 db=db,
             )
@@ -556,8 +569,12 @@ def test_clone_voice_refunds_on_api_failure(tmp_path, monkeypatch):
             before = (await db.get(User, env.verified_user.id)).credits
             try:
                 await api_routes.clone_voice.__wrapped__(
-                    request=DummyRequest(form=DummyForm(files=[DummyUpload("sample.wav", b"wav")])),
-                    req=VoiceCloneRequest(name="Minha voz", description="Amostra"),
+                    request=DummyRequest(
+                        form=DummyForm(
+                            files=[DummyUpload("sample.wav", b"wav")],
+                            fields={"name": "Minha voz", "description": "Amostra"},
+                        )
+                    ),
                     user=env.verified_user,
                     db=db,
                 )

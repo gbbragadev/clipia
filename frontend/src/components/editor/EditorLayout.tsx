@@ -16,6 +16,7 @@ import { OverlayPicker } from './OverlayPicker'
 import { MusicSelector } from './MusicSelector'
 import { AIAssistant } from './AIAssistant'
 import { ExportPanel } from './ExportPanel'
+import { ResetEditorButton } from './ResetEditorButton'
 import { useKeyboardShortcuts } from '@/hooks/useKeyboardShortcuts'
 import { useIsMobile } from '@/hooks/useIsMobile'
 import { InlineError } from '@/components/ui/feedback'
@@ -38,7 +39,7 @@ const PANELS = [
 ]
 
 export function EditorLayout() {
-  const { loading, error, saving, dirty, activePanel, setActivePanel, panelCollapsed, togglePanel, composition } = useEditor()
+  const { loading, error, saving, dirty, activePanel, setActivePanel, panelCollapsed, togglePanel, composition, jobId } = useEditor()
   const [showExport, setShowExport] = useState(false)
   const isMobile = useIsMobile()
   const [timelineOpen, setTimelineOpen] = useState(false)
@@ -82,6 +83,7 @@ export function EditorLayout() {
           {saving && <span className="editor-header__status editor-header__status--saving">{strings.editor.saving}</span>}
           {dirty && !saving && <span className="editor-header__status editor-header__status--dirty">Não salvo</span>}
           {!dirty && !saving && <span className="editor-header__status editor-header__status--saved">{strings.editor.saved}</span>}
+          <ResetEditorButton jobId={jobId} />
           <button className="editor-header__export inline-flex items-center gap-1.5" onClick={() => setShowExport(true)}><Download className="w-3.5 h-3.5" /> Exportar</button>
         </div>
       </header>
