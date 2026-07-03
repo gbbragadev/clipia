@@ -39,6 +39,17 @@ const nextConfig: NextConfig = {
         source: "/storage/:path*",
         destination: `${apiUrl}/storage/:path*`,
       },
+      // Health do backend exposto externamente para monitoracao (UptimeRobot, etc.).
+      // O backend serve /health e /health/deep na raiz; o Next precisa repassar para
+      // um monitor externo conseguir bater sem conhecer a porta interna 8005.
+      {
+        source: "/health",
+        destination: `${apiUrl}/health`,
+      },
+      {
+        source: "/health/:path*",
+        destination: `${apiUrl}/health/:path*`,
+      },
     ];
   },
 };
