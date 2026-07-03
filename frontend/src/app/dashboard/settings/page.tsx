@@ -1,6 +1,7 @@
 "use client";
 
 import { strings } from '@/lib/strings';
+import { meetsPasswordPolicy, PasswordStrength } from '@/lib/password';
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { changePassword, clearToken, deleteAccount, exportAccountData, updateProfile } from "@/lib/auth";
@@ -35,6 +36,11 @@ export default function SettingsPage() {
 
   async function handlePasswordSubmit(e: React.FormEvent) {
     e.preventDefault();
+    const pwdError = meetsPasswordPolicy(newPassword);
+    if (pwdError) {
+      error("Senha inválida", pwdError);
+      return;
+    }
     setPasswordSaving(true);
     try {
       await changePassword(currentPassword, newPassword);
@@ -129,15 +135,19 @@ export default function SettingsPage() {
             required
             className="w-full px-4 py-2.5 rounded-lg bg-white/5 border border-white/10 text-white focus:outline-none focus:border-coral/50"
           />
-          <input
-            type="password"
-            value={newPassword}
-            onChange={(e) => setNewPassword(e.target.value)}
-            placeholder="Nova senha"
-            minLength={6}
-            required
-            className="w-full px-4 py-2.5 rounded-lg bg-white/5 border border-white/10 text-white focus:outline-none focus:border-coral/50"
-          />
+          <div>
+            <input
+              type="password"
+              value={newPassword}
+              onChange={(e) => setNewPassword(e.target.value)}
+              placeholder="Nova senha (mínimo 8 caracteres, com maiúscula e número)"
+              minLength={8}
+              pattern="(?=.*[A-Z])(?=.*\d).{8,}"
+              required
+              className="w-full px-4 py-2.5 rounded-lg bg-white/5 border border-white/10 text-white focus:outline-none focus:border-coral/50"
+            />
+            <PasswordStrength password={newPassword} />
+          </div>
           <button type="submit" disabled={passwordSaving} className="btn-primary px-4 py-2 rounded-lg">
             {passwordSaving ? "Atualizando..." : "Atualizar senha"}
           </button>

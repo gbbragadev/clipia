@@ -52,15 +52,23 @@ interface TemplateSelectorProps {
   onSelect: (id: string) => void
   disabled?: boolean
   templates?: VideoTemplateInfo[]
+  /**
+   * Provedor de voz selecionado no GenerateForm. O custo exibido no card reflete
+   * o que sera realmente debitado (credit_cost) para aquele provedor — evita
+   * discrepancia entre "preco mostrado" e "preco debitado" (BUG-002).
+   */
+  voiceProvider?: 'edge' | 'elevenlabs'
 }
 
-export default function TemplateSelector({ selected, onSelect, disabled, templates }: TemplateSelectorProps) {
+export default function TemplateSelector({ selected, onSelect, disabled, templates, voiceProvider = 'edge' }: TemplateSelectorProps) {
   const items = templates?.length ? templates : FALLBACK_TEMPLATES
 
   return (
     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
       {items.map((t) => {
-        const cost = t.credit_costs?.elevenlabs ?? t.credit_costs?.edge ?? 1
+        // Custo que sera realmente debitado para o provedor de voz selecionado,
+        // caindo para o custo base (edge) quando ausente.
+        const cost = t.credit_costs?.[voiceProvider] ?? t.credit_costs?.edge ?? 1
 
         return (
           <button

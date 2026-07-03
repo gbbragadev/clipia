@@ -48,6 +48,7 @@ export interface RegisterPayload {
   utm_medium?: string;
   utm_campaign?: string;
   turnstile_token?: string;
+  consent?: boolean;
 }
 
 export async function register(email: string, name: string, password: string, extra?: Omit<RegisterPayload, "email" | "name" | "password">): Promise<AuthResponse> {

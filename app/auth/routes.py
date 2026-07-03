@@ -85,6 +85,11 @@ async def register(request: Request, body: RegisterRequest, db: AsyncSession = D
                 referrer_id = referrer.id
 
         code = generate_otp()
+        # LGPD: registra comprovante de consentimento expresso (timestamp + IP) para auditoria.
+        # A obrigatoriedade do aceite e enforcecida no frontend (checkbox); o backend registra
+        # o comprovante quando o consentimento e declarado.
+        consented_at = datetime.now(timezone.utc) if body.consent else None
+        consent_ip = client_ip(request) if body.consent else None
         user = User(
             email=body.email,
             name=body.name,
@@ -98,6 +103,8 @@ async def register(request: Request, body: RegisterRequest, db: AsyncSession = D
             utm_campaign=body.utm_campaign,
             referral_code=uuid.uuid4().hex[:8],
             referred_by=referrer_id,
+            consented_at=consented_at,
+            consent_ip=consent_ip,
         )
         db.add(user)
         await db.commit()

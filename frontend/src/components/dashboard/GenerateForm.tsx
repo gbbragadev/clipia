@@ -194,6 +194,7 @@ export default function GenerateForm({ onJobComplete, prefillTopic, prefillTrend
           onSelect={handleTemplateSelect}
           disabled={generating}
           templates={templates}
+          voiceProvider={voiceProvider}
         />
       </div>
 

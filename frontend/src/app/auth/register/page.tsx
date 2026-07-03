@@ -2,6 +2,7 @@
 
 import { Eye, EyeOff } from 'lucide-react';
 import { strings } from '@/lib/strings';
+import { meetsPasswordPolicy, PasswordStrength } from '@/lib/password';
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
@@ -11,44 +12,6 @@ import { FilmstripBackground } from "@/components/ui/FilmstripBackground";
 import { trackEvent, trackGA } from "@/components/TrackingScripts";
 import { TurnstileWidget } from "@/components/auth/TurnstileWidget";
 
-const PWD_CRITERIA = [
-  (p: string) => p.length >= 8,
-  (p: string) => /[A-Z]/.test(p),
-  (p: string) => /\d/.test(p),
-  (p: string) => p.length >= 12 || /[^A-Za-z0-9]/.test(p),
-];
-const STRENGTH = [
-  { label: "", color: "" },
-  { label: "Fraca", color: "#ef4444" },
-  { label: "Média", color: "#f59e0b" },
-  { label: "Boa", color: "#3b82f6" },
-  { label: "Forte", color: "#22c55e" },
-];
-
-function PasswordStrength({ password }: { password: string }) {
-  if (!password) {
-    return <p className="text-xs text-slate-400 mt-1.5">Minimo 8 caracteres, 1 maiuscula e 1 numero.</p>;
-  }
-  const score = PWD_CRITERIA.filter((test) => test(password)).length;
-  const { label, color } = STRENGTH[score];
-  return (
-    <div className="mt-2">
-      <div className="flex gap-1" aria-hidden="true">
-        {[0, 1, 2, 3].map((i) => (
-          <span
-            key={i}
-            className="h-1 flex-1 rounded-full transition-colors duration-300"
-            style={{ background: i < score ? color : "rgba(255,255,255,0.1)" }}
-          />
-        ))}
-      </div>
-      <p className="text-xs mt-1.5 font-medium" style={{ color: color || undefined }}>
-        Força da senha: {label}
-      </p>
-    </div>
-  );
-}
-
 export default function RegisterPage() {
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
@@ -57,27 +20,25 @@ export default function RegisterPage() {
   const [captchaToken, setCaptchaToken] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [consentAccepted, setConsentAccepted] = useState(false);
   const { register } = useAuth();
   const router = useRouter();
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError("");
-    if (password.length < 8) {
-      setError("Senha deve ter no minimo 8 caracteres");
+    const pwdError = meetsPasswordPolicy(password);
+    if (pwdError) {
+      setError(pwdError);
       return;
     }
-    if (!/[A-Z]/.test(password)) {
-      setError("Senha deve conter pelo menos 1 letra maiuscula");
-      return;
-    }
-    if (!/\d/.test(password)) {
-      setError("Senha deve conter pelo menos 1 numero");
+    if (!consentAccepted) {
+      setError("Você precisa aceitar os Termos de Uso e a Política de Privacidade para continuar.");
       return;
     }
     setLoading(true);
     try {
-      await register(email, name, password, captchaToken);
+      await register(email, name, password, captchaToken, consentAccepted);
       trackEvent("CompleteRegistration");
       trackGA("sign_up", { method: "email" });
       router.push(`/auth/verify?email=${encodeURIComponent(email)}`);
@@ -171,9 +132,30 @@ export default function RegisterPage() {
 
           <TurnstileWidget onToken={setCaptchaToken} />
 
+          <label className="flex items-start gap-3 cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={consentAccepted}
+              onChange={(e) => setConsentAccepted(e.target.checked)}
+              required
+              className="mt-0.5 w-5 h-5 rounded border border-white/20 bg-white/5 accent-coral shrink-0 cursor-pointer"
+            />
+            <span className="text-xs sm:text-sm text-slate-300 leading-relaxed">
+              Li e aceito os{" "}
+              <Link href="/termos" className="text-coral font-semibold hover:underline" target="_blank">
+                Termos de Uso
+              </Link>{" "}
+              e a{" "}
+              <Link href="/privacidade" className="text-coral font-semibold hover:underline" target="_blank">
+                Política de Privacidade
+              </Link>
+              .
+            </span>
+          </label>
+
           <button
             type="submit"
-            disabled={loading}
+            disabled={loading || !consentAccepted}
             className="w-full py-3.5 rounded-xl bg-gradient-to-r from-coral to-azure text-white font-bold disabled:opacity-50 hover:opacity-90 transition shadow-lg shadow-coral/25 mt-2"
           >
             {loading ? strings.auth.register.loading : strings.auth.register.submit}

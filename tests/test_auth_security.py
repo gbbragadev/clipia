@@ -33,6 +33,21 @@ async def test_register_normalizes_email_and_hashes_password(client, db_session)
 
 
 @pytest.mark.asyncio
+async def test_register_records_lgpd_consent_audit_trail(client, db_session):
+    """LGPD: quando o cadastro declara consent=True, o backend registra
+    comprovante de aceite (consented_at + IP) para auditoria."""
+    response = await client.post(
+        "/api/v1/auth/register",
+        json={"email": "consent@example.com", "name": "Consent", "password": "Secret123", "consent": True},
+    )
+    assert response.status_code == 201
+    user = await db_session.scalar(select(User).where(User.email == "consent@example.com"))
+    assert user is not None
+    assert user.consented_at is not None, "Deve registrar timestamp do consentimento."
+    assert user.consent_ip, "Deve registrar IP do consentimento."
+
+
+@pytest.mark.asyncio
 async def test_login_wrong_password_and_missing_user_share_401(client):
     register = {"email": "login@example.com", "name": "Login", "password": "Secret123"}
     await client.post("/api/v1/auth/register", json=register)
@@ -48,7 +63,9 @@ async def test_login_wrong_password_and_missing_user_share_401(client):
 
     assert wrong_password.status_code == 401, "Wrong-password login must return 401."
     assert missing_user.status_code == 401, "Missing-user login must also return 401."
-    assert wrong_password.json()["detail"] == missing_user.json()["detail"], "Auth failures should not leak which credential was wrong."
+    assert (
+        wrong_password.json()["detail"] == missing_user.json()["detail"]
+    ), "Auth failures should not leak which credential was wrong."
 
 
 @pytest.mark.asyncio
@@ -115,5 +132,9 @@ async def test_cors_preflight_allows_known_origin_and_blocks_unknown(client):
         },
     )
 
-    assert allowed.headers.get("access-control-allow-origin") == "http://localhost:3003", "Configured frontend origin should be allowed by CORS."
-    assert blocked.headers.get("access-control-allow-origin") is None, "Unknown origins should not receive an allow-origin header."
+    assert (
+        allowed.headers.get("access-control-allow-origin") == "http://localhost:3003"
+    ), "Configured frontend origin should be allowed by CORS."
+    assert (
+        blocked.headers.get("access-control-allow-origin") is None
+    ), "Unknown origins should not receive an allow-origin header."

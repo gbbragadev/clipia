@@ -7,6 +7,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useRef, useState } from "react";
 import Logo from "@/components/brand/Logo";
 import { resetPassword, verifyResetCode } from "@/lib/auth";
+import { PasswordStrength, meetsPasswordPolicy } from "@/lib/password";
 
 function ResetPasswordForm() {
   const [code, setCode] = useState(["", "", "", "", "", ""]);
@@ -58,8 +59,9 @@ function ResetPasswordForm() {
       setError(strings.auth.verify.errorIncomplete);
       return;
     }
-    if (password.length < 6) {
-      setError("Senha deve ter pelo menos 6 caracteres");
+    const pwdError = meetsPasswordPolicy(password);
+    if (pwdError) {
+      setError(pwdError);
       return;
     }
 
@@ -127,10 +129,11 @@ function ResetPasswordForm() {
                 type={showPwd ? "text" : "password"}
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                minLength={6}
+                minLength={8}
+                pattern="(?=.*[A-Z])(?=.*\d).{8,}"
                 required
                 className="w-full px-4 py-2.5 pr-12 rounded-lg bg-white/5 border border-white/10 text-white placeholder-slate-500 focus:outline-none focus:border-coral/50"
-                placeholder="Mínimo 6 caracteres"
+                placeholder="Mínimo 8 caracteres, com maiúscula e número"
               />
               <button
                 type="button"
@@ -141,6 +144,7 @@ function ResetPasswordForm() {
                 {showPwd ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
               </button>
             </div>
+            <PasswordStrength password={password} />
           </div>
 
           <button

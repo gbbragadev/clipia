@@ -34,7 +34,7 @@ async def test_change_password_with_wrong_current_password_fails(client, verifie
     response = await client.post(
         "/api/v1/auth/change-password",
         headers=auth_headers(verified_user),
-        json={"current_password": "wrong", "new_password": "newsecret"},
+        json={"current_password": "wrong", "new_password": "NewSecret123"},
     )
 
     assert response.status_code == 400
@@ -45,11 +45,11 @@ async def test_change_password_works_and_login_uses_new_password(client, verifie
     response = await client.post(
         "/api/v1/auth/change-password",
         headers=auth_headers(verified_user),
-        json={"current_password": "supersecret", "new_password": "newsecret"},
+        json={"current_password": "supersecret", "new_password": "NewSecret123"},
     )
     login_new = await client.post(
         "/api/v1/auth/login",
-        json={"email": verified_user.email, "password": "newsecret"},
+        json={"email": verified_user.email, "password": "NewSecret123"},
     )
     login_old = await client.post(
         "/api/v1/auth/login",
@@ -59,6 +59,34 @@ async def test_change_password_works_and_login_uses_new_password(client, verifie
     assert response.status_code == 200
     assert login_new.status_code == 200
     assert login_old.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_change_password_enforces_strength_policy(client, verified_user, auth_headers):
+    """A troca de senha deve aplicar a mesma politica de forca do cadastro
+    (8+ chars, 1 maiuscula, 1 digito) para que a politica seja uniforme."""
+    # Sem maiuscula/digito -> rejeitado (422 de validacao do Pydantic)
+    weak = await client.post(
+        "/api/v1/auth/change-password",
+        headers=auth_headers(verified_user),
+        json={"current_password": "supersecret", "new_password": "newsecret"},
+    )
+    # Menos de 8 chars -> rejeitado
+    too_short = await client.post(
+        "/api/v1/auth/change-password",
+        headers=auth_headers(verified_user),
+        json={"current_password": "supersecret", "new_password": "Ab1"},
+    )
+    # Conforme a politica -> aceito
+    strong = await client.post(
+        "/api/v1/auth/change-password",
+        headers=auth_headers(verified_user),
+        json={"current_password": "supersecret", "new_password": "NewSecret123"},
+    )
+
+    assert weak.status_code == 422
+    assert too_short.status_code == 422
+    assert strong.status_code == 200
 
 
 @pytest.mark.asyncio
@@ -91,7 +119,9 @@ async def test_delete_account_anonymizes_and_invalidates_token(client, db_sessio
 
 
 @pytest.mark.asyncio
-async def test_export_data_returns_user_jobs_and_purchases(client, verified_user, auth_headers, job_factory, purchase_factory):
+async def test_export_data_returns_user_jobs_and_purchases(
+    client, verified_user, auth_headers, job_factory, purchase_factory
+):
     await job_factory(user_id=verified_user.id, status="completed")
     await purchase_factory(user_id=verified_user.id, package_name="starter", status="approved")
 

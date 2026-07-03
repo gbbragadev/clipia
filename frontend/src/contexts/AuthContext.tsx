@@ -19,7 +19,7 @@ interface AuthContextType {
   user: User | null;
   loading: boolean;
   login: (email: string, password: string) => Promise<void>;
-  register: (email: string, name: string, password: string, turnstileToken?: string) => Promise<void>;
+  register: (email: string, name: string, password: string, turnstileToken?: string, consent?: boolean) => Promise<void>;
   logout: () => void;
   refreshUser: () => Promise<void>;
 }
@@ -81,9 +81,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(me);
   }, []);
 
-  const register = useCallback(async (email: string, name: string, password: string, turnstileToken?: string) => {
+  const register = useCallback(async (email: string, name: string, password: string, turnstileToken?: string, consent?: boolean) => {
     const utm = getStoredUTM();
-    const res = await authRegister(email, name, password, { ...utm, turnstile_token: turnstileToken });
+    const res = await authRegister(email, name, password, { ...utm, turnstile_token: turnstileToken, consent });
     clearStoredUTM();
     setToken(res.access_token);
     const me = await getMe();

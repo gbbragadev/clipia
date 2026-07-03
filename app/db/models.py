@@ -53,6 +53,9 @@ class User(Base):
     )
     referred_by: Mapped[uuid.UUID | None] = mapped_column(GUID(), ForeignKey("users.id"), nullable=True)
     password_reset_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # LGPD: comprovante de consentimento expresso no cadastro (Termos + Política de Privacidade).
+    consented_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    consent_ip: Mapped[str | None] = mapped_column(String(45), nullable=True)
 
     jobs: Mapped[list["Job"]] = relationship(back_populates="user")
     purchases: Mapped[list["CreditPurchase"]] = relationship(back_populates="user")
