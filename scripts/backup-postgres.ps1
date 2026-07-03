@@ -1,11 +1,12 @@
 ﻿# scripts/backup-postgres.ps1
 # Backup diario do Postgres ClipIA (local + offsite opcional para Cloudflare R2).
 #
-# O offsite e ativado quando as env vars R2_* estao definidas (escopo User ou .env).
+# O offsite e ativado quando as env vars R2_* estao definidas (escopo User).
 # Sem elas, cai graciosamente no backup local apenas (retencao $KeepDays dias).
 #
-# R2 (S3-compatible): o upload usa a API S3 nativa do R2 via aws-sigv4 sem
-# dependencias — implementado em puro PowerShell/.NET. Nada a instalar.
+# O upload R2 (S3-compatible, SigV4) e feito por scripts/upload_r2.py (stdlib
+# Python) — mais robusto que reimplementar SigV4 em PowerShell. Usa o venv
+# .venv312 se existir, senao cai no python do PATH.
 #
 # Uso: .\scripts\backup-postgres.ps1 [-KeepDays 14]
 param(
@@ -19,79 +20,29 @@ $container = "clipia-postgres-1"
 $date = Get-Date -Format "yyyy-MM-dd_HHmm"
 $file = Join-Path $backupDir "clipia_$date.sql.gz"
 
-# --- Credenciais R2 (opcionais): User-scope primeiro, depois .env ---
+# --- Credenciais R2 (opcionais): User-scope ---
+# Lemos do User scope e PROPAGAMOS para o Process scope, para que o subprocesso
+# Python (upload_r2.py) tambem enxergue as vars (cada processo novo herda so do
+# pai imediato, e o scheduler/launcher pode nao ter User->Process automatico).
 $script:R2_ACCOUNT_ID    = [System.Environment]::GetEnvironmentVariable("R2_ACCOUNT_ID", "User")
 $script:R2_ACCESS_KEY_ID = [System.Environment]::GetEnvironmentVariable("R2_ACCESS_KEY_ID", "User")
 $script:R2_SECRET_KEY    = [System.Environment]::GetEnvironmentVariable("R2_SECRET_ACCESS_KEY", "User")
 $script:R2_BUCKET        = [System.Environment]::GetEnvironmentVariable("R2_BUCKET", "User")
-$script:R2_ENDPOINT      = $null
-if ($script:R2_ACCOUNT_ID -and $script:R2_ACCOUNT_ID -ne "") {
-    $script:R2_ENDPOINT = "https://$($script:R2_ACCOUNT_ID).r2.cloudflarestorage.com"
+foreach ($kv in @{
+        R2_ACCOUNT_ID    = $script:R2_ACCOUNT_ID
+        R2_ACCESS_KEY_ID = $script:R2_ACCESS_KEY_ID
+        R2_SECRET_ACCESS_KEY = $script:R2_SECRET_KEY
+        R2_BUCKET        = $script:R2_BUCKET
+    }.GetEnumerator()) {
+    if ($kv.Value) {
+        [System.Environment]::SetEnvironmentVariable($kv.Key, $kv.Value, "Process")
+    }
 }
 
 function Test-R2Configured {
     return (-not [string]::IsNullOrWhiteSpace($script:R2_ACCESS_KEY_ID)) -and `
            (-not [string]::IsNullOrWhiteSpace($script:R2_SECRET_KEY)) -and `
-           (-not [string]::IsNullOrWhiteSpace($script:R2_BUCKET)) -and `
-           ($null -ne $script:R2_ENDPOINT)
-}
-
-# --- SigV4 minimal (HMAC-SHA256) para S3/R2 PUT de objeto ---
-# Referencia: docs.aws.amazon.com/AmazonS3/latest/API/sig-v4-header-based-auth.html
-function Get-HmacSha256Hex([byte[]]$keyBytes, [string]$data) {
-    $hmac = New-Object System.Security.Cryptography.HMACSHA256
-    $hmac.Key = $keyBytes
-    $hash = $hmac.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($data))
-    return [BitConverter]::ToString($hash).Replace("-", "").ToLower()
-}
-
-function Get-HmacSha256Bytes([byte[]]$keyBytes, [string]$data) {
-    $hmac = New-Object System.Security.Cryptography.HMACSHA256
-    $hmac.Key = $keyBytes
-    return $hmac.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($data))
-}
-
-function Get-Sha256HexBytes([byte[]]$bytes) {
-    $sha = [System.Security.Cryptography.SHA256]::Create()
-    try {
-        return [BitConverter]::ToString($sha.ComputeHash($bytes)).Replace("-", "").ToLower()
-    } finally { $sha.Dispose() }
-}
-
-function Upload-ToR2([string]$filePath, [string]$objectKey) {
-    $region = "auto"
-    $service = "s3"
-    $now = [DateTime]::UtcNow
-    $amzDate = $now.ToString("yyyyMMddTHHmmssZ")
-    $dateStamp = $now.ToString("yyyyMMdd")
-
-    $host_ = "$($script:R2_ENDPOINT -replace '^https://','')"
-    $endpoint = "$($script:R2_ENDPOINT)/$($script:R2_BUCKET)/$objectKey"
-
-    $bytes = [System.IO.File]::ReadAllBytes($filePath)
-    $payloadHash = Get-Sha256HexBytes $bytes
-
-    # Canonical request
-    $canonicalHeaders = "host:$host_`nx-amz-content-sha256:$payloadHash`nx-amz-date:$amzDate`n"
-    $signedHeaders = "host;x-amz-content-sha256;x-amz-date"
-    $canonical = "PUT`n/$objectKey`n`n$canonicalHeaders`n$signedHeaders`n$payloadHash"
-
-    # String to sign
-    $scope = "$dateStamp/$region/$service/aws4_request"
-    $kDate = Get-HmacSha256Bytes ([System.Text.Encoding]::UTF8.GetBytes("AWS4" + $script:R2_SECRET_KEY)) $dateStamp
-    $kRegion = Get-HmacSha256Bytes $kDate $region
-    $kService = Get-HmacSha256Bytes $kRegion $service
-    $kSigning = Get-HmacSha256Bytes $kService "aws4_request"
-
-    $stringToSign = "AWS4-HMAC-SHA256`n$amzDate`n$scope`n$(Get-Sha256HexBytes ([System.Text.Encoding]::UTF8.GetBytes($canonical)))"
-    $signature = Get-HmacSha256Hex $kSigning $stringToSign
-
-    $auth = "AWS4-HMAC-SHA256 Credential=$($script:R2_ACCESS_KEY_ID)/$scope, SignedHeaders=$signedHeaders, Signature=$signature"
-
-    $resp = Invoke-WebRequest -Method PUT -Uri $endpoint `
-        -Headers @{ "Authorization" = $auth; "x-amz-content-sha256" = $payloadHash; "x-amz-date" = $amzDate } `
-        -Body $bytes -UseBasicParsing -ErrorAction Stop
-    return $resp.StatusCode
+           (-not [string]::IsNullOrWhiteSpace($script:R2_BUCKET))
 }
 
 # --- Inicio ---
@@ -128,12 +79,20 @@ if ($sizeBytes -lt 1MB) {
 }
 Write-Host "[$(Get-Date -Format o)] Backup local: $file ($size $unit)"
 
-# --- Offsite para R2 (se configurado) ---
+# --- Offsite para R2 (se configurado) via upload_r2.py ---
 if (Test-R2Configured) {
     $objectKey = "backups/$(Split-Path -Leaf $file)"
+    # Preferir o venv .venv312 (mesmo do app); fallback python do PATH.
+    $venvPy = Join-Path $root ".venv312\Scripts\python.exe"
+    if (Test-Path $venvPy) { $py = $venvPy } else { $py = "python" }
+    $uploader = Join-Path $PSScriptRoot "upload_r2.py"
     try {
-        $code = Upload-ToR2 $file $objectKey
-        Write-Host "[$(Get-Date -Format o)] Offsite OK: R2 $($script:R2_BUCKET)/$objectKey (HTTP $code)" -ForegroundColor Green
+        & $py $uploader $file $objectKey 2>&1 | ForEach-Object { Write-Host $_ }
+        if ($LASTEXITCODE -eq 0) {
+            Write-Host "[$(Get-Date -Format o)] Offsite OK: R2 $($script:R2_BUCKET)/$objectKey" -ForegroundColor Green
+        } else {
+            throw "upload_r2.py exit $LASTEXITCODE"
+        }
     } catch {
         Write-Host "[$(Get-Date -Format o)] Offsite R2 FALHOU: $($_.Exception.Message)" -ForegroundColor Yellow
         Write-Host "    Backup local preservado em $file" -ForegroundColor Yellow
@@ -143,7 +102,7 @@ if (Test-R2Configured) {
     Write-Host "    Para offsite: defina R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_BUCKET (User scope)." -ForegroundColor DarkGray
 }
 
-# Limpar antigos (local) — foreach statement (PS 5.1 nao confunde $_ em string aqui)
+# Limpar antigos (local)
 $oldBackups = Get-ChildItem -Path $backupDir -Filter "clipia_*.sql.gz" |
     Where-Object { $_.LastWriteTime -lt (Get-Date).AddDays(-$KeepDays) }
 foreach ($b in $oldBackups) {

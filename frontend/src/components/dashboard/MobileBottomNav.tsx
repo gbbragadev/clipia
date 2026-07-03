@@ -55,8 +55,9 @@ export function MobileBottomNav() {
       }}
     >
       <ul className="flex items-stretch justify-around" style={{ height: 'calc(3.5rem + env(safe-area-inset-bottom, 0px))' }}>
-        {items.map(({ href, label, Icon }) => {
-          const active = isActive({ href, label, Icon })
+        {items.map((item) => {
+          const { href, label, Icon } = item
+          const active = isActive(item)
           return (
             <li key={href} className="flex-1">
               <Link
