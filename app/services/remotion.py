@@ -159,14 +159,24 @@ def invoke_remotion_render(
     timeout = timeout or settings.REMOTION_RENDER_TIMEOUT
     job_dir = settings.STORAGE_DIR / "jobs" / job_id
 
-    props = build_composition_props(job_id, audio_filename=audio_filename, default_music_url=default_music_url)
+    # Render server-side roda NA MESMA maquina do backend (worker local, deploy=checkout):
+    # buscar midia por BACKEND_URL publico faz hairpin localhost->Cloudflare->tunnel->localhost
+    # que ja passou de 30s por asset — estoura o delayRender de 28s do Remotion e mata o export.
+    # URLs publicas continuam valendo para o browser (composition endpoint usa BACKEND_URL).
+    local_backend = "http://127.0.0.1:8005"
+    props = build_composition_props(
+        job_id,
+        backend_url=local_backend,
+        audio_filename=audio_filename,
+        default_music_url=default_music_url,
+    )
     # musicUrl e asset do publicDir do front (/music/*.mp3); o render server-side do Remotion nao
     # resolve o publicDir local (404). Reescrevemos para URL absoluta servida pelo backend (igual
     # audio/midia). Fica aqui, e nao no build_composition_props, para o preview/testes manterem o
     # caminho relativo.
     music = props.get("musicUrl")
     if isinstance(music, str) and music.startswith("/"):
-        props["musicUrl"] = f"{_backend_url()}{music}"
+        props["musicUrl"] = f"{local_backend}{music}"
     props_path = job_dir / "remotion_props.json"
     props_path.write_text(json.dumps(props, ensure_ascii=False), encoding="utf-8")
 
