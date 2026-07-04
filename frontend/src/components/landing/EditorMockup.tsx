@@ -7,6 +7,31 @@ import { usePrefersReducedMotion } from "@/components/landing/lib/motion";
 import { HERO_SCRIPT } from "@/components/landing/lib/script";
 
 const THEME = "3 curiosidades sobre o espaço";
+
+// Uma imagem por cena do storyboard; o preview do celular acompanha a cena ativa.
+const SCENE_IMGS = [
+  {
+    thumb: "https://images.pexels.com/photos/32507799/pexels-photo-32507799.png?auto=compress&cs=tinysrgb&fit=crop&h=400&w=300",
+    full: "https://images.pexels.com/photos/32507799/pexels-photo-32507799.png?auto=compress&cs=tinysrgb&fit=crop&h=900&w=600",
+    alt: "Nebulosa da Lagoa em tons de laranja e verde no espaço profundo",
+  },
+  {
+    thumb: "https://images.pexels.com/photos/355956/pexels-photo-355956.jpeg?auto=compress&cs=tinysrgb&fit=crop&h=400&w=300",
+    full: "https://images.pexels.com/photos/355956/pexels-photo-355956.jpeg?auto=compress&cs=tinysrgb&fit=crop&h=900&w=600",
+    alt: "Astronauta em caminhada espacial com a Terra ao fundo",
+  },
+  {
+    thumb: "https://images.pexels.com/photos/30596301/pexels-photo-30596301.png?auto=compress&cs=tinysrgb&fit=crop&h=400&w=300",
+    full: "https://images.pexels.com/photos/30596301/pexels-photo-30596301.png?auto=compress&cs=tinysrgb&fit=crop&h=900&w=600",
+    alt: "Terra nascendo sobre a superfície da Lua",
+  },
+  {
+    thumb: "https://images.pexels.com/photos/17954395/pexels-photo-17954395.jpeg?auto=compress&cs=tinysrgb&fit=crop&h=400&w=300",
+    full: "https://images.pexels.com/photos/17954395/pexels-photo-17954395.jpeg?auto=compress&cs=tinysrgb&fit=crop&h=900&w=600",
+    alt: "Via Láctea vertical em céu estrelado",
+  },
+];
+
 const TYPE_MS = 1700;
 const SCRIPT_MS = 2400;
 const NARR_MS = 1400;
@@ -30,6 +55,14 @@ export function EditorMockup() {
   const accRef = useRef(0);
   const startRef = useRef(0);
   const lastRef = useRef(0);
+
+  // Pre-aquece as imagens de cena para a troca do preview não piscar.
+  useEffect(() => {
+    SCENE_IMGS.forEach((s) => {
+      const im = new Image();
+      im.src = s.full;
+    });
+  }, []);
 
   // Pause the animation when the editor is off-screen.
   useEffect(() => {
@@ -162,7 +195,7 @@ export function EditorMockup() {
                     >
                       <div className="relative h-12 w-9 shrink-0 overflow-hidden rounded-md ring-1 ring-white/10">
                         <img
-                          src="https://images.pexels.com/photos/25752810/pexels-photo-25752810.jpeg?auto=compress&cs=tinysrgb&fit=crop&h=400&w=300"
+                          src={SCENE_IMGS[i % SCENE_IMGS.length].thumb}
                           alt=""
                           className="h-full w-full object-cover"
                         />
@@ -203,8 +236,8 @@ export function EditorMockup() {
             {/* RIGHT: preview + voice */}
             <div className="flex flex-col items-center gap-3">
               <PhonePreview
-                image="https://images.pexels.com/photos/25752810/pexels-photo-25752810.jpeg?auto=compress&cs=tinysrgb&fit=crop&h=900&w=600"
-                alt="Prévia vertical de um vídeo sobre o espaço, com legenda animada."
+                image={SCENE_IMGS[activeScene % SCENE_IMGS.length].full}
+                alt={`Prévia vertical de um vídeo sobre o espaço: ${SCENE_IMGS[activeScene % SCENE_IMGS.length].alt}.`}
                 words={narrationReady ? words : []}
                 activeIndex={narrationReady ? wordIndex : -1}
                 captionStyle="pop"

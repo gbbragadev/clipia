@@ -11,34 +11,35 @@ import { generateScript } from "@/components/landing/lib/script";
 import { NICHES, DURATIONS, VOICES, CAPTION_STYLES, SITE } from "@/components/landing/lib/data";
 import { cn } from "@/components/landing/utils/cn";
 
+// Fotos próprias da demo — nenhuma repete a galeria de exemplos.
 const NICHE_IMG: Record<string, { img: string; alt: string }> = {
   curiosidades: {
-    img: "https://images.pexels.com/photos/25752810/pexels-photo-25752810.jpeg?auto=compress&cs=tinysrgb&fit=crop&h=900&w=600",
-    alt: "Nebulosa colorida representando um vídeo de curiosidades.",
+    img: "https://images.pexels.com/photos/14618894/pexels-photo-14618894.jpeg?auto=compress&cs=tinysrgb&fit=crop&h=900&w=600",
+    alt: "Sol e planetas em céu estrelado representando um vídeo de curiosidades.",
   },
   motivacional: {
-    img: "https://images.pexels.com/photos/33525484/pexels-photo-33525484.jpeg?auto=compress&cs=tinysrgb&fit=crop&h=900&w=600",
-    alt: "Caminhante ao nascer do sol representando um vídeo motivacional.",
+    img: "https://images.pexels.com/photos/1576939/pexels-photo-1576939.jpeg?auto=compress&cs=tinysrgb&fit=crop&h=900&w=600",
+    alt: "Alpinista no topo de um pico rochoso ao amanhecer representando um vídeo motivacional.",
   },
   financas: {
-    img: "https://images.pexels.com/photos/6764225/pexels-photo-6764225.jpeg?auto=compress&cs=tinysrgb&fit=crop&h=900&w=600",
-    alt: "Moedas douradas representando um vídeo de finanças.",
+    img: "https://images.pexels.com/photos/6775160/pexels-photo-6775160.jpeg?auto=compress&cs=tinysrgb&fit=crop&h=900&w=600",
+    alt: "Planta crescendo em um pote de moedas representando um vídeo de finanças.",
   },
   misterio: {
-    img: "https://images.pexels.com/photos/17331666/pexels-photo-17331666.jpeg?auto=compress&cs=tinysrgb&fit=crop&h=900&w=600",
-    alt: "Floresta com névoa representando um vídeo de mistério.",
+    img: "https://images.pexels.com/photos/14393789/pexels-photo-14393789.jpeg?auto=compress&cs=tinysrgb&fit=crop&h=900&w=600",
+    alt: "Corredor gótico escuro iluminado por um vitral representando um vídeo de mistério.",
   },
   religioso: {
-    img: "https://images.pexels.com/photos/35711666/pexels-photo-35711666.jpeg?auto=compress&cs=tinysrgb&fit=crop&h=900&w=600",
-    alt: "Raios de sol entre nuvens representando um vídeo religioso.",
+    img: "https://images.pexels.com/photos/25752564/pexels-photo-25752564.jpeg?auto=compress&cs=tinysrgb&fit=crop&h=900&w=600",
+    alt: "Bíblia aberta ao lado de uma vela acesa representando um vídeo religioso.",
   },
   humor: {
-    img: "https://images.pexels.com/photos/5349022/pexels-photo-5349022.jpeg?auto=compress&cs=tinysrgb&fit=crop&h=900&w=600",
-    alt: "Arte abstrata colorida representando um vídeo de humor.",
+    img: "https://images.pexels.com/photos/25652088/pexels-photo-25652088.jpeg?auto=compress&cs=tinysrgb&fit=crop&h=900&w=600",
+    alt: "Duas amigas rindo juntas ao ar livre representando um vídeo de humor.",
   },
   drama: {
-    img: "https://images.pexels.com/photos/38146058/pexels-photo-38146058.jpeg?auto=compress&cs=tinysrgb&fit=crop&h=900&w=600",
-    alt: "Colunas antigas representando um vídeo de drama histórico.",
+    img: "https://images.pexels.com/photos/13092365/pexels-photo-13092365.jpeg?auto=compress&cs=tinysrgb&fit=crop&h=900&w=600",
+    alt: "Coliseu de Roma ao pôr do sol representando um vídeo de drama histórico.",
   },
 };
 
