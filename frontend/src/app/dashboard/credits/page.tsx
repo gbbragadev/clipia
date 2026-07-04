@@ -16,7 +16,8 @@ export default function CreditsPage() {
   const [packages, setPackages] = useState<CreditPackage[]>([])
   const [loadingPackages, setLoadingPackages] = useState(true)
   const [packagesError, setPackagesError] = useState<string | null>(null)
-  const [provider, setProvider] = useState<PaymentProvider>('stripe')
+  // Pix (Mercado Pago) como default — e o preferido no BR e o caminho mais rapido/barato.
+  const [provider, setProvider] = useState<PaymentProvider>('mercadopago')
   const mountedRef = useRef(true)
 
   const loadPackages = useCallback(async () => {
@@ -89,7 +90,8 @@ export default function CreditsPage() {
           {/* Provider selector */}
           <div className="flex justify-center gap-2 mb-6">
             {([
-              { id: 'stripe', label: 'Stripe', sub: 'Cartão e Pix' },
+              { id: 'mercadopago', label: 'Pix', sub: 'Pix e cartão' },
+              { id: 'stripe', label: 'Cartão', sub: 'Stripe internacional' },
             ] as const).map((opt) => (
               <button
                 key={opt.id}

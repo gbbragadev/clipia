@@ -182,9 +182,9 @@ async def verify_email(request: Request, body: VerifyEmailRequest, db: AsyncSess
         user.otp_attempts = 0
         user.verification_code = None
         user.verification_expires = None
-        user.credits = 2
+        user.credits = settings.WELCOME_CREDIT_BONUS
         await db.commit()
-        record_credit_metric("credit", 2)
+        record_credit_metric("credit", settings.WELCOME_CREDIT_BONUS)
 
         # Credit referrer with 2 bonus credits (max 10 referrals per user)
         MAX_REFERRAL_BONUS_COUNT = 10
@@ -207,7 +207,7 @@ async def verify_email(request: Request, body: VerifyEmailRequest, db: AsyncSess
                 await db.commit()
                 record_credit_metric("referral_bonus", 2)
 
-        return {"status": "verified", "credits": 2}
+        return {"status": "verified", "credits": settings.WELCOME_CREDIT_BONUS}
 
 
 @router.post(

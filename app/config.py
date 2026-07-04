@@ -127,6 +127,12 @@ class Settings(BaseSettings):
     CREDIT_COST_VOICE_DESIGN: int = 5  # criar voz custom (ElevenLabs Voice Design) — operacao paga
     CREDIT_COST_VOICE_CLONE: int = 5  # clonar voz (ElevenLabs Instant Voice Clone) — operacao paga
 
+    # Bonus de creditos ao verificar email. Default 2 (publico). Elevar temporariamente
+    # para um beta fechado (ex: 20) para que testadores consigam gerar varios videos sem
+    # comprar; voltar para 2 antes do lancamento publico. Nao afeta o bonus do referrer
+    # (sempre +2 fixo, ver app/auth/routes.py).
+    WELCOME_CREDIT_BONUS: int = 2
+
     # Guardrail anti-burn: teto DIARIO de geracoes de video IA (Seedance ~R$0,67/s, ~R$20/Short) por
     # usuario. 0 desliga. Mesmo conta admin/seed (999k creditos) nao queima $ ilimitado num dia — foi
     # o vetor do gasto de ~$6 (tester com conta admin). Vale pra TODOS os planos, inclusive admin.
