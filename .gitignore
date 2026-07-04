@@ -36,3 +36,7 @@ CLAUDE.local.md
 .pytest-basetemp-*/
 pytestbasetemp-current/
 .tmp/
+
+# Screenshots de smoke/evidencia das sessoes de agente (ficam so no disco)
+/*.png
+/frontend/smoke-*.png
