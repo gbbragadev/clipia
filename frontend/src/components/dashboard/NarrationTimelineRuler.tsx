@@ -10,8 +10,8 @@ interface NarrationTimelineRulerProps {
 }
 
 const SEGMENT_COLORS = [
-  '#8b5cf6', '#6366f1', '#3b82f6', '#06b6d4',
-  '#8b5cf6', '#6366f1', '#3b82f6', '#06b6d4',
+  '#ff5638', '#ff7a61', '#3e9bff', '#06b6d4',
+  '#ff5638', '#ff7a61', '#3e9bff', '#06b6d4',
 ]
 const BAR_HEIGHT = 28
 const LABEL_HEIGHT = 16

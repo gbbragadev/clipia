@@ -55,8 +55,8 @@ export function CinematicSection({
   const backgroundClasses = {
     none: '',
     grain: 'relative before:absolute before:inset-0 before:z-[-1] before:bg-[url(/noise.svg)] before:opacity-10',
-    gradient: 'relative before:absolute before:inset-0 before:z-[-1] before:bg-gradient-to-b before:from-transparent before:to-purple-900/10',
-    mesh: 'relative before:absolute before:inset-0 before:z-[-1] before:bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] before:from-purple-900/20 before:via-[#0f0b1a] before:to-[#0f0b1a]',
+    gradient: 'relative before:absolute before:inset-0 before:z-[-1] before:bg-gradient-to-b before:from-transparent before:to-coral/10',
+    mesh: 'relative before:absolute before:inset-0 before:z-[-1] before:bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] before:from-coral/15 before:via-[#0b0d15] before:to-[#0b0d15]',
   }
 
   const revealClasses = {

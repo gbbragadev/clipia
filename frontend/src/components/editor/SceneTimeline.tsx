@@ -2,7 +2,7 @@
 
 import { useEditor } from '@/contexts/EditorContext'
 
-const SCENE_COLORS = ['#7c3aed', '#3b82f6', '#06b6d4', '#10b981', '#f59e0b', '#ef4444']
+const SCENE_COLORS = ['#ff5638', '#3b82f6', '#06b6d4', '#10b981', '#f59e0b', '#ef4444']
 
 export function SceneTimeline() {
   const { composition, selectedSceneIndex, selectScene, playerFrame } = useEditor()

@@ -262,7 +262,7 @@ export function RouteErrorScreen({
   return (
     <main className="min-h-screen px-4 py-16 flex items-center justify-center">
       <div className="card w-full max-w-xl p-8 text-center">
-        <div className="mb-5 inline-flex h-14 w-14 items-center justify-center rounded-2xl" style={{ background: 'rgba(124, 58, 237, 0.12)' }}>
+        <div className="mb-5 inline-flex h-14 w-14 items-center justify-center rounded-2xl" style={{ background: 'rgba(255, 86, 56, 0.12)' }}>
           <span className="text-2xl">!</span>
         </div>
         <h1 className="text-2xl font-bold" style={{ color: 'var(--text-primary)' }}>

@@ -11,7 +11,7 @@ import VideoPlayerModal from './VideoPlayerModal'
 
 const STYLE_GRADIENTS: Record<string, string> = {
   educational: 'from-coral/40 to-azure/40',
-  storytelling: 'from-indigo-900/40 to-violet-900/40',
+  storytelling: 'from-azure/30 to-coral/20',
   news: 'from-slate-800/40 to-gray-900/40',
   comedy: 'from-rose-900/40 to-amber-900/40',
 }
@@ -129,7 +129,7 @@ export default function VideoCard({ job, onEdit, onCancel }: VideoCardProps) {
 
   return (
     <GlowCard intensity={0.2} className="h-full">
-      <div className="flex flex-col h-full bg-[#110d1a] hover:bg-[#161122] transition-colors rounded-xl overflow-hidden relative">
+      <div className="flex flex-col h-full bg-[var(--bg-raised)] hover:bg-[var(--bg-surface)] transition-colors rounded-xl overflow-hidden relative">
         {/* Thumbnail - shorter on mobile, taller on desktop */}
         <div
           className={`w-full aspect-[3/4] sm:aspect-[9/16] bg-gradient-to-br ${gradient} flex flex-col items-center justify-center relative overflow-hidden group ${job.download_url ? 'cursor-pointer' : ''}`}

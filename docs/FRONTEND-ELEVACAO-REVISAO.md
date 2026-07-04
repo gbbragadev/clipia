@@ -115,3 +115,36 @@ Aplicar ícones lucide + tokens de motion consistentes. Auditorar (não refazer)
 - [ ] Após revisão, atualizar `docs/SESSION-COORD.md` e a memória `frontend-elevacao-fases.md`.
 
 — *Sessão GLM-5.2-max, 29/06 ~19h.*
+
+---
+
+## 7. Sprint Fable 5 — 03/07/2026 (bugs de acesso ao vídeo + fim do roxo residual)
+
+### Bugs reportados corrigidos (commits próprios, ver `git log`)
+- **Player dedicado** (`VideoPlayerModal.tsx`): blob autenticado único alimenta player + download + Web Share; thumbnail/play do card abrem o modal.
+- **Download confiável**: `lib/download.ts` com progresso por stream (fração via Content-Length); spinner+% nos botões; toasts. `ExportPanel` com state machine `idle→rendering→ready|error` — download bloqueado durante render; backend marca `rendering` no Redis ANTES do `.delay()` (corrida que entregava versão pré-edição).
+- **Grid reativa**: polling com backoff enquanto houver job ativo; `/jobs` expõe `progress`/`current_step`; barra de progresso + etapa no card; `onJobCreated` mostra o card na hora.
+
+### Design tokens — fonte de verdade (globals.css)
+| Token | Valor | Uso |
+|-------|-------|-----|
+| `--accent-primary` | `#ff5638` (coral) | CTAs, seleção, destaques — igual em dark/light |
+| `--accent-secondary` | `#3e9bff` (azure) | Acento secundário, gradientes `coral→azure` |
+| `--color-coral/-soft/-azure/-mint` | `@theme` | Utilities Tailwind (`text-coral`, `from-coral`…) |
+| `--bg-base/-raised/-surface(-hover)` | grafite | Superfícies (NUNCA hex roxo-tingido `#110d1a`/`#1a1425`) |
+| `--gradient-ambient-1/2/3` | tints coral/azure | Fundo ambiente do app (era roxo `rgba(88,28,135…)`) |
+| `EASE`/`DURATIONS`/`SPRING` | `lib/motion.ts` | Toda animação JS |
+
+**Regra de cor aplicada**: acento de UI (seleção/ativo/glow/progresso) = coral/azure via token; cor de CATEGORIA/conteúdo (gradiente por nicho em `niches.ts`, moods do `MusicSelector`, opção "Roxo" de fundo de legenda) mantém variedade semântica.
+
+### Roxo eliminado nesta sprint
+`globals.css` (ambients, hero-bg/filmstrip mortos deletados, sombra light), `GlowCard` (default `#7c3aed`→coral, bg `#1a1425`→grafite), `manifest.ts` (theme_color PWA), `ExportCostBanner`, `ScrollProgress`, `CinematicSection` (mesh das páginas SEO), `NarrationTimelineRuler`, `KineticTypographyPreview`, admin accent, e no editor: `EditorTimeline`/`SceneTimeline` (1ª cor de cena), `RemotionPreview` (glow), `ScriptEditor`/`SubtitleTimeline`/`SceneGrid`/`SubtitleEditor` (estados de seleção), `ExportPanel` (reescrito em BEM + tokens). `VideoCard`/`dashboard` sem `#110d1a`.
+
+### Dead code removido (zero imports, verificado)
+`components/{HowItWorks,HowItWorksStepCanvas,ShowcasePretextOverlay,SocialProofBar,SocialProofCanvas}.tsx`, `hooks/useVideoGeneration.ts`, `lib/api.ts` (órfão após o hook), `components/editor/EndScreen.tsx` (duplicata vazia; o vivo é `overlays/EndScreen.tsx`). Itens da Seção 3-B referentes a esses arquivos estão OBSOLETOS.
+
+### Estados
+- `EmptyState` da grid: ilustração (3 shorts em leque) + CTA `#studio`.
+- Toasts consistentes: download (card/modal/export), render pronto, vídeo pronto/falhou na grid.
+
+— *Sessão Fable 5, 03/07.*

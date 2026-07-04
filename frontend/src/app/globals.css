@@ -28,9 +28,12 @@
   --card-bg-hover: rgba(255, 255, 255, 0.06);
   --card-border: rgba(255, 255, 255, 0.06);
   --input-bg: #1A1A22;
-  --gradient-ambient-1: rgba(88, 28, 135, 0.12);
-  --gradient-ambient-2: rgba(37, 99, 235, 0.06);
-  --gradient-ambient-3: rgba(139, 92, 246, 0.05);
+  /* Acentos da marca (coral/azure) — única fonte de verdade para o shell */
+  --accent-primary: #ff5638;
+  --accent-secondary: #3e9bff;
+  --gradient-ambient-1: rgba(255, 86, 56, 0.08);
+  --gradient-ambient-2: rgba(62, 155, 255, 0.06);
+  --gradient-ambient-3: rgba(255, 122, 97, 0.04);
   --logo-text: #fff;
   --overlay-bg: rgba(0, 0, 0, 0.6);
 }
@@ -55,9 +58,11 @@
   --card-bg-hover: #f9fafb;
   --card-border: rgba(0, 0, 0, 0.1);
   --input-bg: #ffffff;
-  --gradient-ambient-1: rgba(139, 92, 246, 0.04);
-  --gradient-ambient-2: rgba(59, 130, 246, 0.03);
-  --gradient-ambient-3: rgba(139, 92, 246, 0.02);
+  --accent-primary: #ff5638;
+  --accent-secondary: #3e9bff;
+  --gradient-ambient-1: rgba(255, 86, 56, 0.04);
+  --gradient-ambient-2: rgba(62, 155, 255, 0.03);
+  --gradient-ambient-3: rgba(255, 122, 97, 0.02);
   --logo-text: #111827;
   --overlay-bg: rgba(255, 255, 255, 0.8);
 }
@@ -88,15 +93,6 @@ body::before {
   transition: background 0.3s;
 }
 
-/* Hero mesh gradient background */
-.hero-bg {
-  background:
-    radial-gradient(ellipse 90% 60% at 50% -10%, rgba(120, 60, 220, 0.3), transparent),
-    radial-gradient(ellipse 70% 50% at 80% 40%, rgba(37, 99, 235, 0.2), transparent),
-    radial-gradient(ellipse 60% 50% at 20% 70%, rgba(139, 92, 246, 0.12), transparent),
-    transparent;
-}
-
 /* Glass cards */
 .card {
   background: var(--card-bg);
@@ -113,7 +109,7 @@ body::before {
   border-color: rgba(255, 86, 56, 0.25);
 }
 [data-theme="light"] .card:hover {
-  box-shadow: 0 4px 12px rgba(139, 92, 246, 0.08), 0 2px 4px rgba(0, 0, 0, 0.04);
+  box-shadow: 0 4px 12px rgba(255, 86, 56, 0.08), 0 2px 4px rgba(0, 0, 0, 0.04);
 }
 
 /* Buttons */
@@ -142,61 +138,6 @@ body::before {
   font-size: 15px;
 }
 .btn-outline:hover { border-color: var(--border-hover); color: var(--text-primary); }
-
-/* Filmstrip */
-.filmstrip-border {
-  background: repeating-linear-gradient(
-    90deg, rgba(139,92,246,0.15) 0px, rgba(139,92,246,0.15) 10px, transparent 10px, transparent 14px
-  );
-  height: 14px;
-}
-
-/* Animations */
-@keyframes pulse-glow {
-  0%, 100% { opacity: 0.6; }
-  50% { opacity: 1; }
-}
-
-@keyframes cursor-blink {
-  0%, 50% { opacity: 1; }
-  51%, 100% { opacity: 0; }
-}
-
-@keyframes float {
-  0%, 100% { transform: translateY(0); }
-  50% { transform: translateY(-10px); }
-}
-
-@keyframes progress-fill {
-  0% { width: 0%; }
-  100% { width: 100%; }
-}
-
-/* Phone feed scroll */
-.phone-scroll {
-  overflow-y: auto;
-  scroll-snap-type: y mandatory;
-  -ms-overflow-style: none;
-  scrollbar-width: none;
-}
-.phone-scroll::-webkit-scrollbar { display: none; }
-
-.reel {
-  scroll-snap-align: start;
-  flex-shrink: 0;
-}
-
-@keyframes gradient-shift {
-  0% { background-position: 0% 0%; }
-  50% { background-position: 100% 100%; }
-  100% { background-position: 0% 0%; }
-}
-
-@keyframes float-particle {
-  0% { transform: translateY(0) scale(1); opacity: 0.3; }
-  50% { transform: translateY(-30px) scale(1.2); opacity: 0.6; }
-  100% { transform: translateY(0) scale(1); opacity: 0.3; }
-}
 
 /* ── Fase 0: Typography utilities ── */
 .font-display { font-family: var(--font-display); }

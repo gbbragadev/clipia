@@ -125,8 +125,8 @@ export function SubtitleEditor() {
               onClick={() => updateSubtitleStyle({ position: pos })}
               className={`editor-btn-sm ${style.position === pos ? '' : ''}`}
               style={{
-                background: style.position === pos ? 'rgba(124, 58, 237, 0.2)' : undefined,
-                borderColor: style.position === pos ? 'rgba(124, 58, 237, 0.4)' : undefined,
+                background: style.position === pos ? 'rgba(255, 86, 56, 0.2)' : undefined,
+                borderColor: style.position === pos ? 'rgba(255, 86, 56, 0.4)' : undefined,
                 color: style.position === pos ? 'var(--color-coral-soft)' : undefined,
               }}
             >

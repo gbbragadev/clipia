@@ -132,7 +132,7 @@ export default function DashboardPage() {
       />
 
       {/* Studio-like Generate Form Wrapper */}
-      <div ref={formRef} className="relative rounded-3xl bg-[#110d1a] border border-white/5 overflow-hidden p-6 md:p-10 shadow-2xl mb-16">
+      <div ref={formRef} id="studio" className="relative rounded-3xl bg-[var(--bg-raised)] border border-white/5 overflow-hidden p-6 md:p-10 shadow-2xl mb-16">
         <div className="absolute inset-0 bg-[url(/noise.svg)] opacity-20 pointer-events-none mix-blend-overlay"></div>
         <div className="absolute -top-40 -right-40 w-96 h-96 bg-coral/20 blur-[120px] rounded-full pointer-events-none"></div>
         <div className="relative z-10">

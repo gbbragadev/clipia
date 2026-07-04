@@ -137,7 +137,7 @@ export default function KineticTypographyPreview({ text, speed = 2 }: KineticTyp
 
       // Progress bar
       const pct = Math.min(elapsed / totalDuration, 1)
-      ctx.fillStyle = '#8b5cf6'
+      ctx.fillStyle = '#ff5638'
       ctx.fillRect(0, CANVAS_H - PROGRESS_HEIGHT, CANVAS_W * pct, PROGRESS_HEIGHT)
 
       if (elapsed < totalDuration) {

@@ -106,7 +106,7 @@ export function SceneGrid() {
                   style={{
                     width: '100%', minHeight: 48,
                     background: 'rgba(0,0,0,0.3)',
-                    border: '1px solid rgba(124, 58, 237, 0.3)',
+                    border: '1px solid rgba(255, 86, 56, 0.3)',
                     borderRadius: 6,
                     color: '#e2e8f0', fontSize: 12, lineHeight: 1.5,
                     padding: 6, resize: 'vertical', fontFamily: 'inherit',

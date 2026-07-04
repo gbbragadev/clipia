@@ -46,7 +46,7 @@ export function RemotionPreview() {
         {/* Glow behind player */}
         <div style={{
           position: 'absolute', inset: -20,
-          background: 'radial-gradient(ellipse at center, rgba(124, 58, 237, 0.12) 0%, transparent 70%)',
+          background: 'radial-gradient(ellipse at center, rgba(255, 86, 56, 0.10) 0%, transparent 70%)',
           borderRadius: 40,
           filter: 'blur(20px)',
           pointerEvents: 'none',

@@ -4,7 +4,7 @@ import { useCallback, useRef } from 'react'
 import { useEditor } from '@/contexts/EditorContext'
 import { SubtitleTimeline } from './SubtitleTimeline'
 
-const SCENE_COLORS = ['#7c3aed', '#3b82f6', '#06b6d4', '#10b981', '#f59e0b', '#ef4444']
+const SCENE_COLORS = ['#ff5638', '#3b82f6', '#06b6d4', '#10b981', '#f59e0b', '#ef4444']
 
 function formatTime(seconds: number): string {
   const m = Math.floor(seconds / 60)

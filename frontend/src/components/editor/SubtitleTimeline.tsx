@@ -44,10 +44,10 @@ export function SubtitleTimeline() {
       const isPast = currentTime > word.end
 
       ctx.fillStyle = isActive
-        ? 'rgba(124, 58, 237, 0.7)'
+        ? 'rgba(255, 86, 56, 0.7)'
         : isPast
-          ? 'rgba(124, 58, 237, 0.2)'
-          : 'rgba(124, 58, 237, 0.12)'
+          ? 'rgba(255, 86, 56, 0.2)'
+          : 'rgba(255, 86, 56, 0.12)'
       ctx.beginPath()
       ctx.roundRect(x1, 2, wordW - 1, h - 4, 2)
       ctx.fill()

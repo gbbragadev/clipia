@@ -138,7 +138,7 @@ export default function AdminDashboardPage() {
         <StatCard title="Receita aprovada" value={formatCurrency(data.summary.approved_revenue_brl)} hint={`${data.summary.approved_orders} pedidos aprovados`} accent="#22c55e" />
         <StatCard title="Receita pendente" value={formatCurrency(data.summary.pending_revenue_brl)} hint={`${data.summary.pending_orders} pagamentos em aberto`} accent="#f59e0b" />
         <StatCard title="Ticket medio" value={formatCurrency(data.summary.average_ticket_brl)} hint={`${data.summary.credits_sold} creditos vendidos`} accent="#38bdf8" />
-        <StatCard title="Usuarios novos" value={String(data.summary.new_users)} hint={`${data.summary.verified_users} verificados / ${data.summary.paying_users} pagantes`} accent="#a78bfa" />
+        <StatCard title="Usuarios novos" value={String(data.summary.new_users)} hint={`${data.summary.verified_users} verificados / ${data.summary.paying_users} pagantes`} accent="#3e9bff" />
         <StatCard title="Jobs ativos" value={String(data.summary.active_jobs)} hint="fila + processamento agora" accent="#fb7185" />
         <StatCard title="Creditos consumidos" value={String(data.summary.credits_consumed)} hint="estimado pelo volume de jobs" accent="#f97316" />
         <StatCard title="Taxa de sucesso" value={`${data.operations.success_rate}%`} hint={`${data.operations.completed_jobs} concluidos / ${data.operations.failed_jobs} falhos`} accent="#14b8a6" />

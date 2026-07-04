@@ -6,7 +6,7 @@ export default function ScrollProgress() {
   return (
     <div className="h-[2px] bg-gray-900">
       <div
-        className="h-full bg-gradient-to-r from-purple-500 via-fuchsia-500 to-blue-500 transition-[width] duration-100"
+        className="h-full bg-gradient-to-r from-coral via-coral-soft to-azure transition-[width] duration-100"
         style={{ width: `${progress * 100}%` }}
       />
     </div>

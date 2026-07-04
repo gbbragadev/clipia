@@ -21,8 +21,8 @@ export function ScriptEditor() {
             style={{
               padding: 12,
               borderRadius: 10,
-              background: isSelected ? 'rgba(124, 58, 237, 0.15)' : 'rgba(255,255,255,0.03)',
-              border: isSelected ? '1px solid rgba(124, 58, 237, 0.4)' : '1px solid rgba(255,255,255,0.06)',
+              background: isSelected ? 'rgba(255, 86, 56, 0.15)' : 'rgba(255,255,255,0.03)',
+              border: isSelected ? '1px solid rgba(255, 86, 56, 0.4)' : '1px solid rgba(255,255,255,0.06)',
               cursor: 'pointer',
               transition: 'all 0.15s ease',
             }}

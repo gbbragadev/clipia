@@ -31,7 +31,7 @@ export default function ExportCostBanner({ pendingCredits, userCredits }: Export
           href="/dashboard/credits"
           className="px-3 py-1 rounded-lg text-xs font-semibold"
           style={{
-            background: 'linear-gradient(135deg, #a855f7, #6366f1)',
+            background: 'linear-gradient(135deg, #ff5638, #3e9bff)',
             color: '#fff',
             textDecoration: 'none',
           }}
