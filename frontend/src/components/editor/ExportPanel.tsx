@@ -1,14 +1,24 @@
 'use client'
 
-import { useState, useCallback, useEffect } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { Check, Download, Loader2, X } from 'lucide-react'
 import { useEditor } from '@/contexts/EditorContext'
 import { useAuth } from '@/contexts/AuthContext'
 import { downloadAuthenticatedFile } from '@/lib/download'
 import { getToken } from '@/lib/auth'
 import { readApiError } from '@/lib/http'
+import { useToast } from '@/components/ui/feedback'
 import ExportCostBanner from '@/components/dashboard/ExportCostBanner'
 
-type RenderStatus = 'ready' | 'rendering' | 'updated' | 'error'
+/**
+ * Estado do re-render (a fonte da verdade é o Redis via /status):
+ * - idle: nenhum render disparado (narração stale aguardando decisão do usuário)
+ * - rendering: worker aplicando as edições — download BLOQUEADO (antes o botão
+ *   ficava ativo e baixava a versão pré-edição: bug reportado pelo fundador)
+ * - ready: arquivo final reflete as edições
+ * - error: render falhou — pode baixar a versão anterior explicitamente
+ */
+type RenderState = 'idle' | 'rendering' | 'ready' | 'error'
 
 interface PlatformCaption {
   platform: string
@@ -20,11 +30,26 @@ interface PlatformCaption {
 export function ExportPanel({ onClose }: { onClose: () => void }) {
   const { composition, jobId, narrationStale, setActivePanel } = useEditor()
   const { user } = useAuth()
-  const [renderStatus, setRenderStatus] = useState<RenderStatus>('ready')
+  const { success: toastSuccess, error: toastError } = useToast()
+
+  const [renderState, setRenderState] = useState<RenderState>('idle')
+  const [renderProgress, setRenderProgress] = useState(0)
+  const [renderDetail, setRenderDetail] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const [copiedIndex, setCopiedIndex] = useState<number | null>(null)
-  const [rendering, setRendering] = useState(false)
   const [staleAccepted, setStaleAccepted] = useState(false)
+  const [downloading, setDownloading] = useState(false)
+  const [dlProgress, setDlProgress] = useState<number | null>(null)
+  const [copiedIndex, setCopiedIndex] = useState<number | null>(null)
+
+  const pollTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const unmounted = useRef(false)
+  useEffect(() => {
+    unmounted.current = false
+    return () => {
+      unmounted.current = true
+      if (pollTimer.current) clearTimeout(pollTimer.current)
+    }
+  }, [])
 
   const generateCaptions = useCallback((): PlatformCaption[] => {
     const title = composition?.title || 'Meu video'
@@ -55,103 +80,107 @@ export function ExportPanel({ onClose }: { onClose: () => void }) {
     } catch { /* fallback */ }
   }
 
-  // Trigger background render
-  const handleRender = async () => {
-    setRendering(true)
-    setError(null)
-    setRenderStatus('rendering')
+  const authHeaders = useCallback((): Record<string, string> => {
+    const token = getToken()
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+    if (token) headers['Authorization'] = `Bearer ${token}`
+    return headers
+  }, [])
 
+  // Poll do /status até o worker terminar. O backend marca "rendering" no Redis
+  // ANTES de enfileirar, então "completed" aqui significa re-render concluído de
+  // verdade (não o "completed" estale do pipeline original).
+  const pollStatus = useCallback(async () => {
     try {
-      const token = getToken()
-      const headers: Record<string, string> = { 'Content-Type': 'application/json' }
-      if (token) headers['Authorization'] = `Bearer ${token}`
+      const res = await fetch(`/api/v1/jobs/${jobId}/status`, { headers: authHeaders() })
+      if (!res.ok) throw new Error(await readApiError(res, 'Erro ao verificar status'))
+      const data = await res.json()
+      if (unmounted.current) return
 
-      const res = await fetch(`/api/v1/jobs/${jobId}/render`, { method: 'POST', headers })
-      if (!res.ok) throw new Error(await readApiError(res, `Erro ${res.status}`))
-
-      // Poll in background
-      const poll = async () => {
-        try {
-          const statusRes = await fetch(`/api/v1/jobs/${jobId}/status`, { headers })
-          if (!statusRes.ok) throw new Error(await readApiError(statusRes, 'Erro ao verificar status'))
-          const data = await statusRes.json()
-
-          if (data.status === 'completed') {
-            setRenderStatus('updated')
-            setRendering(false)
-          } else if (data.status === 'error') {
-            throw new Error(data.error || 'Erro na renderizacao')
-          } else {
-            setTimeout(poll, 2000)
-          }
-        } catch (pollErr) {
-          setError(pollErr instanceof Error ? pollErr.message : 'Erro')
-          setRenderStatus('error')
-          setRendering(false)
-        }
+      if (data.status === 'completed') {
+        setRenderState('ready')
+        setRenderProgress(1)
+        toastSuccess('Vídeo atualizado', 'Suas edições foram aplicadas ao arquivo final.')
+      } else if (data.status === 'error') {
+        setRenderState('error')
+        setError(data.error || 'Erro na renderização')
+      } else {
+        setRenderProgress(Number(data.progress) || 0)
+        setRenderDetail(typeof data.detail === 'string' && data.detail ? data.detail : null)
+        pollTimer.current = setTimeout(pollStatus, 2500)
       }
-      setTimeout(poll, 2000)
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Erro ao renderizar')
-      setRenderStatus('error')
-      setRendering(false)
+    } catch (pollErr) {
+      if (unmounted.current) return
+      setRenderState('error')
+      setError(pollErr instanceof Error ? pollErr.message : 'Erro ao verificar status')
     }
-  }
+  }, [jobId, authHeaders, toastSuccess])
 
-  // Auto-trigger render on open
+  const handleRender = useCallback(async () => {
+    setError(null)
+    setRenderState('rendering')
+    setRenderProgress(0)
+    setRenderDetail(null)
+    try {
+      const res = await fetch(`/api/v1/jobs/${jobId}/render`, { method: 'POST', headers: authHeaders() })
+      if (!res.ok) throw new Error(await readApiError(res, `Erro ${res.status}`))
+      pollTimer.current = setTimeout(pollStatus, 2000)
+    } catch (err) {
+      if (unmounted.current) return
+      setRenderState('error')
+      setError(err instanceof Error ? err.message : 'Erro ao renderizar')
+    }
+  }, [jobId, authHeaders, pollStatus])
+
+  // Auto-dispara o render ao abrir (a menos que a narração esteja stale — aí o
+  // usuário decide entre regenerar a voz ou exportar mesmo assim).
   useEffect(() => {
     if (!narrationStale) handleRender()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  const downloadUrl = `/api/v1/jobs/${jobId}/download`
+  const handleDownload = useCallback(async () => {
+    if (downloading || renderState === 'rendering') return
+    setDownloading(true)
+    setDlProgress(null)
+    try {
+      await downloadAuthenticatedFile(`/api/v1/jobs/${jobId}/download`, `clipia-${jobId.slice(0, 8)}.mp4`, setDlProgress)
+      toastSuccess('Download concluído', 'Confira a pasta de downloads do navegador.')
+    } catch (err) {
+      toastError('Falha no download', err instanceof Error ? err.message : 'Tente novamente em instantes.')
+    } finally {
+      setDownloading(false)
+      setDlProgress(null)
+    }
+  }, [jobId, downloading, renderState, toastSuccess, toastError])
+
+  const downloadIsPrevious = renderState !== 'ready'
 
   return (
-    <div
-      style={{
-        position: 'fixed', inset: 0,
-        background: 'rgba(0, 0, 0, 0.7)',
-        zIndex: 100,
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-      }}
-      onClick={(e) => { if (e.target === e.currentTarget) onClose() }}
-    >
-      <div style={{
-        maxWidth: 480, width: '90%',
-        background: '#222222', borderRadius: 16, padding: 24,
-        position: 'relative', maxHeight: '90vh', overflowY: 'auto',
-      }}>
-        {/* Close */}
-        <button
-          onClick={onClose}
-          style={{
-            position: 'absolute', top: 12, right: 12,
-            background: 'none', border: 'none', color: '#888',
-            fontSize: 20, cursor: 'pointer', lineHeight: 1,
-          }}
-        >
-          X
+    <div className="export-overlay" onClick={(e) => { if (e.target === e.currentTarget) onClose() }}>
+      <div className="export-panel" role="dialog" aria-modal="true" aria-label="Exportar vídeo">
+        <button type="button" className="export-panel__close" onClick={onClose} aria-label="Fechar">
+          <X size={16} />
         </button>
 
-        <h2 style={{ color: '#E8E8E8', margin: '0 0 20px', fontSize: 20 }}>Exportar Vídeo</h2>
+        <h2 className="export-panel__title">Exportar vídeo</h2>
 
         {narrationStale && !staleAccepted && (
-          <div style={{
-            background: 'rgba(245,158,11,0.1)', border: '1px solid rgba(245,158,11,0.3)',
-            borderRadius: 8, padding: 12, marginBottom: 12, fontSize: 13, color: '#fbbf24',
-          }}>
+          <div className="export-stale">
             O texto das cenas mudou desde a última narração. Se exportar agora, o áudio e as
             legendas NÃO vão refletir o novo texto.
-            <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
+            <div className="export-stale__actions">
               <button
+                type="button"
+                className="export-stale__btn"
                 onClick={() => { setActivePanel('voice'); onClose() }}
-                style={{ background: 'var(--color-coral)', color: '#fff', border: 'none', borderRadius: 6, padding: '6px 12px', fontSize: 12, cursor: 'pointer' }}
               >
                 Regenerar narração primeiro
               </button>
               <button
+                type="button"
+                className="export-stale__btn export-stale__btn--ghost"
                 onClick={() => { setStaleAccepted(true); handleRender() }}
-                style={{ background: 'rgba(255,255,255,0.08)', color: '#ccc', border: '1px solid rgba(255,255,255,0.15)', borderRadius: 6, padding: '6px 12px', fontSize: 12, cursor: 'pointer' }}
               >
                 Exportar mesmo assim
               </button>
@@ -159,7 +188,6 @@ export function ExportPanel({ onClose }: { onClose: () => void }) {
           </div>
         )}
 
-        {/* Cost banner */}
         {(composition?.pendingCredits ?? 0) > 0 && (
           <div style={{ marginBottom: 12 }}>
             <ExportCostBanner
@@ -169,111 +197,89 @@ export function ExportPanel({ onClose }: { onClose: () => void }) {
           </div>
         )}
 
-        {/* Download — always available */}
+        {/* Status do render */}
+        {renderState === 'rendering' && (
+          <div className="export-status export-status--rendering">
+            <Loader2 size={14} className="export-status__spinner" />
+            <div className="export-status__body">
+              <div>{renderDetail || 'Aplicando suas edições… (~2 min)'}</div>
+              <div className="export-progress">
+                <div className="export-progress__fill" style={{ width: `${Math.max(6, renderProgress * 100)}%` }} />
+              </div>
+            </div>
+          </div>
+        )}
+        {renderState === 'ready' && (
+          <div className="export-status export-status--ready">
+            <Check size={14} />
+            <div className="export-status__body">Vídeo atualizado com suas edições!</div>
+          </div>
+        )}
+        {renderState === 'error' && (
+          <div className="export-status export-status--error">
+            <div className="export-status__body">Erro: {error}</div>
+            <button type="button" className="export-status__retry" onClick={handleRender}>
+              Tentar novamente
+            </button>
+          </div>
+        )}
+
+        {/* Download — só habilita fora do render (fim da corrida que baixava a versão antiga) */}
         <button
           type="button"
-          onClick={() => downloadAuthenticatedFile(downloadUrl, `clipia-${jobId.slice(0, 8)}.mp4`)}
-          style={{
-            display: 'block', width: '100%', padding: '14px 0',
-            borderRadius: 10, border: 'none',
-            background: '#10b981', color: '#fff',
-            fontSize: 16, fontWeight: 600,
-            textAlign: 'center', textDecoration: 'none',
-            marginBottom: 12,
-            cursor: 'pointer',
-          }}
+          className={`export-download${downloadIsPrevious && renderState !== 'rendering' ? ' export-download--previous' : ''}`}
+          onClick={handleDownload}
+          disabled={downloading || renderState === 'rendering'}
         >
-          Baixar Video
+          {renderState === 'rendering' ? (
+            <>
+              <Loader2 size={16} className="export-status__spinner" />
+              Renderizando… aguarde
+            </>
+          ) : downloading ? (
+            <>
+              <Loader2 size={16} className="export-status__spinner" />
+              {dlProgress != null ? `Baixando… ${Math.round(dlProgress * 100)}%` : 'Baixando…'}
+            </>
+          ) : (
+            <>
+              <Download size={16} />
+              {downloadIsPrevious ? 'Baixar versão anterior' : 'Baixar vídeo'}
+            </>
+          )}
         </button>
+        {downloadIsPrevious && renderState !== 'rendering' && !downloading && (
+          <p className="export-download__hint">
+            Esta é a última versão renderizada — não inclui edições ainda não aplicadas.
+          </p>
+        )}
 
-        {/* Render status badge */}
-        <div style={{
-          padding: '8px 12px', borderRadius: 8, marginBottom: 20,
-          fontSize: 13, display: 'flex', alignItems: 'center', gap: 8,
-          background: rendering ? 'rgba(255,86,56,0.1)' : renderStatus === 'updated' ? 'rgba(16,185,129,0.1)' : renderStatus === 'error' ? 'rgba(239,68,68,0.1)' : 'rgba(255,255,255,0.03)',
-          border: `1px solid ${rendering ? 'rgba(255,86,56,0.2)' : renderStatus === 'updated' ? 'rgba(16,185,129,0.2)' : renderStatus === 'error' ? 'rgba(239,68,68,0.2)' : 'rgba(255,255,255,0.06)'}`,
-        }}>
-          {rendering && (
-            <>
-              <div style={{
-                width: 8, height: 8, borderRadius: '50%',
-                background: 'var(--color-coral)',
-                animation: 'pulse 1.5s ease-in-out infinite',
-              }} />
-              <span style={{ color: '#a78bfa' }}>Atualizando com suas edições... (~2 min)</span>
-              <style>{`@keyframes pulse { 0%,100% { opacity: 0.4 } 50% { opacity: 1 } }`}</style>
-              </>
-          )}
-          {renderStatus === 'updated' && !rendering && (
-            <>
-              <span style={{ color: '#10b981', fontSize: 16 }}>&#10003;</span>
-              <span style={{ color: '#6ee7b7' }}>Video atualizado com suas edicoes!</span>
-            </>
-          )}
-          {renderStatus === 'error' && !rendering && (
-            <>
-              <span style={{ color: '#ef4444' }}>Erro: {error}</span>
-              <button
-                onClick={handleRender}
-                style={{
-                  marginLeft: 'auto', background: 'var(--color-coral)', color: '#fff',
-                  border: 'none', borderRadius: 6, padding: '4px 10px',
-                  fontSize: 12, cursor: 'pointer',
-                }}
-              >
-                Tentar novamente
-              </button>
-            </>
-          )}
-          {renderStatus === 'ready' && !rendering && (
-            <span style={{ color: 'rgba(255,255,255,0.4)' }}>Versão anterior disponível para download</span>
-          )}
-        </div>
+        <h3 className="export-panel__subtitle">Compartilhar nas redes</h3>
 
-        {/* Social sharing captions */}
-        <h3 style={{ color: '#E8E8E8', fontSize: 15, margin: '0 0 12px' }}>
-          Compartilhar nas redes
-        </h3>
-
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+        <div>
           {captions.map((item, i) => (
-            <div key={item.platform} style={{ background: '#2A2A2A', borderRadius: 10, padding: 12 }}>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <span style={{
-                    background: 'var(--color-coral)', color: '#fff',
-                    fontSize: 11, fontWeight: 700, padding: '3px 6px', borderRadius: 4,
-                  }}>
-                    {item.icon}
-                  </span>
-                  <span style={{ color: '#E8E8E8', fontSize: 13, fontWeight: 500 }}>{item.platform}</span>
+            <div key={item.platform} className="export-caption">
+              <div className="export-caption__head">
+                <div className="export-caption__platform">
+                  <span className="export-caption__icon">{item.icon}</span>
+                  {item.platform}
                 </div>
                 <button
+                  type="button"
+                  className={`export-caption__copy${copiedIndex === i ? ' export-caption__copy--copied' : ''}`}
                   onClick={() => copyToClipboard(item.caption, i)}
-                  style={{
-                    background: copiedIndex === i ? '#10b981' : 'var(--color-coral)',
-                    color: '#fff', border: 'none', borderRadius: 6,
-                    padding: '4px 10px', fontSize: 12, cursor: 'pointer', fontWeight: 500,
-                  }}
                 >
                   {copiedIndex === i ? 'Copiado!' : 'Copiar'}
                 </button>
               </div>
               <textarea
+                className="export-caption__textarea"
                 value={item.caption}
                 onChange={(e) => updateCaption(i, e.target.value)}
                 rows={3}
-                style={{
-                  width: '100%', background: '#1a1a1a', border: '1px solid #333',
-                  borderRadius: 6, color: '#E8E8E8', fontSize: 13, padding: 8,
-                  resize: 'vertical', fontFamily: 'inherit',
-                }}
               />
               {item.maxChars && (
-                <div style={{
-                  textAlign: 'right', fontSize: 11, marginTop: 4,
-                  color: item.caption.length >= item.maxChars ? '#ef4444' : '#666',
-                }}>
+                <div className={`export-caption__count${item.caption.length >= item.maxChars ? ' export-caption__count--limit' : ''}`}>
                   {item.caption.length}/{item.maxChars}
                 </div>
               )}

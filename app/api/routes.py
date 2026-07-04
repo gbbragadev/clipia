@@ -993,6 +993,19 @@ async def render_video(
 
     from app.worker.tasks import task_rerender_video
 
+    # Marca "rendering" ANTES de enfileirar: entre o POST e o worker (--pool=solo, fila
+    # pode estar ocupada) o Redis ainda diria "completed" do pipeline original e o poll
+    # do editor declararia o re-render concluido sem ele ter comecado (baixava a versao
+    # pre-edicao). Setar antes do .delay evita sobrescrever o progresso real do worker.
+    _redis.hset(
+        f"job:{job_id}",
+        mapping={
+            "status": "rendering",
+            "progress": 0.0,
+            "current_step": "queued",
+            "detail": "Re-render enfileirado...",
+        },
+    )
     task_rerender_video.delay(job_id)
 
     return {
