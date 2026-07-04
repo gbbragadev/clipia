@@ -29,6 +29,31 @@ def test_parse_reddit_rss_uses_feed_order_as_score():
     assert out[0].score > out[1].score
 
 
+_REDDIT_ATOM_SELFPOST = """<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <entry>
+    <title>TIFU por deixar o bolo no forno</title>
+    <link href="https://www.reddit.com/r/tifu/comments/9/"/>
+    <content type="html">&lt;!-- SC_OFF --&gt;&lt;div class="md"&gt;&lt;p&gt;Ontem decidi fazer um bolo pra familia toda e esqueci ele no forno por tres horas. A casa inteira ficou tomada de fumaca preta.&lt;/p&gt;&lt;/div&gt;&lt;!-- SC_ON --&gt; submitted by &lt;a href="x"&gt;/u/foo&lt;/a&gt;</content>
+  </entry>
+  <entry>
+    <title>Post so de link sem corpo</title>
+    <link href="https://www.reddit.com/r/x/comments/2/"/>
+    <content type="html">&lt;!-- SC_OFF --&gt;&lt;!-- SC_ON --&gt; submitted by &lt;a href="x"&gt;/u/bar&lt;/a&gt;</content>
+  </entry>
+</feed>"""
+
+
+def test_parse_reddit_rss_extracts_selfpost_body_as_context():
+    out = _parse_reddit_rss(_REDDIT_ATOM_SELFPOST)
+    # self-post: corpo vira context (fundamentacao do roteiro), sem rodape nem tags
+    assert "bolo" in out[0].context and "forno" in out[0].context
+    assert "submitted by" not in out[0].context
+    assert "<" not in out[0].context
+    # link-post sem corpo util -> context vazio (o titulo ja basta)
+    assert out[1].context == ""
+
+
 def test_parse_reddit_rss_rejects_dtd():
     import pytest as _pt
 

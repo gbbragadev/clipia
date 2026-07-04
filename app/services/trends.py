@@ -11,6 +11,7 @@ se a qualidade virar gargalo.
 from __future__ import annotations
 
 import asyncio
+import html
 import json
 import logging
 import re
@@ -112,9 +113,23 @@ def _parse_traffic(text: str) -> float:
     return float(digits) if digits else 0.0
 
 
+def _clean_reddit_body(raw_html: str) -> str:
+    """Extrai o corpo textual util de um <content> Atom do Reddit (self-posts: stories,
+    tifu, nosleep — onde o corpo E o roteiro). Descarta o rodape 'submitted by' e as tags.
+    Vazio p/ link-posts (todayilearned etc), cujo titulo ja e o fato. Limita p/ nao inflar o prompt."""
+    if not raw_html:
+        return ""
+    text = html.unescape(raw_html)
+    text = re.split(r"submitted by", text, maxsplit=1)[0]  # corta o rodape padrao do Reddit
+    text = re.sub(r"<[^>]+>", " ", text)  # strip HTML
+    text = re.sub(r"\s+", " ", text).strip()
+    return text[:500] if len(text) >= 40 else ""
+
+
 def _parse_reddit_rss(xml_text: str, source: str = "reddit") -> list[Trend]:
     """Reddit bloqueia o .json (403); o feed Atom (.rss) passa. Atom nao traz upvotes,
-    entao o score vem da ordem do feed 'top' (ja ordenado por relevancia)."""
+    entao o score vem da ordem do feed 'top' (ja ordenado por relevancia). O <content> vira
+    context (fundamentacao do roteiro) quando e um self-post com corpo util."""
     if "<!DOCTYPE" in xml_text or "<!ENTITY" in xml_text:
         raise ValueError("XML com DTD/ENTITY rejeitado")
     root = ElementTree.fromstring(xml_text)
@@ -127,7 +142,8 @@ def _parse_reddit_rss(xml_text: str, source: str = "reddit") -> list[Trend]:
             continue
         link = e.find("atom:link", _ATOM_NS)
         url = (link.get("href") if link is not None else "") or ""
-        out.append(Trend(title=title, source=source, score=float(total - i), url=url))
+        context = _clean_reddit_body(e.findtext("atom:content", default="", namespaces=_ATOM_NS) or "")
+        out.append(Trend(title=title, source=source, score=float(total - i), url=url, context=context))
     return out
 
 
