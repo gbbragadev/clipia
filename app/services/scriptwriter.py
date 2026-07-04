@@ -1,6 +1,7 @@
 import json
 import logging
 
+from app.config import settings
 from app.services.llm import complete_text_ex, strip_code_fences
 from app.templates import get_template
 
@@ -142,6 +143,25 @@ def generate_script(
     if not raw:
         raise ScriptValidationError("LLM retornou resposta vazia (reasoning pode ter estourado o max_tokens)")
     script = _parse_script_json(raw)
+
+    # Guardrail anti-burn: clampa o nº de cenas ANTES de _fix_durations (que redistribui a
+    # duracao pelas cenas restantes). Cada cena de ai_video/ai_image = 1 geracao PAGA; sem teto,
+    # um roteiro com cenas demais (LLM excede as "4-6", ou prompt injection pedindo exaustividade)
+    # multiplica o custo com credito fixo. Teto PROPORCIONAL a duracao (>=6, no maximo 1 cena por
+    # ~4s) limitado pelo teto duro absoluto — nao corta videos longos legitimos.
+    scenes = script.get("scenes")
+    if isinstance(scenes, list):
+        max_scenes = min(settings.MAX_SCENES_PER_VIDEO, max(6, -(-duration_target // 4)))
+        if len(scenes) > max_scenes:
+            logger.warning(
+                "roteiro com %d cenas clampado para %d (duracao=%ds, template=%s) — anti-burn",
+                len(scenes),
+                max_scenes,
+                duration_target,
+                template_id,
+            )
+            script["scenes"] = scenes[:max_scenes]
+
     # Metadado de qualidade (Q7): qual provedor da cascata atendeu. Viaja dentro do
     # script (persistido no Postgres via finalize) — degradacao fica visivel sem migration.
     script["llm_provider"] = llm_provider

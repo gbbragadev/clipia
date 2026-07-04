@@ -132,6 +132,14 @@ class Settings(BaseSettings):
     # o vetor do gasto de ~$6 (tester com conta admin). Vale pra TODOS os planos, inclusive admin.
     MAX_AI_VIDEO_PER_DAY: int = 3
 
+    # Guardrail anti-burn: teto de cenas por video. Cada cena de ai_video/ai_image dispara UMA
+    # geracao PAGA (Seedance ~R$3,35/cena; gpt-image ~R$0,x/cena), enquanto o credito cobrado e
+    # FIXO por template. Um roteiro com cenas demais (LLM excede as "4-6" do prompt, ou prompt
+    # injection pedindo exaustividade) multiplica o custo sem multiplicar a receita. O clamp e
+    # PROPORCIONAL a duracao (max(6, ceil(dur/4))) p/ nao cortar videos longos legitimos, com este
+    # teto duro absoluto. Ver app/services/scriptwriter.py (aplicado apos o parse do roteiro).
+    MAX_SCENES_PER_VIDEO: int = 40
+
     # MercadoPago
     MP_ACCESS_TOKEN: str = ""
     MP_WEBHOOK_SECRET: str = ""

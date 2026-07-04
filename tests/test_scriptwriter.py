@@ -54,6 +54,24 @@ def test_generate_script_applies_default_fade_transitions():
     assert scenes[2]["transition"] == "fade"
 
 
+def test_generate_script_clamps_excessive_scenes():
+    """Anti-burn: LLM gerando cenas demais p/ a duracao e clampado (custo de midia paga escala por cena)."""
+    scenes = [{"text": f"cena {i}", "keywords_en": [], "duration_hint": 5} for i in range(30)]
+    fake = json.dumps({"title": "T", "narration": "n", "scenes": scenes, "hashtags": []})
+    with patch("app.services.scriptwriter.complete_text_ex", return_value=(fake, "openai")):
+        result = generate_script("tema", "educational", 30)  # 30s -> max(6, ceil(30/4)) = 8
+    assert len(result["scenes"]) == 8
+
+
+def test_generate_script_keeps_scenes_for_long_videos():
+    """Videos longos legitimos NAO sao cortados: o clamp e proporcional a duracao, nao um teto fixo."""
+    scenes = [{"text": f"cena {i}", "keywords_en": [], "duration_hint": 6} for i in range(20)]
+    fake = json.dumps({"title": "T", "narration": "n", "scenes": scenes, "hashtags": []})
+    with patch("app.services.scriptwriter.complete_text_ex", return_value=(fake, "openai")):
+        result = generate_script("tema", "educational", 180)  # 180s -> min(40, 45) = 40 >= 20, mantem
+    assert len(result["scenes"]) == 20
+
+
 def test_parse_script_json_accepts_clean_json():
     raw = json.dumps({"title": "T", "scenes": [{"duration_hint": 7}]})
     result = _parse_script_json(raw)

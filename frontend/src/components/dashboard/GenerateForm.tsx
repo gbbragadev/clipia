@@ -320,21 +320,25 @@ export default function GenerateForm({ onJobComplete, onJobCreated, prefillTopic
           <span className="transition-transform" style={{ transform: showAdvancedScript ? 'rotate(90deg)' : 'rotate(0deg)' }}>
             ▶
           </span>
-          Roteiro avancado
+          Roteiro avançado (opcional)
         </button>
 
         {showAdvancedScript && (
           <div className="mt-3 space-y-4">
+            <p className="text-[11px] leading-relaxed text-[var(--text-tertiary)]">
+              Deixe em branco para a IA criar o roteiro a partir do tema acima. Preencha
+              apenas se quiser escrever o seu próprio — cada parágrafo vira uma cena.
+            </p>
             <div>
               <label className="block text-xs text-[var(--text-tertiary)] mb-1.5">
-                Roteiro (separe cenas com linha em branco)
+                Seu roteiro (uma cena por parágrafo, separadas por linha em branco)
               </label>
               <textarea
                 value={script}
                 onChange={(e) => setScript(e.target.value)}
                 disabled={generating}
                 rows={6}
-                placeholder={"O oceano profundo esconde segredos incriveis.\nVoce sabia que existem criaturas bioluminescentes?\n\nA fossa das Marianas tem mais de 11 mil metros.\nNenhum raio de sol chega ate la."}
+                placeholder={"Exemplo (apague e escreva o seu):\nPrimeira cena da narração aqui.\n\nSegunda cena, depois de uma linha em branco.\nCada parágrafo vira uma cena do vídeo."}
                 className="w-full px-4 py-3 text-sm rounded-xl border border-[var(--border-default)] bg-[var(--bg-surface)] text-[var(--text-primary)] placeholder:text-[var(--text-tertiary)] outline-none focus:border-coral/50 transition disabled:opacity-50 resize-y font-mono"
               />
             </div>

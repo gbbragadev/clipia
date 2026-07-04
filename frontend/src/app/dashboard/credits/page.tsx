@@ -38,17 +38,28 @@ export default function CreditsPage() {
     return () => { mountedRef.current = false }
   }, [loadPackages])
 
-  // Handle return from MercadoPago
+  // Handle return from MercadoPago / Stripe
   useEffect(() => {
     const status = searchParams.get('status')
     if (status === 'success') {
-      success('Pagamento aprovado', 'Seus créditos foram adicionados.')
-      refreshUser()
-    } else if (status === 'failure') {
+      // O webhook que credita e ASSINCRONO (~5-30s). Afirmar "creditos adicionados" aqui
+      // contradizia a UI (saldo ainda antigo). Mensagem honesta + polling curto: o saldo
+      // sobe sozinho quando o webhook processa.
+      success('Pagamento aprovado', 'Seus créditos serão creditados em instantes.')
+      void refreshUser()
+      let tries = 0
+      const poll = setInterval(() => {
+        tries += 1
+        void refreshUser()
+        if (tries >= 10) clearInterval(poll)
+      }, 3000)
+      return () => clearInterval(poll)
+    }
+    if (status === 'failure') {
       error('Pagamento não aprovado', 'Tente novamente.')
     } else if (status === 'pending') {
       info('Pagamento pendente', 'Seus créditos serão adicionados assim que confirmado.')
-      refreshUser()
+      void refreshUser()
     }
   }, [error, info, refreshUser, searchParams, success])
 

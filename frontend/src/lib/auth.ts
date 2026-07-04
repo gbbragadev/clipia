@@ -20,6 +20,30 @@ export class NetworkError extends Error {
 /** Timeout das chamadas autenticadas: backend pendurado não pode prender o dashboard no skeleton. */
 const AUTH_REQUEST_TIMEOUT_MS = 15000;
 
+/**
+ * fetch com timeout via AbortController. Um backend lento/pendurado nunca deve prender um
+ * spinner até o Cloudflare estourar (~100s) — falha rápido com mensagem clara. Converte
+ * abort/erro de rede em NetworkError (mensagem amigável) e sempre limpa o timer.
+ */
+async function fetchWithTimeout(
+  input: string,
+  init: RequestInit = {},
+  timeoutMs = AUTH_REQUEST_TIMEOUT_MS,
+): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(input, { ...init, signal: controller.signal });
+  } catch (err) {
+    if (err instanceof DOMException && err.name === "AbortError") {
+      throw new NetworkError("Tempo limite excedido. Tente novamente em instantes.");
+    }
+    throw new NetworkError("Falha de rede. Verifique sua conexão e tente novamente.");
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 export interface User {
   id: string;
   email: string;
@@ -69,7 +93,7 @@ export interface RegisterPayload {
 }
 
 export async function register(email: string, name: string, password: string, extra?: Omit<RegisterPayload, "email" | "name" | "password">): Promise<AuthResponse> {
-  const res = await fetch(`${API_BASE}/api/v1/auth/register`, {
+  const res = await fetchWithTimeout(`${API_BASE}/api/v1/auth/register`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ email, name, password, ...extra }),
@@ -79,7 +103,7 @@ export async function register(email: string, name: string, password: string, ex
 }
 
 export async function login(email: string, password: string): Promise<AuthResponse> {
-  const res = await fetch(`${API_BASE}/api/v1/auth/login`, {
+  const res = await fetchWithTimeout(`${API_BASE}/api/v1/auth/login`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ email, password }),
@@ -122,7 +146,7 @@ export async function getMe(): Promise<User> {
 }
 
 export async function verifyEmail(email: string, code: string): Promise<{ status: string; credits?: number }> {
-  const res = await fetch(`${API_BASE}/api/v1/auth/verify-email`, {
+  const res = await fetchWithTimeout(`${API_BASE}/api/v1/auth/verify-email`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ email, code }),
@@ -132,7 +156,7 @@ export async function verifyEmail(email: string, code: string): Promise<{ status
 }
 
 export async function resendCode(email: string): Promise<{ status: string }> {
-  const res = await fetch(`${API_BASE}/api/v1/auth/resend-code`, {
+  const res = await fetchWithTimeout(`${API_BASE}/api/v1/auth/resend-code`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ email }),
@@ -142,7 +166,7 @@ export async function resendCode(email: string): Promise<{ status: string }> {
 }
 
 export async function forgotPassword(email: string): Promise<{ status: string }> {
-  const res = await fetch(`${API_BASE}/api/v1/auth/forgot-password`, {
+  const res = await fetchWithTimeout(`${API_BASE}/api/v1/auth/forgot-password`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ email }),
@@ -152,7 +176,7 @@ export async function forgotPassword(email: string): Promise<{ status: string }>
 }
 
 export async function verifyResetCode(email: string, code: string): Promise<{ status: string; reset_token: string }> {
-  const res = await fetch(`${API_BASE}/api/v1/auth/verify-reset-code`, {
+  const res = await fetchWithTimeout(`${API_BASE}/api/v1/auth/verify-reset-code`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ email, code }),
@@ -162,7 +186,7 @@ export async function verifyResetCode(email: string, code: string): Promise<{ st
 }
 
 export async function resetPassword(resetToken: string, password: string): Promise<{ status: string }> {
-  const res = await fetch(`${API_BASE}/api/v1/auth/reset-password`, {
+  const res = await fetchWithTimeout(`${API_BASE}/api/v1/auth/reset-password`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ reset_token: resetToken, new_password: password }),
@@ -174,7 +198,7 @@ export async function resetPassword(resetToken: string, password: string): Promi
 export async function updateProfile(name: string): Promise<User> {
   const token = getToken();
   if (!token) throw new Error("Não autenticado");
-  const res = await fetch(`${API_BASE}/api/v1/auth/me`, {
+  const res = await fetchWithTimeout(`${API_BASE}/api/v1/auth/me`, {
     method: "PATCH",
     headers: {
       "Content-Type": "application/json",
@@ -190,7 +214,7 @@ export async function updateProfile(name: string): Promise<User> {
 export async function changePassword(currentPassword: string, newPassword: string): Promise<{ status: string }> {
   const token = getToken();
   if (!token) throw new Error("Não autenticado");
-  const res = await fetch(`${API_BASE}/api/v1/auth/change-password`, {
+  const res = await fetchWithTimeout(`${API_BASE}/api/v1/auth/change-password`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -206,7 +230,7 @@ export async function changePassword(currentPassword: string, newPassword: strin
 export async function deleteAccount(password: string): Promise<{ status: string }> {
   const token = getToken();
   if (!token) throw new Error("Não autenticado");
-  const res = await fetch(`${API_BASE}/api/v1/auth/delete-account`, {
+  const res = await fetchWithTimeout(`${API_BASE}/api/v1/auth/delete-account`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -222,7 +246,7 @@ export async function deleteAccount(password: string): Promise<{ status: string 
 export async function exportAccountData(): Promise<ExportedAccountData> {
   const token = getToken();
   if (!token) throw new Error("Não autenticado");
-  const res = await fetch(`${API_BASE}/api/v1/auth/export-data`, {
+  const res = await fetchWithTimeout(`${API_BASE}/api/v1/auth/export-data`, {
     headers: { Authorization: `Bearer ${token}` },
   });
   if (res.status === 401) notifySessionExpired();

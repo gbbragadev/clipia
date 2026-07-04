@@ -260,16 +260,30 @@ async def generate(
         job_meta["music_enabled"] = "1" if req.music_enabled else "0"
     _redis.hset(f"job:{job_id}", mapping=job_meta)
 
-    dispatch_pipeline(
-        job_id,
-        req.topic,
-        req.style,
-        req.duration_target,
-        template_id=req.template_id,
-        voice_provider=req.voice_provider,
-        voice_config=req.voice_config,
-        trend_context=req.trend_context,
-    )
+    try:
+        dispatch_pipeline(
+            job_id,
+            req.topic,
+            req.style,
+            req.duration_target,
+            template_id=req.template_id,
+            voice_provider=req.voice_provider,
+            voice_config=req.voice_config,
+            trend_context=req.trend_context,
+        )
+    except Exception as e:  # noqa: BLE001 — enfileirar falhou (Celery/Redis down): estorna p/ nao cobrar sem gerar
+        await _refund_credits(db, user.id, credit_cost)
+        if cap_key:
+            _redis.decr(cap_key)  # devolve a cota diaria de ai_video consumida na linha ~243
+        _redis.hset(
+            f"job:{job_id}",
+            mapping={"status": "failed", "error": "Falha ao enfileirar a geracao. Credito estornado."},
+        )
+        logger.error("dispatch_pipeline falhou job=%s user=%s: %s — credito estornado", job_id, user.id, e)
+        raise HTTPException(
+            status_code=503,
+            detail="Nao foi possivel iniciar a geracao agora. Seu credito foi estornado, tente novamente em instantes.",
+        )
 
     if is_ai_video:
         # Telemetria de custo p/ medir gasto real (dono pediu): Seedance ~R$0,67/s.
@@ -1011,7 +1025,22 @@ async def render_video(
             "detail": "Re-render enfileirado...",
         },
     )
-    task_rerender_video.delay(job_id)
+    try:
+        task_rerender_video.delay(job_id)
+    except Exception as e:  # noqa: BLE001 — enfileirar falhou (Celery/Redis down): estorna e reverte
+        if cost > 0:
+            await _refund_credits(db, user.id, cost)
+            job.pending_credits = float(cost)  # restaura p/ a re-tentativa cobrar de novo
+            await db.commit()
+        _redis.hset(
+            f"job:{job_id}",
+            mapping={"status": "completed", "detail": "Re-render nao pode ser enfileirado; credito estornado."},
+        )
+        logger.error("task_rerender_video.delay falhou job=%s: %s — credito estornado", job_id, e)
+        raise HTTPException(
+            status_code=503,
+            detail="Nao foi possivel iniciar o re-render agora. Seu credito foi estornado, tente novamente.",
+        )
 
     return {
         "status": "rendering",
