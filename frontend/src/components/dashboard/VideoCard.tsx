@@ -1,10 +1,13 @@
 'use client'
 
 import { useState, useRef, useEffect, useCallback } from 'react'
+import { Loader2, Play } from 'lucide-react'
 import { strings } from '@/lib/strings';
 import type { JobSummary } from '@/lib/editor-api'
 import { downloadAuthenticatedFile, fetchAuthenticatedBlobUrl } from '@/lib/download'
 import { GlowCard } from '@/components/ui/GlowCard'
+import { useToast } from '@/components/ui/feedback'
+import VideoPlayerModal from './VideoPlayerModal'
 
 const STYLE_GRADIENTS: Record<string, string> = {
   educational: 'from-coral/40 to-azure/40',
@@ -55,9 +58,13 @@ interface VideoCardProps {
 }
 
 export default function VideoCard({ job, onEdit, onCancel }: VideoCardProps) {
+  const { success: toastSuccess, error: toastError } = useToast()
   const canEdit = ['completed', 'editable'].includes(job.status)
   const canCancel = onCancel ? ['processing', 'queued'].includes(job.status) : false
   const [confirmCancel, setConfirmCancel] = useState(false)
+  const [showPlayer, setShowPlayer] = useState(false)
+  const [downloading, setDownloading] = useState(false)
+  const [dlProgress, setDlProgress] = useState<number | null>(null)
   const badge = statusBadge(job.status)
   const gradient = STYLE_GRADIENTS[job.style] || 'from-gray-900/40 to-gray-800/40'
   const icon = STYLE_ICONS[job.style] || '🎬'
@@ -99,14 +106,32 @@ export default function VideoCard({ job, onEdit, onCancel }: VideoCardProps) {
     if (v) { v.pause(); v.currentTime = 0 }
   }, [])
 
+  // Download com feedback real: spinner + % (stream) e toast de sucesso/erro.
+  // Antes a Promise rejeitada era engolida — o botão parecia morto em 4G (bug reportado).
+  const handleDownload = useCallback(async () => {
+    if (!job.download_url || downloading) return
+    setDownloading(true)
+    setDlProgress(null)
+    try {
+      await downloadAuthenticatedFile(job.download_url, `clipia-${job.job_id.slice(0, 8)}.mp4`, setDlProgress)
+      toastSuccess('Download concluído', 'Confira a pasta de downloads do navegador.')
+    } catch (err) {
+      toastError('Falha no download', err instanceof Error ? err.message : 'Tente novamente em instantes.')
+    } finally {
+      setDownloading(false)
+      setDlProgress(null)
+    }
+  }, [job.download_url, job.job_id, downloading, toastSuccess, toastError])
+
   return (
     <GlowCard intensity={0.2} className="h-full">
       <div className="flex flex-col h-full bg-[#110d1a] hover:bg-[#161122] transition-colors rounded-xl overflow-hidden relative">
         {/* Thumbnail - shorter on mobile, taller on desktop */}
         <div
-          className={`w-full aspect-[3/4] sm:aspect-[9/16] bg-gradient-to-br ${gradient} flex flex-col items-center justify-center relative overflow-hidden group`}
+          className={`w-full aspect-[3/4] sm:aspect-[9/16] bg-gradient-to-br ${gradient} flex flex-col items-center justify-center relative overflow-hidden group ${job.download_url ? 'cursor-pointer' : ''}`}
           onMouseEnter={handleEnter}
           onMouseLeave={handleLeave}
+          onClick={() => { if (job.download_url) setShowPlayer(true) }}
         >
           <div className="absolute inset-0 bg-[url(/noise.svg)] opacity-20 mix-blend-overlay"></div>
 
@@ -134,15 +159,18 @@ export default function VideoCard({ job, onEdit, onCancel }: VideoCardProps) {
             </span>
           </div>
 
-          {/* Play Overlay Hint */}
+          {/* Abre o player dedicado (não é mais só decoração) */}
           {job.download_url && (
-            <div className="absolute inset-0 flex items-center justify-center z-10 opacity-0 group-hover:opacity-100 transition-opacity">
-               <div className="w-12 h-12 rounded-full bg-black/50 backdrop-blur-md flex items-center justify-center border border-white/20">
-                 <svg width="20" height="20" viewBox="0 0 24 24" fill="white">
-                   <polygon points="5 3 19 12 5 21 5 3" />
-                 </svg>
-               </div>
-            </div>
+            <button
+              type="button"
+              aria-label={`Assistir "${job.topic}"`}
+              onClick={(e) => { e.stopPropagation(); setShowPlayer(true) }}
+              className="absolute inset-0 flex items-center justify-center z-10 opacity-0 group-hover:opacity-100 focus-visible:opacity-100 transition-opacity cursor-pointer"
+            >
+              <span className="w-12 h-12 rounded-full bg-black/50 backdrop-blur-md flex items-center justify-center border border-white/20 transition-transform group-hover:scale-105">
+                <Play size={20} className="fill-white text-white" />
+              </span>
+            </button>
           )}
         </div>
 
@@ -176,11 +204,21 @@ export default function VideoCard({ job, onEdit, onCancel }: VideoCardProps) {
               {job.download_url && (
                 <button
                   type="button"
-                  onClick={() => downloadAuthenticatedFile(job.download_url!, `clipia-${job.job_id.slice(0, 8)}.mp4`)}
-                  className="flex-1 flex items-center justify-center gap-1.5 py-3 sm:py-2.5 rounded-lg bg-white/10 border border-white/10 text-white text-sm font-semibold hover:bg-white/15 active:scale-[0.97] transition"
+                  onClick={handleDownload}
+                  disabled={downloading}
+                  className="flex-1 flex items-center justify-center gap-1.5 py-3 sm:py-2.5 rounded-lg bg-white/10 border border-white/10 text-white text-sm font-semibold hover:bg-white/15 active:scale-[0.97] transition disabled:cursor-wait disabled:opacity-70"
                 >
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-                  {strings.dashboard.videos.download}
+                  {downloading ? (
+                    <>
+                      <Loader2 size={14} className="animate-spin" />
+                      <span className="tabular-nums">{dlProgress != null ? `${Math.round(dlProgress * 100)}%` : 'Baixando…'}</span>
+                    </>
+                  ) : (
+                    <>
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                      {strings.dashboard.videos.download}
+                    </>
+                  )}
                 </button>
               )}
               {canCancel && (
@@ -222,6 +260,11 @@ export default function VideoCard({ job, onEdit, onCancel }: VideoCardProps) {
           )}
         </div>
       </div>
+
+      {/* Player dedicado (portal — escapa do overflow/transform do card) */}
+      {showPlayer && (
+        <VideoPlayerModal job={job} onClose={() => setShowPlayer(false)} onEdit={onEdit} />
+      )}
     </GlowCard>
   )
 }
