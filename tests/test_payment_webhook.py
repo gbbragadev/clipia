@@ -178,3 +178,44 @@ async def test_webhook_refund_of_unapproved_purchase_is_noop(
     assert response.json()["status"] == "not_credited", "Refund of a never-approved purchase must be a no-op."
     refreshed_user = await db_session.get(User, verified_user.id)
     assert refreshed_user.credits == credits_before, "No-op refund must not change the balance."
+
+
+@pytest.mark.asyncio
+async def test_webhook_approved_replay_is_idempotent(client, db_session, purchase_factory, verified_user, monkeypatch):
+    """Replay do mesmo webhook 'approved' (MP reenvia o mesmo payment) NAO re-credita.
+
+    Espelha test_stripe_webhook_is_idempotent: protege contra duplicacao do lado do
+    provedor (retries, reenvio manual no painel) usando o guard de status do _credit_once.
+    """
+    purchase = await purchase_factory(package_name="popular")  # 30 creditos
+    credits_before = (await db_session.get(User, verified_user.id)).credits
+    monkeypatch.setattr("app.payments.routes.settings.MP_WEBHOOK_SECRET", "secret")
+
+    class _Sdk:
+        class payment:
+            @staticmethod
+            def get(_payment_id):
+                return {"response": {"status": "approved", "external_reference": str(purchase.id)}}
+
+    monkeypatch.setattr("app.payments.service._get_sdk", lambda: _Sdk())
+
+    # 1) Primeiro webhook: credita
+    first = await client.post(
+        "/api/v1/webhooks/mercadopago",
+        json={"action": "payment.updated", "data": {"id": "123"}},
+        headers=_signed_headers(),
+    )
+    assert first.json()["status"] == "credited", "First approved webhook must credit."
+
+    # 2) Replay do mesmo payment_id: nao re-credita
+    second = await client.post(
+        "/api/v1/webhooks/mercadopago",
+        json={"action": "payment.updated", "data": {"id": "123"}},
+        headers=_signed_headers(),
+    )
+    assert second.json()["status"] == "not_credited", "Duplicate MP webhook must not re-credit."
+
+    refreshed_user = await db_session.get(User, verified_user.id)
+    assert (
+        refreshed_user.credits == credits_before + 30
+    ), "Replay must leave the balance exactly at one-credit increment."
