@@ -37,6 +37,8 @@ function statusBadge(status: string) {
       return { label: 'Atualizando', classes: 'bg-azure/20 text-azure animate-pulse border border-azure/30' }
     case 'cancelling':
       return { label: 'Cancelando', classes: 'bg-gray-500/20 text-gray-400 animate-pulse border border-gray-500/30' }
+    case 'cancelled':
+      return { label: 'Cancelado', classes: 'bg-gray-500/20 text-gray-400 border border-gray-500/30' }
     case 'queued':
       return { label: 'Na fila', classes: 'bg-gray-500/20 text-gray-400 border border-gray-500/30' }
     default:

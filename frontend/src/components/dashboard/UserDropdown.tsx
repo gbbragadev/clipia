@@ -46,8 +46,8 @@ export default function UserDropdown({ name, plan, onLogout }: UserDropdownProps
               <span
                 className="inline-block mt-1 px-2 py-0.5 rounded text-[10px] font-semibold uppercase"
                 style={{
-                  background: plan === 'free' ? 'rgba(148,163,184,0.15)' : 'rgba(168,85,247,0.15)',
-                  color: plan === 'free' ? '#94a3b8' : '#c084fc',
+                  background: plan === 'free' ? 'rgba(148,163,184,0.15)' : 'rgba(255,86,56,0.15)',
+                  color: plan === 'free' ? '#94a3b8' : '#ff7a61',
                 }}
               >
                 {plan}

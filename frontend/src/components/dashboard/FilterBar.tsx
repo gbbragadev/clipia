@@ -31,9 +31,9 @@ export default function FilterBar({ filters }: FilterBarProps) {
                 onClick={() => filter.onChange(opt.value)}
                 className="px-2.5 py-1 rounded-lg text-xs sm:text-sm font-medium transition-all cursor-pointer"
                 style={{
-                  background: active ? 'rgba(168, 85, 247, 0.15)' : 'transparent',
-                  color: active ? '#c084fc' : 'var(--text-tertiary)',
-                  border: active ? '1px solid rgba(168, 85, 247, 0.3)' : '1px solid transparent',
+                  background: active ? 'rgba(255, 86, 56, 0.15)' : 'transparent',
+                  color: active ? '#ff7a61' : 'var(--text-tertiary)',
+                  border: active ? '1px solid rgba(255, 86, 56, 0.3)' : '1px solid transparent',
                 }}
               >
                 {opt.label}
