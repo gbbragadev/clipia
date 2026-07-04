@@ -233,4 +233,7 @@ def test_job_list_format_unchanged(tmp_path, monkeypatch):
         "duration_target",
         "created_at",
         "download_url",
+        # Grid reativa (2026-07-03): progresso em tempo real exposto do Redis.
+        "progress",
+        "current_step",
     }
