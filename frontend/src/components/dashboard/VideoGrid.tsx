@@ -19,12 +19,16 @@ type SortOrder = 'newest' | 'oldest'
 type StatusFilter = 'all' | 'editable' | 'completed' | 'queued' | 'processing' | 'error'
 
 function SkeletonCard() {
+  // Espelha a estrutura do VideoCard real (thumb retrato + footer) para não haver
+  // pulo de layout quando os dados chegam; shimmer via .anim-shimmer do globals.css
+  // (reduced-motion é zerado pela rede de segurança CSS global).
   return (
-    <div className="rounded-xl bg-[var(--bg-surface)] border border-[var(--border-subtle)] overflow-hidden animate-pulse">
-      <div className="aspect-video bg-[var(--bg-surface-hover)]" />
-      <div className="p-4 space-y-2">
-        <div className="h-4 bg-[var(--bg-surface-hover)] rounded w-3/4" />
-        <div className="h-3 bg-[var(--bg-surface-hover)] rounded w-1/2" />
+    <div className="anim-shimmer relative overflow-hidden rounded-xl bg-[var(--bg-raised)] border border-[var(--border-subtle)]">
+      <div className="w-full aspect-[3/4] sm:aspect-[9/16] bg-[var(--bg-surface)]" />
+      <div className="p-4 space-y-2.5 border-t border-white/5">
+        <div className="h-3.5 w-3/4 rounded bg-[var(--bg-surface-hover)]" />
+        <div className="h-3 w-1/2 rounded bg-[var(--bg-surface-hover)]" />
+        <div className="h-9 rounded-lg bg-[var(--bg-surface-hover)]" />
       </div>
     </div>
   )
@@ -63,9 +67,7 @@ export default function VideoGrid({ jobs, loading, onEdit, onCancel }: VideoGrid
   if (loading) {
     return (
       <div className="grid grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
-        <SkeletonCard />
-        <SkeletonCard />
-        <SkeletonCard />
+        {Array.from({ length: 6 }, (_, i) => <SkeletonCard key={i} />)}
       </div>
     )
   }

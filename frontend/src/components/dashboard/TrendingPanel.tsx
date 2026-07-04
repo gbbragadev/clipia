@@ -75,7 +75,10 @@ export default function TrendingPanel({ onSelect }: TrendingPanelProps) {
       {loading ? (
         <div className="grid sm:grid-cols-2 gap-3">
           {Array.from({ length: 4 }).map((_, i) => (
-            <div key={i} className="h-16 rounded-xl bg-white/5 animate-pulse" />
+            <div key={i} className="anim-shimmer relative h-16 overflow-hidden rounded-xl border border-white/5 bg-white/5 p-3">
+              <div className="h-3 w-4/5 rounded bg-white/10" />
+              <div className="mt-2 h-2.5 w-2/5 rounded bg-white/[0.07]" />
+            </div>
           ))}
         </div>
       ) : trends.length === 0 ? (

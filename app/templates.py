@@ -68,6 +68,47 @@ TEMPLATES: dict[str, VideoTemplate] = {
         ),
         voice=VoicePreset(),
     ),
+    "curiosidades_lista": VideoTemplate(
+        id="curiosidades_lista",
+        name="Top Curiosidades",
+        description="Lista numerada de fatos surpreendentes com gancho forte — o formato viral clássico",
+        icon="🤯",
+        layout=LayoutConfig(type="fullscreen"),
+        media=MediaStrategy(source="pexels"),
+        script=ScriptConfig(
+            prompt_extra=(
+                "\n\nEste video e uma LISTA NUMERADA de curiosidades (formato viral 'top N')."
+                "\nCena 1 = gancho com promessa explicita (ex: '5 curiosidades sobre X que quase ninguem conhece')."
+                "\nCada cena do meio = UM fato numerado em voz alta ('Numero 3: ...'), em ordem crescente"
+                " de impacto — guarde o mais insano para a penultima cena."
+                "\nUltima cena = CTA rapido ('Comenta qual te surpreendeu e segue para mais')."
+                "\nFatos REAIS e verificaveis; se nao tiver certeza, troque o fato."
+            ),
+            needs_keywords=True,
+        ),
+        voice=VoicePreset(),
+    ),
+    "voce_sabia": VideoTemplate(
+        id="voce_sabia",
+        name="Você Sabia?",
+        description="Um único fato surpreendente, curto e direto — perfeito para volume diário",
+        icon="💡",
+        layout=LayoutConfig(type="fullscreen"),
+        media=MediaStrategy(source="pexels"),
+        script=ScriptConfig(
+            prompt_extra=(
+                "\n\nEste video e do formato 'VOCE SABIA?' — UM unico fato surpreendente, explorado a fundo."
+                "\nCena 1 = comece literalmente com 'Voce sabia que' + a parte mais chocante do fato."
+                "\nCenas do meio = o porque/como, com detalhes que aumentam a surpresa."
+                "\nUltima cena = fechamento memoravel que convida a compartilhar."
+                "\nUse no MAXIMO 4 cenas — video curto e denso."
+                "\nFato REAL e verificavel; se nao tiver certeza, troque o fato."
+            ),
+            needs_keywords=True,
+            word_rate=2.0,
+        ),
+        voice=VoicePreset(voice_id="pt-BR-ThalitaNeural", rate=-5, pitch=2),
+    ),
     "gameplay_split": VideoTemplate(
         id="gameplay_split",
         name="Gameplay Split",

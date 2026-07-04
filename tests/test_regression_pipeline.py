@@ -47,6 +47,9 @@ def test_templates_endpoint_unchanged():
     template_ids = {item["id"] for item in response}
     assert template_ids == {
         "stock_narration",
+        # Templates virais Q4 (2026-07-03): formatos do ICP de curiosidades.
+        "curiosidades_lista",
+        "voce_sabia",
         "gameplay_split",
         "character_narration",
         "story_time",
