@@ -1101,6 +1101,10 @@ async def list_jobs(
         redis_data = _redis.hgetall(f"job:{j.id}")
         status = redis_data.get("status", j.status) if redis_data else j.status
         has_video = j.video_url or (Path(settings.STORAGE_DIR) / "output" / f"{j.id}.mp4").exists()
+        # Em estado ativo o arquivo em output/ pode ser a versao ANTIGA (re-render em
+        # andamento): esconder o download fecha pelo dashboard a mesma corrida que o
+        # editor fecha via get_job (baixar video pre-edicao).
+        downloadable = has_video and status not in {"queued", "processing", "rendering", "cancelling"}
         # Treat completed jobs as editable if they have composition files
         if status == "completed":
             job_dir = Path(settings.STORAGE_DIR) / "jobs" / str(j.id)
@@ -1114,7 +1118,7 @@ async def list_jobs(
                 "status": status,
                 "duration_target": j.duration_target,
                 "created_at": j.created_at.isoformat() if j.created_at else None,
-                "download_url": f"/api/v1/jobs/{j.id}/download" if has_video else None,
+                "download_url": f"/api/v1/jobs/{j.id}/download" if downloadable else None,
                 # Progresso em tempo real p/ a grid reativa (o hash do Redis ja esta em maos).
                 "progress": float(redis_data.get("progress") or 0) if redis_data else 0.0,
                 "current_step": (redis_data.get("current_step") or None) if redis_data else None,

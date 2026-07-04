@@ -134,7 +134,16 @@ export default function VideoPlayerModal({ job, onClose, onEdit }: VideoPlayerMo
               </button>
             </div>
           ) : src ? (
-            <video src={src} controls autoPlay playsInline className="h-full w-full object-contain" />
+            // Sem autoPlay declarativo: a ativação do clique expira durante o fetch async
+            // e o browser bloquearia autoplay COM som. Tentamos programaticamente; se a
+            // política negar, o primeiro frame + controles nativos ficam visíveis.
+            <video
+              src={src}
+              controls
+              playsInline
+              className="h-full w-full object-contain"
+              onLoadedData={(e) => { e.currentTarget.play().catch(() => {}) }}
+            />
           ) : (
             <div className="flex flex-col items-center gap-3 text-slate-400">
               <Loader2 size={22} className="animate-spin text-coral" />

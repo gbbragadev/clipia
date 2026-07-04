@@ -54,6 +54,30 @@ async def test_list_jobs_exposes_realtime_progress(client, app, job_factory, ver
 
 
 @pytest.mark.asyncio
+async def test_list_jobs_hides_download_url_while_rendering(
+    client, app, job_factory, verified_user, auth_headers, storage_dir
+):
+    """Corrida pelo dashboard: durante o re-render o mp4 em output/ e a versao ANTIGA —
+    o download some do card ate o worker terminar (achado da revisao adversarial)."""
+    job = await job_factory(status="completed")
+    output_dir = storage_dir / "output"
+    output_dir.mkdir(parents=True, exist_ok=True)
+    (output_dir / f"{job.id}.mp4").write_bytes(b"video antigo")
+    app.state.fake_redis.hset(f"job:{job.id}", mapping={"status": "rendering", "progress": 0.2})
+
+    resp = await client.get("/api/v1/jobs", headers=auth_headers(verified_user))
+    item = next(i for i in resp.json() if i["job_id"] == str(job.id))
+    assert item["status"] == "rendering"
+    assert item["download_url"] is None, "Download ativo durante o render entrega a versao pre-edicao."
+
+    # Render terminou -> download volta.
+    app.state.fake_redis.hset(f"job:{job.id}", mapping={"status": "completed", "progress": 1.0})
+    resp = await client.get("/api/v1/jobs", headers=auth_headers(verified_user))
+    item = next(i for i in resp.json() if i["job_id"] == str(job.id))
+    assert item["download_url"] is not None
+
+
+@pytest.mark.asyncio
 async def test_list_jobs_without_redis_hash_defaults_progress(client, job_factory, verified_user, auth_headers):
     """Job antigo sem hash no Redis (expirou): progress 0 e step None, sem quebrar."""
     job = await job_factory(status="completed")

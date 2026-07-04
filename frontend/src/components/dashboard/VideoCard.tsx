@@ -84,6 +84,12 @@ export default function VideoCard({ job, onEdit, onCancel }: VideoCardProps) {
   const [previewRequested, setPreviewRequested] = useState(false)
   const videoRef = useRef<HTMLVideoElement>(null)
   const hoveringRef = useRef(false)
+  const mountedRef = useRef(true)
+
+  useEffect(() => {
+    mountedRef.current = true
+    return () => { mountedRef.current = false }
+  }, [])
 
   useEffect(() => {
     return () => { if (previewSrc) URL.revokeObjectURL(previewSrc) }
@@ -96,9 +102,13 @@ export default function VideoCard({ job, onEdit, onCancel }: VideoCardProps) {
       setPreviewRequested(true)
       fetchAuthenticatedBlobUrl(job.download_url)
         .then((url) => {
+          // Card desmontou durante o fetch (filtro/re-fetch da grid): revoga na hora,
+          // senão o setState vira no-op e o blob do MP4 inteiro vaza até a navegação.
+          if (!mountedRef.current) {
+            URL.revokeObjectURL(url)
+            return
+          }
           setPreviewSrc(url)
-          // Toca assim que o blob estiver pronto, se o cursor ainda estiver sobre o card.
-          if (hoveringRef.current) videoRef.current?.play().catch(() => {})
         })
         .catch(() => {})
       return
@@ -142,6 +152,8 @@ export default function VideoCard({ job, onEdit, onCancel }: VideoCardProps) {
           <div className="absolute inset-0 bg-[url(/noise.svg)] opacity-20 mix-blend-overlay"></div>
 
           {job.download_url && previewSrc && (
+            // autoPlay (muted = sempre permitido) resolve o PRIMEIRO hover: quando o blob
+            // chega e o <video> monta, o ref ainda era null no .then — play() manual era no-op.
             <video
               ref={videoRef}
               src={previewSrc}
@@ -149,8 +161,8 @@ export default function VideoCard({ job, onEdit, onCancel }: VideoCardProps) {
               muted
               loop
               playsInline
-              preload="none"
-              onLoadedData={() => { if (hoveringRef.current) videoRef.current?.play().catch(() => {}) }}
+              autoPlay
+              onLoadedData={() => { if (!hoveringRef.current) { videoRef.current?.pause(); if (videoRef.current) videoRef.current.currentTime = 0 } }}
             />
           )}
 
