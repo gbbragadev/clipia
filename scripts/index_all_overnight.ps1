@@ -8,5 +8,7 @@ $env:Path += ";C:\Users\guibr\AppData\Local\Microsoft\WinGet\Packages\Gyan.FFmpe
 Set-Location C:\Dev\clipia
 $log = "C:\Dev\clipia\storage\index_overnight.log"
 "=== $(Get-Date -Format 'yyyy-MM-dd HH:mm') - inicio indexacao overnight ===" | Out-File -FilePath $log -Append -Encoding utf8
-& .\.venv312\Scripts\python.exe scripts\index_library.py 2>&1 | Out-File -FilePath $log -Append -Encoding utf8
-"=== $(Get-Date -Format 'yyyy-MM-dd HH:mm') - fim ===" | Out-File -FilePath $log -Append -Encoding utf8
+& .\.venv312\Scripts\python.exe scripts\index_library.py *>> $log
+$exitCode = $LASTEXITCODE
+"=== $(Get-Date -Format 'yyyy-MM-dd HH:mm') - fim (exit=$exitCode) ===" | Out-File -FilePath $log -Append -Encoding utf8
+exit $exitCode

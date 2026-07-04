@@ -62,6 +62,10 @@ FOLDER_TAG_MAP: dict[str, list[str]] = {
 
 _DB_PATH = settings.STORAGE_DIR / "drive_index.db"
 _CACHE_DIR = settings.STORAGE_DIR / "library" / "cache"
+_RCLONE_DEFAULT_TIMEOUT_SECONDS = 300
+_RCLONE_BATCH_TIMEOUT_SECONDS = 1800
+_RCLONE_BATCH_SIZE = 100
+_RCLONE_BATCH_TPS_LIMIT = "2"
 
 
 def _conn() -> sqlite3.Connection:
@@ -85,10 +89,22 @@ def _conn() -> sqlite3.Connection:
     return conn
 
 
-def _rclone(*args: str) -> subprocess.CompletedProcess:
+def _rclone(*args: str, timeout: int = _RCLONE_DEFAULT_TIMEOUT_SECONDS) -> subprocess.CompletedProcess:
     cmd = [settings.RCLONE_EXE, *args]
     # encoding=utf-8: nomes de arquivo do Drive tem acentos/emoji; cp1252 (default Win) quebra.
-    return subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=300)
+    try:
+        return subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=timeout,
+        )
+    except subprocess.TimeoutExpired as e:
+        stderr = f"rclone timed out after {timeout}s: {e}"
+        logger.warning(stderr)
+        return subprocess.CompletedProcess(cmd, returncode=124, stdout=e.stdout or "", stderr=stderr)
 
 
 def list_remote_clips(folder_id: str) -> list[str]:
@@ -252,24 +268,50 @@ def _download_batch(folder_id: str, names: list[str], dest_dir: Path) -> None:
     dest_dir.mkdir(parents=True, exist_ok=True)
     import tempfile
 
-    with tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False, encoding="utf-8", newline="") as f:
-        for n in names:
-            f.write(n + "\n")
-        files_from = f.name
-    try:
-        res = _rclone(
-            "copy",
-            f"{settings.RCLONE_REMOTE}:",
-            "--drive-root-folder-id",
-            folder_id,
-            "--files-from",
-            files_from,
-            str(dest_dir),
-        )
-        if res.returncode != 0:
-            logger.warning("rclone batch copy falhou p/ pasta %s: %s", folder_id, res.stderr[:200])
-    finally:
-        Path(files_from).unlink(missing_ok=True)
+    for start in range(0, len(names), _RCLONE_BATCH_SIZE):
+        batch = names[start : start + _RCLONE_BATCH_SIZE]
+        with tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False, encoding="utf-8", newline="") as f:
+            for n in batch:
+                f.write(n + "\n")
+            files_from = f.name
+        try:
+            res = _rclone(
+                "copy",
+                f"{settings.RCLONE_REMOTE}:",
+                "--drive-root-folder-id",
+                folder_id,
+                "--files-from",
+                files_from,
+                "--tpslimit",
+                _RCLONE_BATCH_TPS_LIMIT,
+                "--retries",
+                "5",
+                "--low-level-retries",
+                "20",
+                str(dest_dir),
+                timeout=_RCLONE_BATCH_TIMEOUT_SECONDS,
+            )
+            if res.returncode != 0:
+                logger.warning(
+                    "rclone batch copy falhou p/ pasta %s (%d-%d/%d): %s",
+                    folder_id,
+                    start + 1,
+                    start + len(batch),
+                    len(names),
+                    res.stderr[:300],
+                )
+            else:
+                downloaded = sum(1 for name in batch if (dest_dir / name).exists())
+                if downloaded == 0 and batch:
+                    logger.warning(
+                        "rclone batch copy baixou 0 arquivos p/ pasta %s (%d-%d/%d)",
+                        folder_id,
+                        start + 1,
+                        start + len(batch),
+                        len(names),
+                    )
+        finally:
+            Path(files_from).unlink(missing_ok=True)
 
 
 def index_embeddings(tag: str, limit: int | None = None) -> int:

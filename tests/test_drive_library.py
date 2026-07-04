@@ -1,5 +1,6 @@
 """Testes offline do catalogo drive_library (mocka rclone; sem rede/GPU)."""
 
+import subprocess
 from pathlib import Path
 
 import app.services.drive_library as dl
@@ -64,3 +65,39 @@ def test_pick_drive_clip_downloads_and_caches(monkeypatch, tmp_path):
 def test_pick_drive_clip_empty_tag_returns_none(monkeypatch, tmp_path):
     monkeypatch.setattr(dl, "_DB_PATH", tmp_path / "idx.db")
     assert dl.pick_drive_clip("inexistente") is None
+
+
+def test_rclone_timeout_returns_failed_process(monkeypatch):
+    def timeout_run(*args, **kwargs):
+        raise subprocess.TimeoutExpired(args[0], kwargs["timeout"])
+
+    monkeypatch.setattr(dl.subprocess, "run", timeout_run)
+
+    res = dl._rclone("copy", "gdrive:", "dest", timeout=7)
+
+    assert res.returncode == 124
+    assert "timed out after 7s" in res.stderr
+
+
+def test_download_batch_chunks_files_from(monkeypatch, tmp_path):
+    monkeypatch.setattr(dl, "_RCLONE_BATCH_SIZE", 2)
+    calls = []
+
+    def fake_rclone(*args, timeout):
+        files_from = Path(args[args.index("--files-from") + 1])
+        calls.append(
+            {
+                "args": args,
+                "timeout": timeout,
+                "files": files_from.read_text(encoding="utf-8").splitlines(),
+            }
+        )
+        return _FakeProc()
+
+    monkeypatch.setattr(dl, "_rclone", fake_rclone)
+
+    dl._download_batch("FID", ["a.mp4", "b.mp4", "c.mp4"], tmp_path / "cache")
+
+    assert [call["files"] for call in calls] == [["a.mp4", "b.mp4"], ["c.mp4"]]
+    assert all("--tpslimit" in call["args"] for call in calls)
+    assert all(call["timeout"] == dl._RCLONE_BATCH_TIMEOUT_SECONDS for call in calls)
