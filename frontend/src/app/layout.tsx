@@ -66,8 +66,18 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="pt-BR" className={`h-full antialiased ${GeistSans.variable} ${sora.variable}`}>
+    <html
+      lang="pt-BR"
+      className={`h-full antialiased ${GeistSans.variable} ${sora.variable}`}
+      suppressHydrationWarning
+    >
       <head>
+        {/* Sem JS a classe não entra e o conteúdo .reveal fica visível (fail-open). */}
+        <script
+          dangerouslySetInnerHTML={{
+            __html: "document.documentElement.classList.add('js')",
+          }}
+        />
         <script
           type="application/ld+json"
           dangerouslySetInnerHTML={{

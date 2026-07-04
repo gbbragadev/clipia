@@ -37,15 +37,16 @@ export function Hero() {
 
             <Reveal delay={90}>
               <h1 className="mt-5 text-balance text-4xl font-extrabold leading-[1.03] tracking-tight text-cloud sm:text-5xl lg:text-[3.6rem]">
-                Do tema ao <span className="text-coral">vídeo vertical</span>, sem começar do zero.
+                Digite um tema. Receba um vídeo{" "}
+                <span className="text-coral">pronto para postar</span>.
               </h1>
             </Reveal>
 
             <Reveal delay={160}>
               <p className="mt-5 max-w-xl text-pretty text-base leading-relaxed text-mist sm:text-lg">
-                O ClipIA transforma o seu assunto em roteiro, cenas, narração em português, legendas
-                animadas e edição — tudo no navegador. Você revisa no editor e baixa em MP4 9:16
-                pronto para Reels, TikTok e Shorts.
+                A ClipIA escreve o roteiro, narra em português, sincroniza as legendas e monta as
+                cenas — em minutos, direto no navegador. Você só revisa no editor e baixa o MP4
+                9:16 para Reels, TikTok e Shorts.
               </p>
             </Reveal>
 

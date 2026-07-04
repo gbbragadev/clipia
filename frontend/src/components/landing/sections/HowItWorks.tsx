@@ -65,7 +65,7 @@ function MiniVisual({ index }: { index: number }) {
       <div className="flex items-center gap-2">
         <div className="relative h-12 w-7 overflow-hidden rounded-md ring-1 ring-white/10">
           <img
-            src="https://images.pexels.com/photos/25752810/pexels-photo-25752810.jpeg?auto=compress&cs=tinysrgb&fit=crop&h=300&w=200"
+            src="https://images.pexels.com/photos/17954395/pexels-photo-17954395.jpeg?auto=compress&cs=tinysrgb&fit=crop&h=300&w=200"
             alt=""
             className="h-full w-full object-cover"
           />

@@ -52,6 +52,7 @@ export const accentMap: Record<
 export const HERO_FACTS = [
   { icon: "gift", text: "2 vídeos grátis ao confirmar o e-mail" },
   { icon: "card", text: "Sem cartão de crédito" },
+  { icon: "bolt", text: "Do tema ao MP4 em poucos minutos" },
   { icon: "mic", text: "Narração pt-BR com vozes naturais" },
 ] as const;
 

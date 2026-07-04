@@ -196,7 +196,9 @@ body::before {
   .text-pretty { text-wrap: pretty; }
   .no-scrollbar { scrollbar-width: none; -ms-overflow-style: none; }
   .no-scrollbar::-webkit-scrollbar { display: none; }
-  .reveal {
+  /* Escondido apenas quando JS está ativo (html.js via script inline no layout);
+     sem JS o conteúdo permanece visível — fail-open. */
+  .js .reveal {
     opacity: 0;
     transform: translateY(20px);
     transition:
@@ -205,7 +207,7 @@ body::before {
     transition-delay: var(--reveal-delay, 0ms);
     will-change: opacity, transform;
   }
-  .reveal.in { opacity: 1; transform: none; }
+  .js .reveal.in { opacity: 1; transform: none; }
   .bg-grid {
     background-image:
       linear-gradient(to right, rgba(255, 255, 255, 0.035) 1px, transparent 1px),
