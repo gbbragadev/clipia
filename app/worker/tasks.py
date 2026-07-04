@@ -494,6 +494,14 @@ def task_generate_script(
             f"Script: {len(scenes)} scenes, {total_dur}s total, {len(script.get('narration', '').split())} words"
         )
 
+        # Q7: cascata caiu no provedor free = roteiro de qualidade reduzida. Flag no hash
+        # (grid le em tempo real) + o llm_provider dentro do script persiste no Postgres.
+        from app.services.llm import DEGRADED_PROVIDER_LABEL
+
+        if script.get("llm_provider") == DEGRADED_PROVIDER_LABEL:
+            _redis.hset(f"job:{job_id}", "degraded", "1")
+            logger.warning(f"Job {job_id}: roteiro atendido pelo provedor FREE (qualidade reduzida).")
+
         _update_job(job_id, "processing", "scripting", 0.16, detail="Roteiro gerado com sucesso.")
         script["_duration_target"] = duration_target
         return script

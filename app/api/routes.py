@@ -1122,6 +1122,10 @@ async def list_jobs(
                 # Progresso em tempo real p/ a grid reativa (o hash do Redis ja esta em maos).
                 "progress": float(redis_data.get("progress") or 0) if redis_data else 0.0,
                 "current_step": (redis_data.get("current_step") or None) if redis_data else None,
+                # Q7: roteiro atendido pelo provedor free (badge de qualidade reduzida no card).
+                # Redis = tempo real; script JSONB = durabilidade (sobrevive a reboot do Redis).
+                "degraded": (redis_data.get("degraded") == "1" if redis_data else False)
+                or (isinstance(j.script, dict) and j.script.get("llm_provider") == "openrouter-free"),
             }
         )
     return items

@@ -78,6 +78,24 @@ async def test_list_jobs_hides_download_url_while_rendering(
 
 
 @pytest.mark.asyncio
+async def test_list_jobs_expoe_degradacao_do_llm(client, app, job_factory, verified_user, auth_headers):
+    """Q7: cascata caiu no provedor free -> card mostra 'qualidade reduzida'.
+    Redis (tempo real) OU script JSONB (durabilidade pos-reboot) ligam a flag."""
+    via_redis = await job_factory(status="processing")
+    app.state.fake_redis.hset(f"job:{via_redis.id}", mapping={"status": "processing", "degraded": "1"})
+
+    via_script = await job_factory(status="completed", script={"title": "t", "llm_provider": "openrouter-free"})
+    normal = await job_factory(status="completed", script={"title": "t", "llm_provider": "openai"})
+
+    resp = await client.get("/api/v1/jobs", headers=auth_headers(verified_user))
+    items = {i["job_id"]: i for i in resp.json()}
+
+    assert items[str(via_redis.id)]["degraded"] is True
+    assert items[str(via_script.id)]["degraded"] is True, "Reboot do Redis nao pode apagar o aviso (script JSONB)."
+    assert items[str(normal.id)]["degraded"] is False
+
+
+@pytest.mark.asyncio
 async def test_list_jobs_without_redis_hash_defaults_progress(client, job_factory, verified_user, auth_headers):
     """Job antigo sem hash no Redis (expirou): progress 0 e step None, sem quebrar."""
     job = await job_factory(status="completed")

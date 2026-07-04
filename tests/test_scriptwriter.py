@@ -22,7 +22,7 @@ def test_generate_script_returns_valid_structure():
         }
     )
 
-    with patch("app.services.scriptwriter.complete_text", return_value=fake):
+    with patch("app.services.scriptwriter.complete_text_ex", return_value=(fake, "openai")):
         result = generate_script("curiosidades do oceano", "educational", 45)
 
     assert "title" in result
@@ -45,7 +45,7 @@ def test_generate_script_applies_default_fade_transitions():
             "hashtags": [],
         }
     )
-    with patch("app.services.scriptwriter.complete_text", return_value=fake):
+    with patch("app.services.scriptwriter.complete_text_ex", return_value=(fake, "openai")):
         result = generate_script("tema", "educational", 30)
 
     scenes = result["scenes"]

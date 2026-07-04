@@ -5,7 +5,7 @@ from unittest.mock import patch
 import pytest
 
 from app.config import settings
-from app.services.llm import complete_text
+from app.services.llm import DEGRADED_PROVIDER_LABEL, complete_text, complete_text_ex
 
 
 def _only_openrouter(monkeypatch):
@@ -46,6 +46,21 @@ def test_fallback_on_empty_response(monkeypatch):
     _only_openrouter(monkeypatch)
     with _patch_call(main_return="", fallback_return="fallback ok"):
         assert complete_text("prompt") == "fallback ok"
+
+
+def test_complete_text_ex_reporta_provedor_degradado(monkeypatch):
+    """Q7: quando o free atende, o label volta para o caller marcar o job."""
+    _only_openrouter(monkeypatch)
+    with _patch_call(main_exc=RuntimeError("quota"), fallback_return="fallback ok"):
+        text, provider = complete_text_ex("prompt")
+    assert text == "fallback ok"
+    assert provider == DEGRADED_PROVIDER_LABEL
+
+
+def test_complete_text_ex_reporta_provedor_primario(monkeypatch):
+    _only_openrouter(monkeypatch)
+    with _patch_call(main_return="resultado ok"):
+        assert complete_text_ex("prompt") == ("resultado ok", "openrouter")
 
 
 def test_raises_when_no_fallback_configured(monkeypatch):

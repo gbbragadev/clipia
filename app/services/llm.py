@@ -67,14 +67,19 @@ def _call(model: str, prompt: str, max_tokens: int, json_mode: bool, base_url: s
     return completion.choices[0].message.content or ""
 
 
-def complete_text(prompt: str, max_tokens: int = 16000, json_mode: bool = True) -> str:
-    """Chat completion via cascata de provedores; retorna o texto da PRIMEIRA resposta nao-vazia.
+# Provedor de ultima instancia da cascata: modelo free, qualidade visivelmente pior.
+# Quem consome complete_text_ex usa este label para marcar o job como degradado (Q7).
+DEGRADED_PROVIDER_LABEL = "openrouter-free"
+
+
+def complete_text_ex(prompt: str, max_tokens: int = 16000, json_mode: bool = True) -> tuple[str, str]:
+    """Como complete_text, mas retorna (texto, label do provedor que atendeu).
 
     json_mode=True pede response_format JSON (o prompt deve mencionar JSON).
     max_tokens ALTO de proposito: modelos de reasoning (DeepSeek V4 Pro) gastam tokens "pensando"
     antes do output; com teto baixo o content volta vazio (finish_reason=length).
 
-    A cascata (_provider_chain) tenta OpenRouter pago -> OpenAI -> xAI -> OpenRouter free. Pula
+    A cascata (_provider_chain) tenta OpenAI -> xAI -> OpenRouter pago -> OpenRouter free. Pula
     provedor que erra (ex.: 402 sem credito) OU devolve vazio, ate um responder. Se todos
     falharem, levanta o ultimo erro (nunca retorna "" silencioso).
     """
@@ -89,7 +94,7 @@ def complete_text(prompt: str, max_tokens: int = 16000, json_mode: bool = True) 
             if result and result.strip():
                 if label != "openrouter":
                     logger.info("LLM atendido pelo provedor de fallback: %s (%s)", label, model)
-                return result
+                return result, label
             last_err = ValueError(f"{label}/{model} retornou resposta vazia")
             logger.warning("LLM %s (%s) vazio — proximo provedor", label, model)
         except Exception as e:  # noqa: BLE001 — segue a cascata em qualquer falha do provedor
@@ -97,3 +102,8 @@ def complete_text(prompt: str, max_tokens: int = 16000, json_mode: bool = True) 
             logger.warning("LLM %s (%s) falhou: %s — proximo provedor", label, model, e)
 
     raise last_err or RuntimeError("Todos os provedores LLM falharam")
+
+
+def complete_text(prompt: str, max_tokens: int = 16000, json_mode: bool = True) -> str:
+    """Chat completion via cascata; retorna so o texto (ver complete_text_ex)."""
+    return complete_text_ex(prompt, max_tokens, json_mode)[0]

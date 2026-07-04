@@ -1,7 +1,7 @@
 import json
 import logging
 
-from app.services.llm import complete_text, strip_code_fences
+from app.services.llm import complete_text_ex, strip_code_fences
 from app.templates import get_template
 
 logger = logging.getLogger(__name__)
@@ -136,12 +136,15 @@ def generate_script(
     if trend_context and trend_context.strip():
         prompt_text += TREND_CONTEXT_INSTRUCTION.format(trend_context=trend_context.strip())
 
-    # max_tokens default de complete_text e alto de proposito (reasoning do DeepSeek V4 Pro).
-    raw = complete_text(prompt_text)
+    # max_tokens default de complete_text_ex e alto de proposito (reasoning do DeepSeek V4 Pro).
+    raw, llm_provider = complete_text_ex(prompt_text)
     raw = strip_code_fences(raw)
     if not raw:
         raise ScriptValidationError("LLM retornou resposta vazia (reasoning pode ter estourado o max_tokens)")
     script = _parse_script_json(raw)
+    # Metadado de qualidade (Q7): qual provedor da cascata atendeu. Viaja dentro do
+    # script (persistido no Postgres via finalize) — degradacao fica visivel sem migration.
+    script["llm_provider"] = llm_provider
 
     # Validate and fix duration_hints
     script = _fix_durations(script, duration_target)

@@ -174,7 +174,11 @@
 | 03/07 | **F0-2** Grid reativa (polling c/ backoff, `/jobs` expõe progress/current_step, onJobCreated) | `2266988` | 3 testes `test_jobs_realtime.py`; barra de progresso visível no smoke |
 | 03/07 | **F0-3** Tokens unificados (fim do roxo residual; `--accent-primary` real; -886 linhas dead code) | `3a9fd52` + `0c12491` + `b2eddd5` | `LIVE-elevacao-landing-0307.png` + `LIVE-elevacao-dashboard-grid-0307.png` — zero roxo de marca |
 | 03/07 | **F0-4 (parcial)** EmptyState rico c/ CTA; toasts consistentes em download/render/grid | `3a9fd52` | tsc+build verdes; skeletons ricos ainda pendentes |
-| 03/07 | **BÔNUS** Export por Remotion estava QUEBRADO em prod: mídia buscada via domínio público fazia hairpin de 30s > timeout 28s do delayRender → render local usa 127.0.0.1:8005 | (sprint 03/07) | erro real reproduzido e corrigido no smoke E2E |
+| 03/07 | **BÔNUS** Export por Remotion estava QUEBRADO em prod: mídia buscada via domínio público fazia hairpin de 30s > timeout 28s do delayRender → render local usa 127.0.0.1:8005 | `924b4cf` + `b998c40` | re-render E2E real completou em ~4,4min (antes: erro em 100% das tentativas) |
+| 04/07 | **Q4** Templates virais (`curiosidades_lista` + `voce_sabia`) reusando pipeline stock (1 crédito) | `dd526c3` | job `8f4686a3`: roteiro saiu "gancho → Número 1…5 → CTA" perfeito; MP4 12,1M no output |
+| 04/07 | **F0-4 (fechado)** Skeletons ricos espelhando o card real (shimmer, retrato) na grid + TrendingPanel | `dd526c3` | tsc+build verdes; era paisagem `animate-pulse` → pulo de layout |
+| 04/07 | **Q4** Templates virais: "Top Curiosidades" (lista numerada + gancho + CTA) e "Você Sabia?" (fato único, voz Thalita) — reusam pipeline stock (1 crédito) | `dd526c3` | Gate REAL passou: job `8f4686a3` gerou roteiro "Número 1…5" com gancho e CTA; MP4 final 12,1M no output |
+| 04/07 | **F0-4** Skeletons ricos: grid espelha o card real (retrato+footer, shimmer `.anim-shimmer`); TrendingPanel idem | `dd526c3` | tsc + build verdes; sem pulo de layout no load |
 
 ### Follow-ups anotados pela revisão adversarial (03/07)
 - **Watchdog de render**: se o worker morrer antes de consumir a task de re-render, o job fica
@@ -183,3 +187,9 @@
   `error`+refund após N min sem heartbeat). Mesma família: job preso em `cancelling` há 19d na
   conta admin.
 - Jobs `cancelling` antigos deviam normalizar para `cancelled` na listagem (higiene de status).
+- **Gotcha de boot (04/07 ~00:58)**: após reboot da máquina, TODOS os processos subidos por
+  scheduled task (logon `ClipIA Production` E task temporária) ficaram com listener "surdo"
+  (TCP conecta via backlog do kernel, app nunca vê o request, loop asyncio ocioso — diagnosticável
+  com `py-spy dump` + GET cru via socket). Spawn direto do shell funcionou. Se 8005/3003
+  pendurarem com log limpo: matar e re-subir de outro contexto. Reboot também matou um job no
+  meio do finalize → recuperado enfileirando `task_finalize.delay(final.mp4, job_id)` à mão.

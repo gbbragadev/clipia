@@ -239,4 +239,6 @@ def test_job_list_format_unchanged(tmp_path, monkeypatch):
         # Grid reativa (2026-07-03): progresso em tempo real exposto do Redis.
         "progress",
         "current_step",
+        # Q7 (2026-07-04): flag de degradacao do LLM (badge qualidade reduzida).
+        "degraded",
     }

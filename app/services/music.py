@@ -12,6 +12,9 @@ _MUSIC_DIR = BASE_DIR / "frontend" / "public" / "music"
 # template_id -> nome do arquivo (sem .mp3) em frontend/public/music/
 TEMPLATE_MOODS: dict[str, str] = {
     "stock_narration": "inspirational",
+    # Templates virais Q4: energia de lista viral / curiosidade leve.
+    "curiosidades_lista": "upbeat-energy",
+    "voce_sabia": "inspirational",
     "gameplay_split": "upbeat-energy",
     "character_narration": "happy-pop",
     "story_time": "dark-ambient",

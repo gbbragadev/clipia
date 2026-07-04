@@ -175,6 +175,14 @@ export default function VideoCard({ job, onEdit, onCancel }: VideoCardProps) {
             <span className={`inline-flex items-center text-[10px] px-2.5 py-1 rounded-full font-semibold uppercase tracking-wider backdrop-blur-sm ${badge.classes}`}>
               {badge.label}
             </span>
+            {job.degraded && (
+              <span
+                className="inline-flex items-center gap-1 text-[10px] px-2.5 py-1 rounded-full font-semibold backdrop-blur-sm bg-amber-500/20 text-amber-300 border border-amber-500/30"
+                title="O provedor principal de roteiro estava indisponível — este vídeo usou o modo econômico. Regenere mais tarde para qualidade total."
+              >
+                ⚠ Qualidade reduzida
+              </span>
+            )}
           </div>
 
           {/* Abre o player dedicado (não é mais só decoração) */}

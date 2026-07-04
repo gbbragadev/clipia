@@ -91,6 +91,8 @@ export interface JobSummary {
   progress?: number
   /** Etapa atual do pipeline (chave de STEP_LABELS). */
   current_step?: string | null
+  /** Roteiro atendido pelo provedor LLM free (badge "qualidade reduzida"). */
+  degraded?: boolean
 }
 
 /** Jobs nestes status ainda vão mudar sozinhos — a grid faz polling enquanto existirem. */

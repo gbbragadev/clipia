@@ -23,7 +23,7 @@ FAKE_CLAUDE_RESPONSE = """
 
 def _patch_llm(body: str = FAKE_CLAUDE_RESPONSE):
     """Mocka a chamada LLM (OpenRouter/DeepSeek) retornando o corpo JSON dado."""
-    return patch("app.services.scriptwriter.complete_text", return_value=body)
+    return patch("app.services.scriptwriter.complete_text_ex", return_value=(body, "openai"))
 
 
 def test_visual_hint_instruction_appears_for_ai_image_template():
