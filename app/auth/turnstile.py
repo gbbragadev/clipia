@@ -20,14 +20,21 @@ logger = logging.getLogger(__name__)
 _VERIFY_URL = "https://challenges.cloudflare.com/turnstile/v0/siteverify"
 
 
-async def verify_turnstile(token: str | None, remoteip: str | None = None) -> bool:
+async def verify_turnstile(token: str | None, remoteip: str | None = None, bypass_header: str | None = None) -> bool:
     """Valida um token Turnstile.
 
     Retorna True se o captcha esta desabilitado (sem secret) OU se o token e valido.
     Fail-closed quando ativo: token ausente/invalido/erro de rede -> False (nao deixa
     passar sob ataque). ponytail: fail-closed acopla o cadastro a disponibilidade do CF;
     aceitavel porque so liga quando o Gui pluga o secret.
+
+    Bypass de teste: se READINESS_BYPASS_SECRET estiver configurado E o header
+    `X-Readiness-Bypass` recebido bater com ele, pula o Turnstile. Uso exclusivo do
+    validate_readiness.py / testes E2E internos — nunca habilitar em prod exposta sem
+    necessidade (mesmo sendo seguro: requer segredo compartilhado).
     """
+    if settings.READINESS_BYPASS_SECRET and bypass_header and bypass_header == settings.READINESS_BYPASS_SECRET:
+        return True  # bypass explicito e autenticado (gate de go-live / testes internos)
     if not settings.TURNSTILE_SECRET_KEY:
         return True  # desabilitado -> no-op gracioso
     if not token:

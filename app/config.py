@@ -146,6 +146,12 @@ class Settings(BaseSettings):
     # Gere as keys no painel Cloudflare (Turnstile): secret aqui, site key em NEXT_PUBLIC_TURNSTILE_SITE_KEY (frontend).
     TURNSTILE_SECRET_KEY: str = ""
 
+    # Bypass do Turnstile para o gate automatizado de go-live (validate_readiness.py) e
+    # testes E2E internos. Quando configurado, requests com o header
+    # `X-Readiness-Bypass: <READINESS_BYPASS_SECRET>` pulam a verificacao anti-bot.
+    # Vazio = bypass desabilitado (producao segura). NUNCA commitar o valor real.
+    READINESS_BYPASS_SECRET: str = ""
+
     # Rate Limiting
     RATE_LIMIT_AUTH: str = "5/minute"
     RATE_LIMIT_GENERATE: str = "10/minute"

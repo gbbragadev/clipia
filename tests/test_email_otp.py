@@ -50,6 +50,7 @@ async def test_verify_turnstile_noop_when_secret_absent(monkeypatch):
     from app.auth import turnstile
 
     monkeypatch.setattr(turnstile.settings, "TURNSTILE_SECRET_KEY", "")
+    monkeypatch.setattr(turnstile.settings, "READINESS_BYPASS_SECRET", "")
     assert await turnstile.verify_turnstile("anything") is True, "Sem secret o captcha e no-op (cadastro livre)."
 
 
@@ -58,12 +59,40 @@ async def test_verify_turnstile_rejects_missing_token_when_enabled(monkeypatch):
     from app.auth import turnstile
 
     monkeypatch.setattr(turnstile.settings, "TURNSTILE_SECRET_KEY", "test-secret")
+    monkeypatch.setattr(turnstile.settings, "READINESS_BYPASS_SECRET", "")
     assert await turnstile.verify_turnstile(None) is False, "Com captcha ativo, token ausente reprova (fail-closed)."
 
 
 @pytest.mark.asyncio
+async def test_verify_turnstile_bypass_with_matching_secret(monkeypatch):
+    """Gate de go-live: header X-Readiness-Bypass com secret correto pula o Turnstile."""
+    from app.auth import turnstile
+
+    monkeypatch.setattr(turnstile.settings, "TURNSTILE_SECRET_KEY", "test-secret")  # ativo
+    monkeypatch.setattr(turnstile.settings, "READINESS_BYPASS_SECRET", "bypass-secret")
+    assert (
+        await turnstile.verify_turnstile(None, bypass_header="bypass-secret") is True
+    ), "Bypass com secret correto deve passar mesmo com Turnstile ativo e sem token."
+
+
+@pytest.mark.asyncio
+async def test_verify_turnstile_bypass_rejects_wrong_secret(monkeypatch):
+    """Secret de bypass errado/ausente NAO pula o Turnstile (fail-closed)."""
+    from app.auth import turnstile
+
+    monkeypatch.setattr(turnstile.settings, "TURNSTILE_SECRET_KEY", "test-secret")
+    monkeypatch.setattr(turnstile.settings, "READINESS_BYPASS_SECRET", "bypass-secret")
+    assert (
+        await turnstile.verify_turnstile(None, bypass_header="wrong") is False
+    ), "Secret de bypass incorreto deve ser tratado como sem bypass."
+    assert (
+        await turnstile.verify_turnstile(None, bypass_header=None) is False
+    ), "Bypass ausente com Turnstile ativo reprova (fail-closed)."
+
+
+@pytest.mark.asyncio
 async def test_register_blocks_when_captcha_rejected(client, db_session, monkeypatch):
-    async def _reject(token, remoteip=None):
+    async def _reject(token, remoteip=None, bypass_header=None):
         return False
 
     monkeypatch.setattr("app.auth.routes.verify_turnstile", _reject)

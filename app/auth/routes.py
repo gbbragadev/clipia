@@ -61,7 +61,7 @@ def _ensure_utc(dt: datetime) -> datetime:
 @limiter.limit(settings.RATE_LIMIT_AUTH)
 async def register(request: Request, body: RegisterRequest, db: AsyncSession = Depends(get_db)):
     """Register a new user and return an access token."""
-    if not await verify_turnstile(body.turnstile_token, client_ip(request)):
+    if not await verify_turnstile(body.turnstile_token, client_ip(request), request.headers.get("x-readiness-bypass")):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Verificacao anti-bot falhou. Recarregue a pagina e tente novamente.",

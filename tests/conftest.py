@@ -96,6 +96,10 @@ async def test_db(tmp_path, monkeypatch):
     monkeypatch.setattr(settings, "STORAGE_DIR", storage_dir)
     monkeypatch.setattr(settings, "CORS_ORIGINS", "http://localhost:3003")
     monkeypatch.setattr(settings, "MP_WEBHOOK_SECRET", "")
+    # Suite imune ao .env local: com Turnstile ativo em prod (secret no .env), os testes de
+    # register levariam 400 anti-bot. Testes de Turnstile setam o secret explicitamente.
+    monkeypatch.setattr(settings, "TURNSTILE_SECRET_KEY", "")
+    monkeypatch.setattr(settings, "READINESS_BYPASS_SECRET", "")
 
     async def override_get_db():
         async with session_factory() as session:

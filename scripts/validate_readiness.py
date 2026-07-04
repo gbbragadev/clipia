@@ -41,13 +41,21 @@ def _mark(level: str, msg: str) -> None:
     print(f"[{level:4}] {msg}")
 
 
-def _http(method: str, url: str, body: dict | None = None, token: str | None = None) -> tuple[int, dict]:
+def _http(
+    method: str, url: str, body: dict | None = None, token: str | None = None, extra_headers: dict | None = None
+) -> tuple[int, dict]:
     """Request JSON simples. Retorna (status, json|{}). Nao levanta em erro HTTP."""
     data = json.dumps(body).encode() if body is not None else None
     req = urllib.request.Request(url, data=data, method=method)
     req.add_header("Content-Type", "application/json")
+    # Cloudflare Bot Fight Mode bloqueia o User-Agent padrao do Python ("Python-urllib/3.x")
+    # com erro 1010. Usamos um UA explicito e identificavel para o readiness passar
+    # pelo WAF quando rodado contra o dominio publico.
+    req.add_header("User-Agent", "ClipIA-Readiness/1.0 (+https://clipia.com.br)")
     if token:
         req.add_header("Authorization", f"Bearer {token}")
+    for k, v in (extra_headers or {}).items():
+        req.add_header(k, v)
     try:
         with urllib.request.urlopen(req, timeout=30) as r:
             raw = r.read().decode() or "{}"
@@ -131,8 +139,16 @@ async def run(base: str, make_video: bool) -> None:
     password = "Valida!" + uuid.uuid4().hex[:8]
     conn = None
     try:
-        # 3a. cadastro
-        st, body = _http("POST", f"{api}/auth/register", {"email": email, "name": "Validacao QA", "password": password})
+        # 3a. cadastro (bypass do Turnstile se READINESS_BYPASS_SECRET estiver configurado)
+        bypass_headers = {}
+        if settings.READINESS_BYPASS_SECRET:
+            bypass_headers["X-Readiness-Bypass"] = settings.READINESS_BYPASS_SECRET
+        st, body = _http(
+            "POST",
+            f"{api}/auth/register",
+            {"email": email, "name": "Validacao QA", "password": password},
+            extra_headers=bypass_headers,
+        )
         token = body.get("access_token")
         if st == 201 and token:
             _mark("PASS", f"Cadastro aceito (201) para {email}.")
