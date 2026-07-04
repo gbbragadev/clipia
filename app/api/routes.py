@@ -794,6 +794,11 @@ async def save_editor_state(
                 script = json.loads(script_path.read_text(encoding="utf-8"))
                 script["scenes"] = comp["scenes"]
                 script_path.write_text(json.dumps(script, ensure_ascii=False, indent=2), encoding="utf-8")
+                # Espelha o script editado no Postgres: sem isso ha split-brain
+                # (j.script guarda o roteiro ORIGINAL da geracao para sempre e os
+                # fallbacks de get_job/list_jobs servem versao velha pos-edicao).
+                await db.execute(update(Job).where(Job.id == job.id).values(script=script))
+                await db.commit()
             if comp.get("words"):
                 words_path = job_dir / "words.json"
                 words_path.write_text(json.dumps(comp["words"], ensure_ascii=False), encoding="utf-8")

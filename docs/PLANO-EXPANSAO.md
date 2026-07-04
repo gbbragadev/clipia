@@ -177,6 +177,8 @@
 | 03/07 | **BÔNUS** Export por Remotion estava QUEBRADO em prod: mídia buscada via domínio público fazia hairpin de 30s > timeout 28s do delayRender → render local usa 127.0.0.1:8005 | `924b4cf` + `b998c40` | re-render E2E real completou em ~4,4min (antes: erro em 100% das tentativas) |
 | 04/07 | **Q4** Templates virais (`curiosidades_lista` + `voce_sabia`) reusando pipeline stock (1 crédito) | `dd526c3` | job `8f4686a3`: roteiro saiu "gancho → Número 1…5 → CTA" perfeito; MP4 12,1M no output |
 | 04/07 | **F0-4 (fechado)** Skeletons ricos espelhando o card real (shimmer, retrato) na grid + TrendingPanel | `dd526c3` | tsc+build verdes; era paisagem `animate-pulse` → pulo de layout |
+| 04/07 | **Q7** Degradação do LLM visível (`llm_provider` no script + `degraded` no Redis/`/jobs` + badge âmbar no card). Reembolso automático NÃO implementado — política de dinheiro é decisão do dono | `2da7e69` | pytest 357 verdes; teste cobre Redis E script JSONB (sobrevive a reboot do Redis) |
+| 04/07 | **Q2** Vozes pt-BR no diálogo — **já estava entregue** (config aponta Fernanda + Bruno-ClipIA, ambas pt-BR confirmadas na conta via `/voices`); PLANO estava desatualizado | (pré-existente) | gate auditivo (gerar diálogo e ouvir 2 locutores) fica para o dono — consome caracteres ElevenLabs |
 | 04/07 | **Q4** Templates virais: "Top Curiosidades" (lista numerada + gancho + CTA) e "Você Sabia?" (fato único, voz Thalita) — reusam pipeline stock (1 crédito) | `dd526c3` | Gate REAL passou: job `8f4686a3` gerou roteiro "Número 1…5" com gancho e CTA; MP4 final 12,1M no output |
 | 04/07 | **F0-4** Skeletons ricos: grid espelha o card real (retrato+footer, shimmer `.anim-shimmer`); TrendingPanel idem | `dd526c3` | tsc + build verdes; sem pulo de layout no load |
 

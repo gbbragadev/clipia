@@ -31,6 +31,36 @@ async def test_edit_persists_editor_state_and_composition_reads_it(
 
 
 @pytest.mark.asyncio
+async def test_edit_espelha_script_no_postgres(
+    client, db_session, job_factory, verified_user, auth_headers, storage_dir
+):
+    """Split-brain (achado da revisao adversarial): j.script guardava o roteiro ORIGINAL
+    para sempre; edicoes so iam pro script.json em disco. Fallbacks de get_job/list_jobs
+    (inclusive a flag degraded) serviam versao velha pos-edicao/reboot."""
+    original = {"scenes": [{"text": "scene 1"}], "llm_provider": "openrouter-free"}
+    job = await job_factory(script=original, editor_state=None)
+    job_dir = storage_dir / "jobs" / str(job.id)
+    job_dir.mkdir(parents=True)
+    (job_dir / "script.json").write_text(json.dumps(original), encoding="utf-8")
+
+    editor_state = {"composition": {"scenes": [{"text": "cena reescrita pelo usuario"}]}}
+    save = await client.post(
+        f"/api/v1/jobs/{job.id}/edit",
+        headers=auth_headers(verified_user),
+        json={"editor_state": editor_state},
+    )
+    assert save.status_code == 200
+
+    refreshed = await db_session.get(Job, job.id)
+    await db_session.refresh(refreshed)
+    assert (
+        refreshed.script["scenes"][0]["text"] == "cena reescrita pelo usuario"
+    ), "O Postgres deve espelhar o script editado (fim do split-brain DB vs disco)."
+    # Metadado de qualidade sobrevive a edicao (flag degraded e historica por design).
+    assert refreshed.script["llm_provider"] == "openrouter-free"
+
+
+@pytest.mark.asyncio
 async def test_composition_preserves_utf8_accents(
     client, db_session, job_factory, verified_user, auth_headers, storage_dir
 ):

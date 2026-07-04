@@ -499,7 +499,8 @@ def task_generate_script(
         from app.services.llm import DEGRADED_PROVIDER_LABEL
 
         if script.get("llm_provider") == DEGRADED_PROVIDER_LABEL:
-            _redis.hset(f"job:{job_id}", "degraded", "1")
+            # mapping= (nao posicional): assinatura unica que o FakeRedis dos testes suporta.
+            _redis.hset(f"job:{job_id}", mapping={"degraded": "1"})
             logger.warning(f"Job {job_id}: roteiro atendido pelo provedor FREE (qualidade reduzida).")
 
         _update_job(job_id, "processing", "scripting", 0.16, detail="Roteiro gerado com sucesso.")
