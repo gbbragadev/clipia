@@ -3,7 +3,7 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
 import { Loader2, Play } from 'lucide-react'
 import { strings } from '@/lib/strings';
-import type { JobSummary } from '@/lib/editor-api'
+import { ACTIVE_JOB_STATUSES, STEP_LABELS, type JobSummary } from '@/lib/editor-api'
 import { downloadAuthenticatedFile, fetchAuthenticatedBlobUrl } from '@/lib/download'
 import { GlowCard } from '@/components/ui/GlowCard'
 import { useToast } from '@/components/ui/feedback'
@@ -33,6 +33,10 @@ function statusBadge(status: string) {
       return { label: 'Erro', classes: 'bg-red-500/20 text-red-400 border border-red-500/30' }
     case 'processing':
       return { label: strings.dashboard.generate.loading, classes: 'bg-coral/20 text-coral animate-pulse border border-coral/30' }
+    case 'rendering':
+      return { label: 'Atualizando', classes: 'bg-azure/20 text-azure animate-pulse border border-azure/30' }
+    case 'cancelling':
+      return { label: 'Cancelando', classes: 'bg-gray-500/20 text-gray-400 animate-pulse border border-gray-500/30' }
     case 'queued':
       return { label: 'Na fila', classes: 'bg-gray-500/20 text-gray-400 border border-gray-500/30' }
     default:
@@ -188,6 +192,26 @@ export default function VideoCard({ job, onEdit, onCancel }: VideoCardProps) {
             <span>&bull;</span>
             <span>{timeAgo(job.created_at)}</span>
           </div>
+
+          {/* Progresso em tempo real (a grid faz polling enquanto o job está ativo) */}
+          {ACTIVE_JOB_STATUSES.includes(job.status) && (
+            <div className="mb-3">
+              <div className="flex items-center justify-between mb-1">
+                <span className="text-[11px] font-medium text-coral">
+                  {STEP_LABELS[job.current_step ?? ''] || 'Processando...'}
+                </span>
+                <span className="text-[11px] text-slate-500 tabular-nums">
+                  {Math.round((job.progress ?? 0) * 100)}%
+                </span>
+              </div>
+              <div className="h-1 rounded-full overflow-hidden bg-white/10">
+                <div
+                  className="h-full rounded-full bg-gradient-to-r from-coral to-azure transition-all duration-500 ease-out"
+                  style={{ width: `${Math.max(4, (job.progress ?? 0) * 100)}%` }}
+                />
+              </div>
+            </div>
+          )}
 
           {/* Always-visible action buttons */}
           {(canEdit || job.download_url || canCancel) && (

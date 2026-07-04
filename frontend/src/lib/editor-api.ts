@@ -87,6 +87,28 @@ export interface JobSummary {
   duration_target: number
   created_at: string | null
   download_url: string | null
+  /** Fração 0..1 do pipeline (tempo real via Redis). */
+  progress?: number
+  /** Etapa atual do pipeline (chave de STEP_LABELS). */
+  current_step?: string | null
+}
+
+/** Jobs nestes status ainda vão mudar sozinhos — a grid faz polling enquanto existirem. */
+export const ACTIVE_JOB_STATUSES = ['queued', 'processing', 'rendering', 'cancelling']
+
+/** Rótulos pt-BR das etapas do pipeline (compartilhado por GenerateForm e VideoCard). */
+export const STEP_LABELS: Record<string, string> = {
+  scripting: 'Escrevendo roteiro...',
+  generating_images: 'Gerando imagens IA...',
+  generating_videos: 'Gerando clipes IA...',
+  tts: 'Gerando narração...',
+  transcribing: 'Transcrevendo áudio...',
+  media: 'Buscando vídeos...',
+  compositing: 'Montando vídeo...',
+  finalizing: 'Finalizando...',
+  preparing: 'Preparando re-render...',
+  encoding: 'Renderizando edições...',
+  queued: 'Na fila...',
 }
 
 export async function fetchJobs(): Promise<JobSummary[]> {

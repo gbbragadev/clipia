@@ -3,7 +3,7 @@
 import { useMemo, useState } from 'react'
 import { motion } from 'motion/react'
 import { fadeUp, staggerContainer, useReducedMotionState } from '@/lib/motion'
-import type { JobSummary } from '@/lib/editor-api'
+import { ACTIVE_JOB_STATUSES, type JobSummary } from '@/lib/editor-api'
 import VideoCard from './VideoCard'
 import EmptyState from './EmptyState'
 import FilterBar from './FilterBar'
@@ -46,7 +46,10 @@ export default function VideoGrid({ jobs, loading, onEdit, onCancel }: VideoGrid
 
   const filteredJobs = useMemo(() => {
     let result = [...jobs]
-    if (statusFilter !== 'all') {
+    if (statusFilter === 'processing') {
+      // "Processando" agrupa todos os status ativos (queued/processing/rendering/cancelling)
+      result = result.filter((j) => ACTIVE_JOB_STATUSES.includes(j.status))
+    } else if (statusFilter !== 'all') {
       result = result.filter((j) => j.status === statusFilter)
     }
     result.sort((a, b) => {
@@ -75,7 +78,7 @@ export default function VideoGrid({ jobs, loading, onEdit, onCancel }: VideoGrid
     { value: 'all', label: 'Todos', count: jobs.length },
     ...(statusCounts['editable'] ? [{ value: 'editable', label: 'Concluídos', count: statusCounts['editable'] }] : []),
     ...(statusCounts['completed'] ? [{ value: 'completed', label: 'Concluídos', count: (statusCounts['completed'] || 0) + (statusCounts['editable'] || 0) }] : []),
-    ...(statusCounts['processing'] || statusCounts['queued'] ? [{ value: 'processing', label: 'Processando', count: (statusCounts['processing'] || 0) + (statusCounts['queued'] || 0) }] : []),
+    ...(ACTIVE_JOB_STATUSES.some((s) => statusCounts[s]) ? [{ value: 'processing', label: 'Processando', count: ACTIVE_JOB_STATUSES.reduce((acc, s) => acc + (statusCounts[s] || 0), 0) }] : []),
     ...(statusCounts['error'] || statusCounts['failed'] ? [{ value: 'error', label: 'Erro', count: (statusCounts['error'] || 0) + (statusCounts['failed'] || 0) }] : []),
   ]
 

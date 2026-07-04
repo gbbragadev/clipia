@@ -7,6 +7,7 @@ import {
   generateVideo,
   fetchJobStatus,
   fetchTemplates,
+  STEP_LABELS,
   type GenerateParams,
   type JobStatusResponse,
   type VideoTemplateInfo,
@@ -20,23 +21,15 @@ import NarrationTimelineRuler from './NarrationTimelineRuler'
 import KineticPreviewPanel from './KineticPreviewPanel'
 import { useToast } from '@/components/ui/feedback'
 
-const STEP_LABELS: Record<string, string> = {
-  scripting: 'Escrevendo roteiro...',
-  generating_images: 'Gerando imagens IA...',
-  tts: 'Gerando narração...',
-  transcribing: 'Transcrevendo áudio...',
-  media: 'Buscando vídeos...',
-  compositing: 'Montando vídeo...',
-  finalizing: 'Finalizando...',
-}
-
 interface GenerateFormProps {
   onJobComplete: () => void
+  /** Chamado assim que o job é enfileirado — a grid mostra o card na hora e liga o polling. */
+  onJobCreated?: () => void
   prefillTopic?: string
   prefillTrendContext?: string | null
 }
 
-export default function GenerateForm({ onJobComplete, prefillTopic, prefillTrendContext }: GenerateFormProps) {
+export default function GenerateForm({ onJobComplete, onJobCreated, prefillTopic, prefillTrendContext }: GenerateFormProps) {
   const { user, refreshUser } = useAuth()
   const { success, error: toastError, info } = useToast()
 
@@ -164,6 +157,7 @@ export default function GenerateForm({ onJobComplete, prefillTopic, prefillTrend
       lastRequestRef.current = params
       const result = await generateVideo(params)
       startPolling(result.job_id)
+      onJobCreated?.()
       success('Video enfileirado', 'A geracao foi iniciada com sucesso.')
       setActiveJob({
         job_id: result.job_id,

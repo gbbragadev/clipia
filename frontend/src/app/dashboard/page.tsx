@@ -2,9 +2,9 @@
 
 import { Mail } from 'lucide-react'
 import { strings } from '@/lib/strings';
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { fetchJobs, cancelJob, type JobSummary } from '@/lib/editor-api'
+import { fetchJobs, cancelJob, ACTIVE_JOB_STATUSES, type JobSummary } from '@/lib/editor-api'
 import { useAuth } from '@/contexts/AuthContext'
 import GenerateForm from '@/components/dashboard/GenerateForm'
 import TrendingPanel from '@/components/dashboard/TrendingPanel'
@@ -36,6 +36,47 @@ export default function DashboardPage() {
   }, [])
 
   useEffect(() => { loadJobs() }, [loadJobs])
+
+  // ── Grid reativa: enquanto houver job ativo, re-busca a lista com backoff.
+  // O efeito só liga/desliga quando a "atividade" muda (não a cada poll), então o
+  // backoff sobrevive entre ticks. Toast + refresh de créditos nas transições.
+  const hasActiveJobs = useMemo(() => jobs.some((j) => ACTIVE_JOB_STATUSES.includes(j.status)), [jobs])
+  const jobsRef = useRef(jobs)
+  useEffect(() => { jobsRef.current = jobs }, [jobs])
+
+  useEffect(() => {
+    if (!hasActiveJobs) return
+    let cancelled = false
+    let delay = 4000
+    let timer: ReturnType<typeof setTimeout>
+
+    const tick = async () => {
+      try {
+        const fresh = await fetchJobs()
+        if (cancelled) return
+        delay = 4000
+        const before = new Map(jobsRef.current.map((j) => [j.job_id, j.status]))
+        for (const j of fresh) {
+          const prev = before.get(j.job_id)
+          if (!prev || !ACTIVE_JOB_STATUSES.includes(prev) || ACTIVE_JOB_STATUSES.includes(j.status)) continue
+          if (['completed', 'editable'].includes(j.status)) {
+            toastSuccess('Vídeo pronto', j.topic)
+          } else if (['failed', 'error'].includes(j.status)) {
+            toastError('A geração falhou', j.topic)
+          }
+          refreshUser() // créditos podem ter mudado (conclusão ou reembolso)
+        }
+        setJobs(fresh)
+      } catch {
+        // Blip de rede: não zera a grid; só espaça o próximo poll.
+        if (!cancelled) delay = Math.min(delay * 2, 20000)
+      }
+      if (!cancelled) timer = setTimeout(tick, delay)
+    }
+
+    timer = setTimeout(tick, delay)
+    return () => { cancelled = true; clearTimeout(timer) }
+  }, [hasActiveJobs, refreshUser, toastSuccess, toastError])
 
   const handleCancel = useCallback(async (jobId: string) => {
     try {
@@ -97,6 +138,7 @@ export default function DashboardPage() {
         <div className="relative z-10">
           <GenerateForm
             onJobComplete={loadJobs}
+            onJobCreated={loadJobs}
             prefillTopic={prefill?.topic}
             prefillTrendContext={prefill?.trendContext}
           />

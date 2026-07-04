@@ -1115,6 +1115,9 @@ async def list_jobs(
                 "duration_target": j.duration_target,
                 "created_at": j.created_at.isoformat() if j.created_at else None,
                 "download_url": f"/api/v1/jobs/{j.id}/download" if has_video else None,
+                # Progresso em tempo real p/ a grid reativa (o hash do Redis ja esta em maos).
+                "progress": float(redis_data.get("progress") or 0) if redis_data else 0.0,
+                "current_step": (redis_data.get("current_step") or None) if redis_data else None,
             }
         )
     return items
