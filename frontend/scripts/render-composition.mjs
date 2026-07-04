@@ -47,7 +47,17 @@ try {
   const t1 = Date.now()
   log({ status: 'bundled', seconds: +((t1 - t0) / 1000).toFixed(1) })
 
-  const composition = await selectComposition({ serveUrl, id: 'ShortVideo', inputProps })
+  // Clipes da biblioteca Drive chegam a ~100MB por cena: a extração de frame do
+  // OffthreadVideo sob carga estoura o delayRender default (~28s) e mata o render.
+  // 120s dá folga real na máquina única (backend+worker+frontend no mesmo host).
+  const TIMEOUT_MS = 120000
+
+  const composition = await selectComposition({
+    serveUrl,
+    id: 'ShortVideo',
+    inputProps,
+    timeoutInMilliseconds: TIMEOUT_MS,
+  })
   log({
     status: 'composition',
     durationInFrames: composition.durationInFrames,
@@ -65,6 +75,12 @@ try {
     inputProps,
     pixelFormat: 'yuv420p',
     crf: 23,
+    timeoutInMilliseconds: TIMEOUT_MS,
+    // Máquina única e cheia (backend+worker+frontend+Docker): o compositor chegou a
+    // morrer de OOM (malloc de 2MB falhou) com 6 cenas de ~100MB. Concorrência baixa
+    // + cache de vídeo limitado trocam velocidade por render que TERMINA.
+    concurrency: 2,
+    offthreadVideoCacheSizeInBytes: 512 * 1024 * 1024,
     onProgress: ({ progress }) => {
       const pct = Math.round(progress * 100)
       if (pct !== lastPct && pct % 10 === 0) {
