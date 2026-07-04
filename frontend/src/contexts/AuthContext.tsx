@@ -11,6 +11,7 @@ import {
   setToken,
   clearToken,
   getToken,
+  NetworkError,
 } from "@/lib/auth";
 import { getStoredUTM, clearStoredUTM } from "@/hooks/useUTM";
 import { useToast } from "@/components/ui/feedback";
@@ -41,7 +42,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
     getMe()
       .then(setUser)
-      .catch(() => clearToken())
+      .catch((err: unknown) => {
+        // Erro transitório (502/timeout/rede) NÃO derruba a sessão: mantemos o token,
+        // deixamos user=null e liberamos o loading para o usuário entrar no dashboard.
+        // O polling de 5 min vai recuperar o usuário assim que o backend voltar.
+        // Só 401 (sessão expirada de verdade) apaga o token.
+        if (!(err instanceof NetworkError)) clearToken();
+      })
       .finally(() => setLoading(false));
   }, []);
 
@@ -65,9 +72,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const interval = window.setInterval(() => {
       getMe()
         .then(setUser)
-        .catch(() => {
-          clearToken();
-          setUser(null);
+        .catch((err: unknown) => {
+          // Em erro transitório mantemos o último usuário conhecido e o token.
+          // Só agir (apagar token + user) se for sessão expirada real (401).
+          if (!(err instanceof NetworkError)) {
+            clearToken();
+            setUser(null);
+          }
         });
     }, 5 * 60 * 1000);
 
@@ -77,8 +88,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const login = useCallback(async (email: string, password: string) => {
     const res = await authLogin(email, password);
     setToken(res.access_token);
-    const me = await getMe();
-    setUser(me);
+    // Erro transitório em /auth/me logo após o login não deve impedir o redirect
+    // para o dashboard: o token já foi gravado e o efeito de carregamento inicial
+    // vai revalidar. Só repassamos 401 (sessão expirada de verdade).
+    try {
+      const me = await getMe();
+      setUser(me);
+    } catch (err) {
+      if (err instanceof NetworkError) {
+        setUser(null);
+        return;
+      }
+      throw err;
+    }
   }, []);
 
   const register = useCallback(async (email: string, name: string, password: string, turnstileToken?: string, consent?: boolean) => {
@@ -86,8 +108,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const res = await authRegister(email, name, password, { ...utm, turnstile_token: turnstileToken, consent });
     clearStoredUTM();
     setToken(res.access_token);
-    const me = await getMe();
-    setUser(me);
+    try {
+      const me = await getMe();
+      setUser(me);
+    } catch (err) {
+      if (err instanceof NetworkError) {
+        setUser(null);
+        return;
+      }
+      throw err;
+    }
   }, []);
 
   const logout = useCallback(() => {

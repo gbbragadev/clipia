@@ -3,6 +3,23 @@ import { notifySessionExpired } from "./http";
 
 const API_BASE = "";
 
+/**
+ * Erro transitório (rede offline, DNS, timeout, 5xx do gateway, etc.).
+ * Diferente de sessão expirada (401): NÃO deve derrubar o usuário logado.
+ * O AuthContext usa instanceof para distinguir e preservar o token/sessão.
+ */
+export class NetworkError extends Error {
+  readonly status?: number;
+  constructor(message: string, status?: number) {
+    super(message);
+    this.name = "NetworkError";
+    this.status = status;
+  }
+}
+
+/** Timeout das chamadas autenticadas: backend pendurado não pode prender o dashboard no skeleton. */
+const AUTH_REQUEST_TIMEOUT_MS = 15000;
+
 export interface User {
   id: string;
   email: string;
@@ -74,12 +91,32 @@ export async function login(email: string, password: string): Promise<AuthRespon
 export async function getMe(): Promise<User> {
   const token = getToken();
   if (!token) throw new Error("Não autenticado");
-  const res = await fetch(`${API_BASE}/api/v1/auth/me`, {
-    headers: { Authorization: `Bearer ${token}` },
-  });
+  const controller = new AbortController();
+  const timer = window.setTimeout(() => controller.abort(), AUTH_REQUEST_TIMEOUT_MS);
+  let res: Response;
+  try {
+    res = await fetch(`${API_BASE}/api/v1/auth/me`, {
+      headers: { Authorization: `Bearer ${token}` },
+      signal: controller.signal,
+    });
+  } catch (err) {
+    // Erro de rede (offline/DNS) ou abort por timeout: transitório, NÃO ejetar.
+    if (err instanceof DOMException && err.name === "AbortError") {
+      throw new NetworkError("Tempo limite ao validar sessão");
+    }
+    throw new NetworkError("Falha de rede ao validar sessão");
+  } finally {
+    window.clearTimeout(timer);
+  }
   if (!res.ok) {
-    if (res.status === 401) notifySessionExpired();
-    throw new Error("Sessão expirada");
+    // 401 = JWT inválido/expirado de verdade => sessão expirada, ejetar.
+    if (res.status === 401) {
+      notifySessionExpired();
+      throw new Error("Sessão expirada");
+    }
+    // Qualquer outra coisa (5xx do gateway, 4xx estranho) é transitória:
+    // manter o token e deixar o usuário entrar; o polling retenta em breve.
+    throw new NetworkError("Serviço indisponível", res.status);
   }
   return res.json();
 }
