@@ -35,6 +35,21 @@ class CreditPurchase(Base):
     user: Mapped["User"] = relationship(back_populates="purchases")
 
 
+class CreditAdjustment(Base):
+    """Auditoria de ajuste manual de creditos pelo admin (e dinheiro: quem, quanto, por que)."""
+
+    __tablename__ = "credit_adjustments"
+
+    id: Mapped[uuid.UUID] = mapped_column(GUID(), primary_key=True, default=uuid.uuid4)
+    admin_user_id: Mapped[uuid.UUID] = mapped_column(GUID(), ForeignKey("users.id"), nullable=False)
+    target_user_id: Mapped[uuid.UUID] = mapped_column(GUID(), ForeignKey("users.id"), nullable=False, index=True)
+    delta: Mapped[int] = mapped_column(Integer, nullable=False)
+    reason: Mapped[str] = mapped_column(String(255), nullable=False)
+    previous_balance: Mapped[int] = mapped_column(Integer, nullable=False)
+    new_balance: Mapped[int] = mapped_column(Integer, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
 class User(Base):
     __tablename__ = "users"
 

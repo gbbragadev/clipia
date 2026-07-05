@@ -17,9 +17,10 @@ from app.api.security import get_owned_job
 from app.auth.dependencies import get_current_admin_user, get_current_user
 from app.config import settings
 from app.db.engine import get_db
-from app.db.models import CreditPurchase, Job, User, VoiceClone, WaitlistEntry
+from app.db.models import CreditAdjustment, CreditPurchase, Job, User, VoiceClone, WaitlistEntry
 from app.errors import ErrorMessages, not_found_error, validate_uuid
 from app.models import (
+    AdminCreditAdjustRequest,
     AISuggestRequest,
     CompositionResponse,
     EditRequest,
@@ -1381,6 +1382,207 @@ async def storage_stats(
     db: AsyncSession = Depends(get_db),
 ):
     return await _build_storage_stats(db)
+
+
+def _admin_pagination(page: int, page_size: int) -> tuple[int, int]:
+    """Clamp de paginacao dos endpoints admin (page >= 1, page_size 1..100)."""
+    return max(1, page), min(max(1, page_size), 100)
+
+
+@router.get(
+    "/admin/users",
+    summary="Admin: list users",
+    description="Paginated user list with search by email/name.",
+    responses={200: {"description": "Users"}},
+)
+async def admin_list_users(
+    search: str = "",
+    page: int = 1,
+    page_size: int = 50,
+    _admin_user: User = Depends(get_current_admin_user),
+    db: AsyncSession = Depends(get_db),
+):
+    page, page_size = _admin_pagination(page, page_size)
+    stmt = select(User)
+    count_stmt = select(func.count()).select_from(User)
+    if search.strip():
+        like = f"%{search.strip()}%"
+        cond = User.email.ilike(like) | User.name.ilike(like)
+        stmt = stmt.where(cond)
+        count_stmt = count_stmt.where(cond)
+
+    total = (await db.execute(count_stmt)).scalar() or 0
+    rows = await db.execute(stmt.order_by(User.created_at.desc()).offset((page - 1) * page_size).limit(page_size))
+    users = list(rows.scalars().all())
+
+    paying: set[str] = set()
+    if users:
+        paying_rows = await db.execute(
+            select(CreditPurchase.user_id)
+            .where(CreditPurchase.user_id.in_([u.id for u in users]), CreditPurchase.status == "approved")
+            .distinct()
+        )
+        paying = {str(uid) for uid in paying_rows.scalars().all()}
+
+    return {
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+        "users": [
+            {
+                "id": str(u.id),
+                "email": u.email,
+                "name": u.name,
+                "credits": u.credits,
+                "plan": u.plan,
+                "email_verified": u.email_verified,
+                "created_at": u.created_at.isoformat() if u.created_at else None,
+                "is_paying": str(u.id) in paying,
+            }
+            for u in users
+        ],
+    }
+
+
+@router.get(
+    "/admin/purchases",
+    summary="Admin: list purchases",
+    description="Paginated purchase list with status filter.",
+    responses={200: {"description": "Purchases"}},
+)
+async def admin_list_purchases(
+    status: str = "",
+    page: int = 1,
+    page_size: int = 50,
+    _admin_user: User = Depends(get_current_admin_user),
+    db: AsyncSession = Depends(get_db),
+):
+    page, page_size = _admin_pagination(page, page_size)
+    stmt = select(CreditPurchase, User.email).join(User, CreditPurchase.user_id == User.id)
+    count_stmt = select(func.count()).select_from(CreditPurchase)
+    if status.strip():
+        stmt = stmt.where(CreditPurchase.status == status.strip())
+        count_stmt = count_stmt.where(CreditPurchase.status == status.strip())
+
+    total = (await db.execute(count_stmt)).scalar() or 0
+    rows = await db.execute(
+        stmt.order_by(CreditPurchase.created_at.desc()).offset((page - 1) * page_size).limit(page_size)
+    )
+
+    return {
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+        "purchases": [
+            {
+                "id": str(p.id),
+                "user_email": email,
+                "package_name": p.package_name,
+                "credits_amount": p.credits_amount,
+                "bonus_credits": p.bonus_credits,
+                "price_brl": p.price_brl,
+                "provider": p.provider,
+                "status": p.status,
+                "created_at": p.created_at.isoformat() if p.created_at else None,
+                "paid_at": p.paid_at.isoformat() if p.paid_at else None,
+            }
+            for p, email in rows.all()
+        ],
+    }
+
+
+@router.get(
+    "/admin/jobs",
+    summary="Admin: list jobs",
+    description="Paginated job list with status filter.",
+    responses={200: {"description": "Jobs"}},
+)
+async def admin_list_jobs(
+    status: str = "",
+    page: int = 1,
+    page_size: int = 50,
+    _admin_user: User = Depends(get_current_admin_user),
+    db: AsyncSession = Depends(get_db),
+):
+    page, page_size = _admin_pagination(page, page_size)
+    stmt = select(Job, User.email).join(User, Job.user_id == User.id)
+    count_stmt = select(func.count()).select_from(Job)
+    if status.strip():
+        stmt = stmt.where(Job.status == status.strip())
+        count_stmt = count_stmt.where(Job.status == status.strip())
+
+    total = (await db.execute(count_stmt)).scalar() or 0
+    rows = await db.execute(stmt.order_by(Job.created_at.desc()).offset((page - 1) * page_size).limit(page_size))
+
+    return {
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+        "jobs": [
+            {
+                "id": str(j.id),
+                "user_email": email,
+                "topic": j.topic,
+                "template_id": j.template_id,
+                "status": j.status,
+                "credit_cost": j.credit_cost,
+                "created_at": j.created_at.isoformat() if j.created_at else None,
+                "error": j.error,
+            }
+            for j, email in rows.all()
+        ],
+    }
+
+
+@router.post(
+    "/admin/users/{user_id}/adjust-credits",
+    summary="Admin: adjust user credits",
+    description="Manually add/remove credits with mandatory reason (audited in credit_adjustments).",
+    responses={200: {"description": "Adjusted"}},
+)
+async def admin_adjust_credits(
+    user_id: str,
+    req: AdminCreditAdjustRequest,
+    admin_user: User = Depends(get_current_admin_user),
+    db: AsyncSession = Depends(get_db),
+):
+    target = await db.get(User, validate_uuid(user_id))
+    if not target:
+        raise not_found_error()
+
+    previous = target.credits
+    new_balance = max(0, previous + req.delta)  # clamp: saldo nunca fica negativo
+    target.credits = new_balance
+    db.add(
+        CreditAdjustment(
+            admin_user_id=admin_user.id,
+            target_user_id=target.id,
+            delta=req.delta,
+            reason=req.reason.strip(),
+            previous_balance=previous,
+            new_balance=new_balance,
+        )
+    )
+    await db.commit()
+
+    applied = new_balance - previous
+    if applied:
+        record_credit_metric("credit" if applied > 0 else "debit", abs(applied))
+    logger.warning(
+        "Admin %s ajustou creditos de %s: %+d (%d -> %d) motivo=%s",
+        admin_user.email,
+        target.email,
+        req.delta,
+        previous,
+        new_balance,
+        req.reason.strip(),
+    )
+    return {
+        "user_id": str(target.id),
+        "delta": req.delta,
+        "previous_balance": previous,
+        "new_balance": new_balance,
+    }
 
 
 @router.get(

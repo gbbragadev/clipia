@@ -117,3 +117,14 @@ class WaitlistRequest(BaseModel):
     @classmethod
     def normalize_email(cls, value) -> str:
         return _normalize_email(value)
+
+
+class AdminCreditAdjustRequest(BaseModel):
+    delta: int = Field(..., ge=-100_000, le=100_000, description="Creditos a somar (negativo subtrai)")
+    reason: str = Field(..., min_length=3, max_length=255, description="Motivo do ajuste (auditoria)")
+
+    @model_validator(mode="after")
+    def validate_delta_nonzero(self):
+        if self.delta == 0:
+            raise ValueError(ErrorMessages.INVALID_INPUT)
+        return self

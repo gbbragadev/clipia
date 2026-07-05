@@ -6,6 +6,9 @@ import { useEffect, useState, type ReactNode } from 'react'
 import { useAuth } from '@/contexts/AuthContext'
 import { fetchAdminDashboard, type AdminDashboardResponse, type AdminRange, type AdminSeriesPoint } from '@/lib/admin'
 import { InlineError } from '@/components/ui/feedback'
+import AdminJobsTab from '@/components/admin/AdminJobsTab'
+import AdminPurchasesTab from '@/components/admin/AdminPurchasesTab'
+import AdminUsersTab from '@/components/admin/AdminUsersTab'
 
 const RANGE_OPTIONS: Array<{ value: AdminRange; label: string }> = [
   { value: '7d', label: '7 dias' },
@@ -13,9 +16,19 @@ const RANGE_OPTIONS: Array<{ value: AdminRange; label: string }> = [
   { value: '90d', label: '90 dias' },
 ]
 
+type AdminTabKey = 'overview' | 'users' | 'purchases' | 'jobs'
+
+const TAB_OPTIONS: Array<{ value: AdminTabKey; label: string }> = [
+  { value: 'overview', label: 'Visão geral' },
+  { value: 'users', label: 'Usuários' },
+  { value: 'purchases', label: 'Compras' },
+  { value: 'jobs', label: 'Vídeos' },
+]
+
 export default function AdminDashboardPage() {
   const { user } = useAuth()
   const [range, setRange] = useState<AdminRange>('30d')
+  const [tab, setTab] = useState<AdminTabKey>('overview')
   const [data, setData] = useState<AdminDashboardResponse | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -58,82 +71,29 @@ export default function AdminDashboardPage() {
     )
   }
 
-  if (loading) {
-    return (
-      <div className="max-w-6xl mx-auto px-4 py-8 space-y-6">
-        <div className="card p-6 animate-pulse">
-          <div className="h-6 w-40 rounded bg-white/10 mb-3" />
-          <div className="h-4 w-64 rounded bg-white/10" />
-        </div>
-        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-          {Array.from({ length: 8 }).map((_, index) => (
-            <div key={index} className="card p-5 animate-pulse">
-              <div className="h-3 w-24 rounded bg-white/10 mb-4" />
-              <div className="h-7 w-28 rounded bg-white/10 mb-3" />
-              <div className="h-3 w-20 rounded bg-white/10" />
-            </div>
-          ))}
-        </div>
+  const overview = loading ? (
+    <div className="space-y-6">
+      <div className="card p-6 animate-pulse">
+        <div className="h-6 w-40 rounded bg-white/10 mb-3" />
+        <div className="h-4 w-64 rounded bg-white/10" />
       </div>
-    )
-  }
-
-  if (error || !data) {
-    return (
-      <div className="max-w-5xl mx-auto px-4 py-8">
-        <InlineError
-          title="Nao foi possivel carregar o painel administrativo"
-          description={error || 'Sem dados disponiveis'}
-        />
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+        {Array.from({ length: 8 }).map((_, index) => (
+          <div key={index} className="card p-5 animate-pulse">
+            <div className="h-3 w-24 rounded bg-white/10 mb-4" />
+            <div className="h-7 w-28 rounded bg-white/10 mb-3" />
+            <div className="h-3 w-20 rounded bg-white/10" />
+          </div>
+        ))}
       </div>
-    )
-  }
-
-  return (
-    <div className="max-w-7xl mx-auto px-4 py-8 space-y-6">
-      <section className="card p-6 overflow-hidden relative">
-        <div
-          className="absolute inset-0 pointer-events-none"
-          style={{
-            background:
-              'radial-gradient(circle at top right, rgba(34,197,94,0.16), transparent 30%), radial-gradient(circle at left, rgba(59,130,246,0.14), transparent 35%)',
-          }}
-        />
-        <div className="relative flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
-          <div>
-            <p className="text-xs uppercase tracking-[0.22em]" style={{ color: '#86efac' }}>Admin Control</p>
-            <h1 className="mt-2 text-3xl font-semibold">Painel administrativo do SaaS</h1>
-            <p className="mt-3 max-w-2xl text-sm leading-6" style={{ color: 'var(--text-secondary)' }}>
-              Receita, conversao, saude operacional e carga do produto em uma unica superficie.
-            </p>
-          </div>
-          <div className="flex flex-wrap items-center gap-3">
-            <div className="rounded-2xl border px-4 py-3" style={{ borderColor: 'rgba(255,255,255,0.08)', background: 'rgba(255,255,255,0.03)' }}>
-              <p className="text-[11px] uppercase tracking-[0.18em]" style={{ color: 'var(--text-tertiary)' }}>Janela</p>
-              <div className="mt-2 flex gap-2">
-                {RANGE_OPTIONS.map((option) => (
-                  <button
-                    key={option.value}
-                    onClick={() => setRange(option.value)}
-                    className="rounded-full px-3 py-1.5 text-sm transition"
-                    style={{
-                      background: range === option.value ? 'linear-gradient(135deg, #16a34a, #0ea5e9)' : 'rgba(255,255,255,0.04)',
-                      color: range === option.value ? '#fff' : 'var(--text-secondary)',
-                    }}
-                  >
-                    {option.label}
-                  </button>
-                ))}
-              </div>
-            </div>
-            <div className="rounded-2xl border px-4 py-3 text-sm" style={{ borderColor: 'rgba(255,255,255,0.08)', background: 'rgba(255,255,255,0.03)' }}>
-              <p style={{ color: 'var(--text-tertiary)' }}>Periodo analisado</p>
-              <p className="mt-1 font-medium">{formatDate(data.window_start)} a {formatDate(data.window_end)}</p>
-            </div>
-          </div>
-        </div>
-      </section>
-
+    </div>
+  ) : error || !data ? (
+    <InlineError
+      title="Nao foi possivel carregar o painel administrativo"
+      description={error || 'Sem dados disponiveis'}
+    />
+  ) : (
+    <>
       <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         <StatCard title="Receita aprovada" value={formatCurrency(data.summary.approved_revenue_brl)} hint={`${data.summary.approved_orders} pedidos aprovados`} accent="#22c55e" />
         <StatCard title="Receita pendente" value={formatCurrency(data.summary.pending_revenue_brl)} hint={`${data.summary.pending_orders} pagamentos em aberto`} accent="#f59e0b" />
@@ -288,6 +248,80 @@ export default function AdminDashboardPage() {
           ])}
         />
       </section>
+    </>
+  )
+
+  return (
+    <div className="max-w-7xl mx-auto px-4 py-8 space-y-6">
+      <section className="card p-6 overflow-hidden relative">
+        <div
+          className="absolute inset-0 pointer-events-none"
+          style={{
+            background:
+              'radial-gradient(circle at top right, rgba(34,197,94,0.16), transparent 30%), radial-gradient(circle at left, rgba(59,130,246,0.14), transparent 35%)',
+          }}
+        />
+        <div className="relative flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
+          <div>
+            <p className="text-xs uppercase tracking-[0.22em]" style={{ color: '#86efac' }}>Admin Control</p>
+            <h1 className="mt-2 text-3xl font-semibold">Painel administrativo do SaaS</h1>
+            <p className="mt-3 max-w-2xl text-sm leading-6" style={{ color: 'var(--text-secondary)' }}>
+              Receita, conversao, saude operacional e carga do produto em uma unica superficie.
+            </p>
+          </div>
+          {tab === 'overview' && (
+            <div className="flex flex-wrap items-center gap-3">
+              <div className="rounded-2xl border px-4 py-3" style={{ borderColor: 'rgba(255,255,255,0.08)', background: 'rgba(255,255,255,0.03)' }}>
+                <p className="text-[11px] uppercase tracking-[0.18em]" style={{ color: 'var(--text-tertiary)' }}>Janela</p>
+                <div className="mt-2 flex gap-2">
+                  {RANGE_OPTIONS.map((option) => (
+                    <button
+                      key={option.value}
+                      onClick={() => setRange(option.value)}
+                      className="rounded-full px-3 py-1.5 text-sm transition"
+                      style={{
+                        background: range === option.value ? 'linear-gradient(135deg, #16a34a, #0ea5e9)' : 'rgba(255,255,255,0.04)',
+                        color: range === option.value ? '#fff' : 'var(--text-secondary)',
+                      }}
+                    >
+                      {option.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              {data && (
+                <div className="rounded-2xl border px-4 py-3 text-sm" style={{ borderColor: 'rgba(255,255,255,0.08)', background: 'rgba(255,255,255,0.03)' }}>
+                  <p style={{ color: 'var(--text-tertiary)' }}>Periodo analisado</p>
+                  <p className="mt-1 font-medium">{formatDate(data.window_start)} a {formatDate(data.window_end)}</p>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      </section>
+
+      <nav className="flex flex-wrap gap-2" aria-label="Seções do painel">
+        {TAB_OPTIONS.map((option) => (
+          <button
+            key={option.value}
+            onClick={() => setTab(option.value)}
+            aria-pressed={tab === option.value}
+            className="rounded-full px-4 py-2 text-sm font-medium transition"
+            style={{
+              background: tab === option.value ? 'linear-gradient(135deg, #16a34a, #0ea5e9)' : 'rgba(255,255,255,0.04)',
+              color: tab === option.value ? '#fff' : 'var(--text-secondary)',
+              border: '1px solid var(--border-subtle)',
+            }}
+          >
+            {option.label}
+          </button>
+        ))}
+      </nav>
+
+      {tab === 'overview' && overview}
+      {tab === 'users' && <AdminUsersTab />}
+      {tab === 'purchases' && <AdminPurchasesTab />}
+      {tab === 'jobs' && <AdminJobsTab />}
     </div>
   )
 }
