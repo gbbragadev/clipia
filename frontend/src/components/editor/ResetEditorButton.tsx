@@ -74,7 +74,7 @@ export function ResetEditorButton({ jobId }: { jobId: string }) {
       title="Volta o vídeo ao estado pré-edição (custa 1 crédito)"
       style={{ whiteSpace: 'nowrap' }}
     >
-      <RotateCcw className="w-3.5 h-3.5" /> Resetar
+      <RotateCcw className="w-3.5 h-3.5" /> <span className="editor-header__reset-label">Resetar</span>
     </button>
   )
 }

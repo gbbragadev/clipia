@@ -148,7 +148,6 @@ export function SceneGrid() {
                         background: (scene.transition || 'none') === t ? 'rgba(255,86,56,0.2)' : undefined,
                         color: (scene.transition || 'none') === t ? 'var(--color-coral)' : undefined,
                         borderColor: (scene.transition || 'none') === t ? 'rgba(255,86,56,0.3)' : undefined,
-                        fontSize: 9, padding: '2px 6px',
                       }}
                     >
                       {t === 'none' ? 'Sem' : t.charAt(0).toUpperCase() + t.slice(1)}

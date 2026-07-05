@@ -50,6 +50,13 @@
   cursor: pointer; transition: opacity 0.15s;
 }
 .editor-header__export:hover { opacity: 0.9; }
+.editor-header__icon-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 36px; height: 36px; border: 1px solid rgba(255,255,255,0.08); border-radius: 7px;
+  background: transparent; color: #999999; cursor: pointer; transition: all 0.15s;
+}
+.editor-header__icon-btn:hover:not(:disabled) { color: #E8E8E8; background: rgba(255,255,255,0.06); }
+.editor-header__icon-btn:disabled { opacity: 0.35; cursor: default; }
 
 /* ── Workspace (row 2) ───────────────────── */
 .editor-workspace {
@@ -369,18 +376,30 @@
 
   .editor-header { height: 44px; flex-shrink: 0; padding: 0 12px; }
   .editor-header__title { display: none; }
+  .editor-header__sep { display: none; }
   .editor-header__export { padding: 6px 12px; }
+  /* Resetar vira icon-only: com undo/redo no header, o texto estourava os 375px
+     e cortava o botão Exportar. A confirmação abre como popover sob o header. */
+  .editor-header__reset-label { display: none; }
+  .editor-header__reset-confirm {
+    position: fixed; top: 50px; right: 8px; z-index: 30;
+    background: #222222; border: 1px solid rgba(255,255,255,0.12);
+    border-radius: 10px; padding: 8px 10px;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+  }
 
   /* Workspace empilha: player em cima, painel embaixo */
   .editor-workspace { flex: 1; flex-direction: column; min-height: 0; }
 
   .editor-player-zone {
     flex: 0 0 auto;
-    max-height: 40vh;
+    /* Altura EXPLÍCITA: com max-height+flex-auto o filho (height:100%) colapsava
+       para ~23px e o preview sumia — editava-se às cegas no celular. */
+    height: min(36vh, 340px);
     padding: 8px;
   }
-  /* Player vira width-driven dentro da zona limitada */
-  .editor-player-container { height: 100%; max-height: 40vh; }
+  /* Player vira height-driven dentro da zona limitada */
+  .editor-player-container { height: 100%; max-height: none; }
 
   /* Painel ocupa o resto da largura/altura; nunca colapsa no mobile */
   .editor-tools-panel,
@@ -410,26 +429,35 @@
     background: #1A1A1A;
     padding-bottom: env(safe-area-inset-bottom);
   }
-  .editor-tab { min-height: 52px; padding: 8px 0; }
+  .editor-tab { min-height: 52px; padding: 6px 0 8px; }
   .editor-tab__icon { font-size: 17px; }
-  .editor-tab__label { font-size: 9px; }
+  .editor-tab__label { font-size: 10px; }
+
+  /* Touch targets: swatches/sliders/botões pequenos demais para dedo (medidos 20-26px) */
+  .editor-color-swatch { width: 38px; height: 38px; border-radius: 8px; }
+  .editor-slider { height: 6px; }
+  .editor-slider::-webkit-slider-thumb { width: 22px; height: 22px; }
+  .editor-btn-sm { min-height: 36px; padding: 8px 12px; }
+  .editor-header__right { gap: 8px; }
+  .editor-header__export { min-height: 36px; }
 
   /* O toggle de colapso lateral não faz sentido no stack vertical */
   .editor-panel-toggle { display: none; }
 
-  /* Botão flutuante p/ abrir a gaveta da timeline */
+  /* Botão flutuante p/ abrir a gaveta da timeline — ancorado acima da tab bar
+     (antes flutuava no MEIO da tela, cobrindo o conteúdo de todas as abas) */
   .editor-timeline-fab {
-    position: absolute;
-    left: 50%;
-    transform: translateX(-50%);
-    top: calc(40vh + 50px);
+    position: fixed;
+    right: 12px;
+    bottom: calc(64px + env(safe-area-inset-bottom));
     z-index: 15;
     display: inline-flex;
     align-items: center;
     gap: 6px;
-    padding: 6px 14px;
+    min-height: 40px;
+    padding: 8px 14px;
     border-radius: 999px;
-    background: rgba(255,86,56,0.9);
+    background: rgba(255,86,56,0.92);
     color: #fff;
     border: none;
     font-size: 12px;
@@ -443,6 +471,8 @@
     position: fixed;
     left: 0; right: 0; bottom: 0;
     z-index: 60;
+    max-height: 60vh;
+    overflow-y: auto;
     background: #1E1E1E;
     border-top: 1px solid rgba(255,255,255,0.12);
     border-radius: 14px 14px 0 0;
@@ -465,7 +495,5 @@
   .editor-timeline-drawer .editor-timeline { padding-bottom: 8px; }
 }
 
-/* Em telas muito estreitas, abas icon-only para caber as 5 */
-@media (max-width: 380px) {
-  .editor-tab__label { display: none; }
-}
+/* Labels das abas ficam SEMPRE visíveis: 375px é o viewport mais comum e
+   5 ícones sem rótulo eram ambíguos (75px por aba comportam o texto). */

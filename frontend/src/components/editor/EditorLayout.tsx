@@ -1,6 +1,6 @@
 'use client'
 
-import { Layers, Mic, Captions, Shapes, Sparkles, Clock, X, Download, ChevronLeft, ChevronRight } from 'lucide-react'
+import { Layers, Mic, Captions, Shapes, Sparkles, Clock, X, Download, ChevronLeft, ChevronRight, Undo2, Redo2 } from 'lucide-react'
 import { AnimatePresence, motion } from 'motion/react'
 import { strings } from '@/lib/strings';
 import { EASE, DURATIONS, useReducedMotionState } from '@/lib/motion'
@@ -39,7 +39,7 @@ const PANELS = [
 ]
 
 export function EditorLayout() {
-  const { loading, error, saving, dirty, activePanel, setActivePanel, panelCollapsed, togglePanel, composition, jobId } = useEditor()
+  const { loading, error, saving, dirty, activePanel, setActivePanel, panelCollapsed, togglePanel, composition, jobId, undo, redo, canUndo, canRedo } = useEditor()
   const [showExport, setShowExport] = useState(false)
   const isMobile = useIsMobile()
   const [timelineOpen, setTimelineOpen] = useState(false)
@@ -83,6 +83,17 @@ export function EditorLayout() {
           {saving && <span className="editor-header__status editor-header__status--saving">{strings.editor.saving}</span>}
           {dirty && !saving && <span className="editor-header__status editor-header__status--dirty">Não salvo</span>}
           {!dirty && !saving && <span className="editor-header__status editor-header__status--saved">{strings.editor.saved}</span>}
+          {isMobile && (
+            <>
+              {/* Sem teclado não há Ctrl+Z: undo/redo precisam de botão no mobile */}
+              <button className="editor-header__icon-btn" onClick={undo} disabled={!canUndo} aria-label="Desfazer">
+                <Undo2 className="w-4 h-4" />
+              </button>
+              <button className="editor-header__icon-btn" onClick={redo} disabled={!canRedo} aria-label="Refazer">
+                <Redo2 className="w-4 h-4" />
+              </button>
+            </>
+          )}
           <ResetEditorButton jobId={jobId} />
           <button className="editor-header__export inline-flex items-center gap-1.5" onClick={() => setShowExport(true)}><Download className="w-3.5 h-3.5" /> Exportar</button>
         </div>
