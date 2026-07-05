@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  @font-face { font-family: 'Geist'; src: url('file:///C:/Dev/clipia/frontend/node_modules/geist/dist/fonts/geist-sans/Geist-Black.ttf'); font-weight: 900; }
+  @font-face { font-family: 'Geist'; src: url('file:///C:/Dev/clipia/frontend/node_modules/geist/dist/fonts/geist-sans/Geist-Bold.ttf'); font-weight: 700; }
+  @font-face { font-family: 'Geist'; src: url('file:///C:/Dev/clipia/frontend/node_modules/geist/dist/fonts/geist-sans/Geist-Medium.ttf'); font-weight: 500; }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    width: 1080px; height: 1920px; font-family: 'Geist', sans-serif;
+    background: radial-gradient(120% 80% at 50% 10%, #1a1216 0%, #0b0a0e 45%, #060608 100%);
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 56px; position: relative; overflow: hidden;
+  }
+  .glow {
+    position: absolute; width: 900px; height: 900px; border-radius: 50%;
+    background: radial-gradient(circle, rgba(240,83,64,0.22) 0%, rgba(240,83,64,0.0) 60%);
+    top: 260px; left: 90px; filter: blur(10px);
+  }
+  .logo { width: 300px; height: 300px; border-radius: 64px; box-shadow: 0 30px 90px rgba(240,83,64,0.35); }
+  .wordmark { font-size: 108px; font-weight: 900; color: #fff; letter-spacing: -2px; }
+  .wordmark span { color: #f05340; }
+  h1 { font-size: 132px; font-weight: 900; color: #ffffff; letter-spacing: -4px; text-align: center; line-height: 1.02; }
+  .url {
+    margin-top: 12px; padding: 34px 76px; border-radius: 999px;
+    background: linear-gradient(90deg, #f05340 0%, #d8452f 55%, #3b82f6 160%);
+    color: #fff; font-size: 66px; font-weight: 700; letter-spacing: 0;
+    box-shadow: 0 24px 70px rgba(240,83,64,0.45);
+  }
+  .tag { color: #9a9aa3; font-size: 40px; font-weight: 500; margin-top: 8px; }
+</style>
+</head>
+<body>
+  <div class="glow"></div>
+  <img class="logo" src="file:///C:/Dev/clipia/app/assets/outro/logo.png">
+  <div class="wordmark">Clip<span>IA</span></div>
+  <h1>Crie o seu.</h1>
+  <div class="url">clipia.com.br</div>
+  <div class="tag">roteiro &middot; voz &middot; legendas &middot; em minutos</div>
+</body>
+</html>

@@ -1,0 +1,98 @@
+﻿[Script Info]
+ScriptType: v4.00+
+PlayResX: 1080
+PlayResY: 1920
+WrapStyle: 2
+
+[V4+ Styles]
+Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
+Style: Cap,Geist,96,&H00FFFFFF,&H00FFFFFF,&H00101014,&H96000000,-1,0,0,0,100,100,0,0,1,5,2,2,60,60,300,1
+
+[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+Dialogue: 0,0:00:00.00,0:00:00.30,Cap,,0,0,0,,{\fad(30,0)}{\c&H385CF0&}ESTE {\c&HFFFFFF&}VÍDEO {\c&HFFFFFF&}QUE
+Dialogue: 0,0:00:00.30,0:00:00.66,Cap,,0,0,0,,{\fad(30,0)}{\c&HFFFFFF&}ESTE {\c&H385CF0&}VÍDEO {\c&HFFFFFF&}QUE
+Dialogue: 0,0:00:00.66,0:00:00.78,Cap,,0,0,0,,{\fad(30,0)}{\c&HFFFFFF&}ESTE {\c&HFFFFFF&}VÍDEO {\c&H385CF0&}QUE
+Dialogue: 0,0:00:00.76,0:00:01.02,Cap,,0,0,0,,{\fad(30,0)}{\c&H385CF0&}VOCÊ {\c&HFFFFFF&}ESTÁ {\c&HFFFFFF&}ASSISTINDO
+Dialogue: 0,0:00:01.02,0:00:01.28,Cap,,0,0,0,,{\fad(30,0)}{\c&HFFFFFF&}VOCÊ {\c&H385CF0&}ESTÁ {\c&HFFFFFF&}ASSISTINDO
+Dialogue: 0,0:00:01.28,0:00:01.90,Cap,,0,0,0,,{\fad(30,0)}{\c&HFFFFFF&}VOCÊ {\c&HFFFFFF&}ESTÁ {\c&H385CF0&}ASSISTINDO
+Dialogue: 0,0:00:01.90,0:00:02.66,Cap,,0,0,0,,{\fad(30,0)}{\c&H385CF0&}FOI {\c&HFFFFFF&}ESCRITO,
+Dialogue: 0,0:00:02.66,0:00:03.46,Cap,,0,0,0,,{\fad(30,0)}{\c&HFFFFFF&}FOI {\c&H385CF0&}ESCRITO,
+Dialogue: 0,0:00:03.46,0:00:03.84,Cap,,0,0,0,,{\fad(30,0)}{\c&H385CF0&}NARRADO {\c&HFFFFFF&}E {\c&HFFFFFF&}LEGENDADO
+Dialogue: 0,0:00:03.84,0:00:04.04,Cap,,0,0,0,,{\fad(30,0)}{\c&HFFFFFF&}NARRADO {\c&H385CF0&}E {\c&HFFFFFF&}LEGENDADO
+Dialogue: 0,0:00:04.04,0:00:04.76,Cap,,0,0,0,,{\fad(30,0)}{\c&HFFFFFF&}NARRADO {\c&HFFFFFF&}E {\c&H385CF0&}LEGENDADO
+Dialogue: 0,0:00:04.76,0:00:05.08,Cap,,0,0,0,,{\fad(30,0)}{\c&H385CF0&}POR {\c&HFFFFFF&}INTELIGÊNCIA {\c&HFFFFFF&}ARTIFICIAL.
+Dialogue: 0,0:00:05.08,0:00:05.90,Cap,,0,0,0,,{\fad(30,0)}{\c&HFFFFFF&}POR {\c&H385CF0&}INTELIGÊNCIA {\c&HFFFFFF&}ARTIFICIAL.
+Dialogue: 0,0:00:05.90,0:00:06.44,Cap,,0,0,0,,{\fad(30,0)}{\c&HFFFFFF&}POR {\c&HFFFFFF&}INTELIGÊNCIA {\c&H385CF0&}ARTIFICIAL.
+Dialogue: 0,0:00:07.62,0:00:08.04,Cap,,0,0,0,,{\fad(30,0)}{\c&H385CF0&}NENHUMA {\c&HFFFFFF&}CÂMERA,
+Dialogue: 0,0:00:08.04,0:00:09.10,Cap,,0,0,0,,{\fad(30,0)}{\c&HFFFFFF&}NENHUMA {\c&H385CF0&}CÂMERA,
+Dialogue: 0,0:00:09.10,0:00:09.48,Cap,,0,0,0,,{\fad(30,0)}{\c&H385CF0&}NENHUM {\c&HFFFFFF&}MICROFONE,
+Dialogue: 0,0:00:09.48,0:00:10.94,Cap,,0,0,0,,{\fad(30,0)}{\c&HFFFFFF&}NENHUM {\c&H385CF0&}MICROFONE,
+Dialogue: 0,0:00:10.94,0:00:11.34,Cap,,0,0,0,,{\fad(30,0)}{\c&H385CF0&}NENHUMA {\c&HFFFFFF&}MADRUGADA {\c&HFFFFFF&}PERDIDA
+Dialogue: 0,0:00:11.34,0:00:11.96,Cap,,0,0,0,,{\fad(30,0)}{\c&HFFFFFF&}NENHUMA {\c&H385CF0&}MADRUGADA {\c&HFFFFFF&}PERDIDA
+Dialogue: 0,0:00:11.96,0:00:12.58,Cap,,0,0,0,,{\fad(30,0)}{\c&HFFFFFF&}NENHUMA {\c&HFFFFFF&}MADRUGADA {\c&H385CF0&}PERDIDA
+Dialogue: 0,0:00:12.58,0:00:12.80,Cap,,0,0,0,,{\fad(30,0)}{\c&H385CF0&}EM {\c&HFFFFFF&}TIMELINE.
+Dialogue: 0,0:00:12.80,0:00:13.30,Cap,,0,0,0,,{\fad(30,0)}{\c&HFFFFFF&}EM {\c&H385CF0&}TIMELINE.
+Dialogue: 0,0:00:14.50,0:00:14.76,Cap,,0,0,0,,{\fad(30,0)}{\c&H385CF0&}VOCÊ {\c&HFFFFFF&}DÁ {\c&HFFFFFF&}UM
+Dialogue: 0,0:00:14.76,0:00:14.94,Cap,,0,0,0,,{\fad(30,0)}{\c&HFFFFFF&}VOCÊ {\c&H385CF0&}DÁ {\c&HFFFFFF&}UM
+Dialogue: 0,0:00:14.94,0:00:15.08,Cap,,0,0,0,,{\fad(30,0)}{\c&HFFFFFF&}VOCÊ {\c&HFFFFFF&}DÁ {\c&H385CF0&}UM
+Dialogue: 0,0:00:15.08,0:00:16.00,Cap,,0,0,0,,{\fad(30,0)}{\c&H385CF0&}TEMA,
+Dialogue: 0,0:00:16.00,0:00:16.16,Cap,,0,0,0,,{\fad(30,0)}{\c&H385CF0&}O {\c&HFFFFFF&}CLIPIA {\c&HFFFFFF&}OLHA
+Dialogue: 0,0:00:16.16,0:00:16.78,Cap,,0,0,0,,{\fad(30,0)}{\c&HFFFFFF&}O {\c&H385CF0&}CLIPIA {\c&HFFFFFF&}OLHA
+Dialogue: 0,0:00:16.78,0:00:17.16,Cap,,0,0,0,,{\fad(30,0)}{\c&HFFFFFF&}O {\c&HFFFFFF&}CLIPIA {\c&H385CF0&}OLHA
+Dialogue: 0,0:00:17.16,0:00:17.32,Cap,,0,0,0,,{\fad(30,0)}{\c&H385CF0&}O {\c&HFFFFFF&}QUE {\c&HFFFFFF&}ESTÁ
+Dialogue: 0,0:00:17.32,0:00:17.40,Cap,,0,0,0,,{\fad(30,0)}{\c&HFFFFFF&}O {\c&H385CF0&}QUE {\c&HFFFFFF&}ESTÁ
+Dialogue: 0,0:00:17.40,0:00:17.62,Cap,,0,0,0,,{\fad(30,0)}{\c&HFFFFFF&}O {\c&HFFFFFF&}QUE {\c&H385CF0&}ESTÁ
+Dialogue: 0,0:00:17.62,0:00:18.10,Cap,,0,0,0,,{\fad(30,0)}{\c&H385CF0&}BOMBANDO {\c&HFFFFFF&}AGORA,
+Dialogue: 0,0:00:18.10,0:00:19.10,Cap,,0,0,0,,{\fad(30,0)}{\c&HFFFFFF&}BOMBANDO {\c&H385CF0&}AGORA,
+Dialogue: 0,0:00:19.10,0:00:19.56,Cap,,0,0,0,,{\fad(30,0)}{\c&H385CF0&}ESCREVE {\c&HFFFFFF&}O {\c&HFFFFFF&}ROTEIRO,
+Dialogue: 0,0:00:19.56,0:00:19.66,Cap,,0,0,0,,{\fad(30,0)}{\c&HFFFFFF&}ESCREVE {\c&H385CF0&}O {\c&HFFFFFF&}ROTEIRO,
+Dialogue: 0,0:00:19.66,0:00:20.28,Cap,,0,0,0,,{\fad(30,0)}{\c&HFFFFFF&}ESCREVE {\c&HFFFFFF&}O {\c&H385CF0&}ROTEIRO,
+Dialogue: 0,0:00:21.28,0:00:21.38,Cap,,0,0,0,,{\fad(30,0)}{\c&H385CF0&}NARRA {\c&HFFFFFF&}EM {\c&HFFFFFF&}PORTUGUÊS
+Dialogue: 0,0:00:21.38,0:00:21.48,Cap,,0,0,0,,{\fad(30,0)}{\c&HFFFFFF&}NARRA {\c&H385CF0&}EM {\c&HFFFFFF&}PORTUGUÊS
+Dialogue: 0,0:00:21.48,0:00:21.98,Cap,,0,0,0,,{\fad(30,0)}{\c&HFFFFFF&}NARRA {\c&HFFFFFF&}EM {\c&H385CF0&}PORTUGUÊS
+Dialogue: 0,0:00:21.98,0:00:22.38,Cap,,0,0,0,,{\fad(30,0)}{\c&H385CF0&}NATURAL {\c&HFFFFFF&}E {\c&HFFFFFF&}LEGENDA
+Dialogue: 0,0:00:22.38,0:00:23.30,Cap,,0,0,0,,{\fad(30,0)}{\c&HFFFFFF&}NATURAL {\c&H385CF0&}E {\c&HFFFFFF&}LEGENDA
+Dialogue: 0,0:00:23.30,0:00:23.78,Cap,,0,0,0,,{\fad(30,0)}{\c&HFFFFFF&}NATURAL {\c&HFFFFFF&}E {\c&H385CF0&}LEGENDA
+Dialogue: 0,0:00:23.78,0:00:24.36,Cap,,0,0,0,,{\fad(30,0)}{\c&H385CF0&}PALAVRA {\c&HFFFFFF&}POR {\c&HFFFFFF&}PALAVRA,
+Dialogue: 0,0:00:24.36,0:00:24.56,Cap,,0,0,0,,{\fad(30,0)}{\c&HFFFFFF&}PALAVRA {\c&H385CF0&}POR {\c&HFFFFFF&}PALAVRA,
+Dialogue: 0,0:00:24.56,0:00:25.48,Cap,,0,0,0,,{\fad(30,0)}{\c&HFFFFFF&}PALAVRA {\c&HFFFFFF&}POR {\c&H385CF0&}PALAVRA,
+Dialogue: 0,0:00:25.48,0:00:25.56,Cap,,0,0,0,,{\fad(30,0)}{\c&H385CF0&}NO {\c&HFFFFFF&}RITMO {\c&HFFFFFF&}EXATO
+Dialogue: 0,0:00:25.56,0:00:25.90,Cap,,0,0,0,,{\fad(30,0)}{\c&HFFFFFF&}NO {\c&H385CF0&}RITMO {\c&HFFFFFF&}EXATO
+Dialogue: 0,0:00:25.90,0:00:26.44,Cap,,0,0,0,,{\fad(30,0)}{\c&HFFFFFF&}NO {\c&HFFFFFF&}RITMO {\c&H385CF0&}EXATO
+Dialogue: 0,0:00:26.44,0:00:26.62,Cap,,0,0,0,,{\fad(30,0)}{\c&H385CF0&}DA {\c&HFFFFFF&}VOZ.
+Dialogue: 0,0:00:26.62,0:00:27.02,Cap,,0,0,0,,{\fad(30,0)}{\c&HFFFFFF&}DA {\c&H385CF0&}VOZ.
+Dialogue: 0,0:00:28.00,0:00:28.12,Cap,,0,0,0,,{\fad(30,0)}{\c&H385CF0&}QUER {\c&HFFFFFF&}AJUSTAR?
+Dialogue: 0,0:00:28.12,0:00:29.16,Cap,,0,0,0,,{\fad(30,0)}{\c&HFFFFFF&}QUER {\c&H385CF0&}AJUSTAR?
+Dialogue: 0,0:00:29.38,0:00:29.46,Cap,,0,0,0,,{\fad(30,0)}{\c&H385CF0&}O {\c&HFFFFFF&}EDITOR {\c&HFFFFFF&}MOSTRA
+Dialogue: 0,0:00:29.46,0:00:29.84,Cap,,0,0,0,,{\fad(30,0)}{\c&HFFFFFF&}O {\c&H385CF0&}EDITOR {\c&HFFFFFF&}MOSTRA
+Dialogue: 0,0:00:29.84,0:00:30.44,Cap,,0,0,0,,{\fad(30,0)}{\c&HFFFFFF&}O {\c&HFFFFFF&}EDITOR {\c&H385CF0&}MOSTRA
+Dialogue: 0,0:00:30.44,0:00:31.04,Cap,,0,0,0,,{\fad(30,0)}{\c&H385CF0&}EXATAMENTE {\c&HFFFFFF&}O {\c&HFFFFFF&}QUE
+Dialogue: 0,0:00:31.04,0:00:31.38,Cap,,0,0,0,,{\fad(30,0)}{\c&HFFFFFF&}EXATAMENTE {\c&H385CF0&}O {\c&HFFFFFF&}QUE
+Dialogue: 0,0:00:31.38,0:00:31.50,Cap,,0,0,0,,{\fad(30,0)}{\c&HFFFFFF&}EXATAMENTE {\c&HFFFFFF&}O {\c&H385CF0&}QUE
+Dialogue: 0,0:00:31.46,0:00:31.72,Cap,,0,0,0,,{\fad(30,0)}{\c&H385CF0&}SAI {\c&HFFFFFF&}NO {\c&HFFFFFF&}ARQUIVO
+Dialogue: 0,0:00:31.72,0:00:31.82,Cap,,0,0,0,,{\fad(30,0)}{\c&HFFFFFF&}SAI {\c&H385CF0&}NO {\c&HFFFFFF&}ARQUIVO
+Dialogue: 0,0:00:31.82,0:00:32.14,Cap,,0,0,0,,{\fad(30,0)}{\c&HFFFFFF&}SAI {\c&HFFFFFF&}NO {\c&H385CF0&}ARQUIVO
+Dialogue: 0,0:00:32.14,0:00:33.00,Cap,,0,0,0,,{\fad(30,0)}{\c&H385CF0&}FINAL.
+Dialogue: 0,0:00:33.18,0:00:33.22,Cap,,0,0,0,,{\fad(30,0)}{\c&H385CF0&}O {\c&HFFFFFF&}QUE {\c&HFFFFFF&}VOCÊ
+Dialogue: 0,0:00:33.22,0:00:33.32,Cap,,0,0,0,,{\fad(30,0)}{\c&HFFFFFF&}O {\c&H385CF0&}QUE {\c&HFFFFFF&}VOCÊ
+Dialogue: 0,0:00:33.32,0:00:33.64,Cap,,0,0,0,,{\fad(30,0)}{\c&HFFFFFF&}O {\c&HFFFFFF&}QUE {\c&H385CF0&}VOCÊ
+Dialogue: 0,0:00:33.64,0:00:34.00,Cap,,0,0,0,,{\fad(30,0)}{\c&H385CF0&}VÊ {\c&HFFFFFF&}É {\c&HFFFFFF&}O
+Dialogue: 0,0:00:34.00,0:00:34.62,Cap,,0,0,0,,{\fad(30,0)}{\c&HFFFFFF&}VÊ {\c&H385CF0&}É {\c&HFFFFFF&}O
+Dialogue: 0,0:00:34.62,0:00:34.74,Cap,,0,0,0,,{\fad(30,0)}{\c&HFFFFFF&}VÊ {\c&HFFFFFF&}É {\c&H385CF0&}O
+Dialogue: 0,0:00:34.74,0:00:34.78,Cap,,0,0,0,,{\fad(30,0)}{\c&H385CF0&}QUE {\c&HFFFFFF&}VOCÊ {\c&HFFFFFF&}PUBLICA.
+Dialogue: 0,0:00:34.78,0:00:35.04,Cap,,0,0,0,,{\fad(30,0)}{\c&HFFFFFF&}QUE {\c&H385CF0&}VOCÊ {\c&HFFFFFF&}PUBLICA.
+Dialogue: 0,0:00:35.04,0:00:35.58,Cap,,0,0,0,,{\fad(30,0)}{\c&HFFFFFF&}QUE {\c&HFFFFFF&}VOCÊ {\c&H385CF0&}PUBLICA.
+Dialogue: 0,0:00:36.58,0:00:36.94,Cap,,0,0,0,,{\fad(30,0)}{\c&H385CF0&}ENQUANTO {\c&HFFFFFF&}VOCÊ {\c&HFFFFFF&}LÊ
+Dialogue: 0,0:00:36.94,0:00:37.34,Cap,,0,0,0,,{\fad(30,0)}{\c&HFFFFFF&}ENQUANTO {\c&H385CF0&}VOCÊ {\c&HFFFFFF&}LÊ
+Dialogue: 0,0:00:37.34,0:00:37.50,Cap,,0,0,0,,{\fad(30,0)}{\c&HFFFFFF&}ENQUANTO {\c&HFFFFFF&}VOCÊ {\c&H385CF0&}LÊ
+Dialogue: 0,0:00:37.50,0:00:37.72,Cap,,0,0,0,,{\fad(30,0)}{\c&H385CF0&}ESTA {\c&HFFFFFF&}LEGENDA,
+Dialogue: 0,0:00:37.72,0:00:38.80,Cap,,0,0,0,,{\fad(30,0)}{\c&HFFFFFF&}ESTA {\c&H385CF0&}LEGENDA,
+Dialogue: 0,0:00:38.80,0:00:38.92,Cap,,0,0,0,,{\fad(30,0)}{\c&H385CF0&}TEM {\c&HFFFFFF&}GENTE {\c&HFFFFFF&}PUBLICANDO
+Dialogue: 0,0:00:38.92,0:00:39.26,Cap,,0,0,0,,{\fad(30,0)}{\c&HFFFFFF&}TEM {\c&H385CF0&}GENTE {\c&HFFFFFF&}PUBLICANDO
+Dialogue: 0,0:00:39.26,0:00:39.88,Cap,,0,0,0,,{\fad(30,0)}{\c&HFFFFFF&}TEM {\c&HFFFFFF&}GENTE {\c&H385CF0&}PUBLICANDO
+Dialogue: 0,0:00:39.88,0:00:40.00,Cap,,0,0,0,,{\fad(30,0)}{\c&H385CF0&}O {\c&HFFFFFF&}TERCEIRO {\c&HFFFFFF&}VÍDEO
+Dialogue: 0,0:00:40.00,0:00:40.52,Cap,,0,0,0,,{\fad(30,0)}{\c&HFFFFFF&}O {\c&H385CF0&}TERCEIRO {\c&HFFFFFF&}VÍDEO
+Dialogue: 0,0:00:40.52,0:00:40.90,Cap,,0,0,0,,{\fad(30,0)}{\c&HFFFFFF&}O {\c&HFFFFFF&}TERCEIRO {\c&H385CF0&}VÍDEO
+Dialogue: 0,0:00:40.90,0:00:41.10,Cap,,0,0,0,,{\fad(30,0)}{\c&H385CF0&}DO {\c&HFFFFFF&}DIA.
+Dialogue: 0,0:00:41.10,0:00:41.42,Cap,,0,0,0,,{\fad(30,0)}{\c&HFFFFFF&}DO {\c&H385CF0&}DIA.
