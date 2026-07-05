@@ -35,12 +35,15 @@ async def _credit_once(db: AsyncSession, purchase: CreditPurchase, external_paym
     if external_payment_id:
         purchase.mp_payment_id = str(external_payment_id)
     purchase.paid_at = datetime.now(timezone.utc)
-    user.credits += purchase.credits_amount
+    bonus = purchase.credits_amount * settings.PURCHASE_BONUS_PERCENT // 100
+    purchase.bonus_credits = bonus
+    user.credits += purchase.credits_amount + bonus
     await db.commit()
-    record_credit_metric("credit", purchase.credits_amount)
+    record_credit_metric("credit", purchase.credits_amount + bonus)
     logger.info(
-        "Credited %d credits to user %s (purchase %s, provider=%s)",
+        "Credited %d credits (+%d bonus) to user %s (purchase %s, provider=%s)",
         purchase.credits_amount,
+        bonus,
         user.id,
         purchase.id,
         purchase.provider,
@@ -55,12 +58,13 @@ async def _revert_once(db: AsyncSession, purchase: CreditPurchase) -> bool:
     user_row = await db.execute(select(User).where(User.id == purchase.user_id))
     user = user_row.scalar_one()
     purchase.status = "refunded"
-    user.credits = max(0, user.credits - purchase.credits_amount)  # clamp em 0 sob o lock
+    total_credited = purchase.credits_amount + purchase.bonus_credits
+    user.credits = max(0, user.credits - total_credited)  # clamp em 0 sob o lock
     await db.commit()
-    record_credit_metric("debit", purchase.credits_amount)
+    record_credit_metric("debit", total_credited)
     logger.warning(
-        "Reverted %d credits from user %s (purchase %s, provider=%s)",
-        purchase.credits_amount,
+        "Reverted %d credits (base+bonus) from user %s (purchase %s, provider=%s)",
+        total_credited,
         user.id,
         purchase.id,
         purchase.provider,

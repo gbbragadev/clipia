@@ -9,6 +9,8 @@ export interface CreditPackage {
   credits: number;
   price_brl: number;
   price_display: string;
+  bonus_percent: number;
+  bonus_credits: number;
 }
 
 export interface PurchaseHistoryItem {

@@ -16,7 +16,8 @@ export default function CreditPackageCard({ pkg, highlight, badge, provider = 's
   const [loading, setLoading] = useState(false)
   const { error: toastError } = useToast()
 
-  const pricePerCredit = (pkg.price_brl / 100 / pkg.credits).toFixed(2).replace('.', ',')
+  const totalCredits = pkg.credits + (pkg.bonus_credits ?? 0)
+  const pricePerCredit = (pkg.price_brl / 100 / totalCredits).toFixed(2).replace('.', ',')
 
   async function handleBuy() {
     setLoading(true)
@@ -68,6 +69,19 @@ export default function CreditPackageCard({ pkg, highlight, badge, provider = 's
         </span>
         <span className="text-sm ml-1" style={{ color: 'var(--text-secondary)' }}>créditos</span>
       </div>
+
+      {pkg.bonus_credits > 0 && (
+        <span
+          className="mt-2 px-2.5 py-0.5 rounded-full text-xs font-semibold"
+          style={{
+            background: 'rgba(34,197,94,0.15)',
+            color: '#4ade80',
+            border: '1px solid rgba(34,197,94,0.3)',
+          }}
+        >
+          +{pkg.bonus_credits} bônus · {totalCredits} no total
+        </span>
+      )}
 
       <p className="mt-1 text-xs" style={{ color: 'var(--text-tertiary)' }}>
         R$ {pricePerCredit} por crédito

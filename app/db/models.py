@@ -15,6 +15,10 @@ class CreditPurchase(Base):
     user_id: Mapped[uuid.UUID] = mapped_column(GUID(), ForeignKey("users.id"), nullable=False)
     package_name: Mapped[str] = mapped_column(String(50), nullable=False)
     credits_amount: Mapped[int] = mapped_column(Integer, nullable=False)
+    # Bonus promocional creditado JUNTO com credits_amount no momento da aprovacao (snapshot da
+    # flag PURCHASE_BONUS_PERCENT na epoca da compra) — estorno reverte base+bonus mesmo se a
+    # promo ja tiver acabado.
+    bonus_credits: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     price_brl: Mapped[int] = mapped_column(Integer, nullable=False)  # centavos
     provider: Mapped[str] = mapped_column(
         String(20), nullable=False, default="mercadopago", server_default="mercadopago"

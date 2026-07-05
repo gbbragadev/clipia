@@ -16,6 +16,8 @@ class PackageResponse(BaseModel):
     credits: int = Field(..., description="Number of credits included")
     price_brl: int = Field(..., description="Price in BRL cents")
     price_display: str = Field(..., description="Formatted price string")
+    bonus_percent: int = Field(default=0, description="Active promotional bonus percent (0 = none)")
+    bonus_credits: int = Field(default=0, description="Extra credits granted on purchase")
 
 
 class CheckoutRequest(BaseModel):

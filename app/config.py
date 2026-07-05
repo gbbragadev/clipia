@@ -133,6 +133,11 @@ class Settings(BaseSettings):
     # (sempre +2 fixo, ver app/auth/routes.py).
     WELCOME_CREDIT_BONUS: int = 2
 
+    # Promocao de compra (beta): % de creditos BONUS sobre o pacote comprado, aplicado no
+    # credito pos-webhook (_credit_once — ponto unico MP+Stripe). 0 desliga. Ex.: 20 -> pacote
+    # popular (30) credita 36. Nao mexe em preco cobrado; rollback = voltar a 0 no .env + restart.
+    PURCHASE_BONUS_PERCENT: int = 0
+
     # Guardrail anti-burn: teto DIARIO de geracoes de video IA (Seedance ~R$0,67/s, ~R$20/Short) por
     # usuario. 0 desliga. Mesmo conta admin/seed (999k creditos) nao queima $ ilimitado num dia — foi
     # o vetor do gasto de ~$6 (tester com conta admin). Vale pra TODOS os planos, inclusive admin.

@@ -85,6 +85,14 @@ export default function CreditsPage() {
               </span>
               <span style={{ color: 'var(--text-secondary)' }}>créditos disponíveis</span>
             </div>
+            {(() => {
+              const bonusPercent = packages.find((p) => p.bonus_percent > 0)?.bonus_percent
+              return bonusPercent ? (
+                <p className="mt-3 text-sm font-medium" style={{ color: '#4ade80' }}>
+                  🎉 Promoção beta: +{bonusPercent}% de créditos bônus em todos os pacotes
+                </p>
+              ) : null
+            })()}
           </div>
 
           {/* Provider selector */}

@@ -47,6 +47,7 @@ async def list_packages(user: User = Depends(get_current_user)):
         price = pkg["price_brl"]
         reais = price // 100
         centavos = price % 100
+        bonus = pkg["credits"] * settings.PURCHASE_BONUS_PERCENT // 100
         packages.append(
             PackageResponse(
                 id=key,
@@ -54,6 +55,8 @@ async def list_packages(user: User = Depends(get_current_user)):
                 credits=pkg["credits"],
                 price_brl=price,
                 price_display=f"R$ {reais},{centavos:02d}",
+                bonus_percent=settings.PURCHASE_BONUS_PERCENT if bonus else 0,
+                bonus_credits=bonus,
             )
         )
     return packages
