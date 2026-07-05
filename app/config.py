@@ -186,6 +186,12 @@ class Settings(BaseSettings):
     SMTP_PASSWORD: str = ""
     SMTP_FROM: str = "noreply@clipia.com.br"
 
+    # Suporte ao usuario (beta). Email vira Reply-To do welcome email; recebimento exige
+    # Cloudflare Email Routing (Resend e send-only). WhatsApp em formato wa.me (so digitos,
+    # ex: 5545999999999); vazio = link omitido do email.
+    SUPPORT_EMAIL: str = "suporte@clipia.com.br"
+    SUPPORT_WHATSAPP: str = ""
+
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
 
 

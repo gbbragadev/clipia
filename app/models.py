@@ -119,6 +119,20 @@ class WaitlistRequest(BaseModel):
         return _normalize_email(value)
 
 
+class FeedbackRequest(BaseModel):
+    kind: Literal["widget", "post_video"]
+    rating: int | None = Field(None, ge=1, le=5, description="Nota 1-5 (widget) ou 1/5 = 👎/👍 (pos-video)")
+    comment: str | None = Field(None, max_length=1000)
+    job_id: str | None = None
+    source_url: str | None = Field(None, max_length=500)
+
+    @model_validator(mode="after")
+    def validate_has_content(self):
+        if self.rating is None and not (self.comment or "").strip():
+            raise ValueError(ErrorMessages.INVALID_INPUT)
+        return self
+
+
 class AdminCreditAdjustRequest(BaseModel):
     delta: int = Field(..., ge=-100_000, le=100_000, description="Creditos a somar (negativo subtrai)")
     reason: str = Field(..., min_length=3, max_length=255, description="Motivo do ajuste (auditoria)")

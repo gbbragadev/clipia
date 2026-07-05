@@ -180,6 +180,26 @@ export async function fetchAdminJobs(params: { status?: string; page?: number })
   )
 }
 
+export interface AdminFeedbackItem {
+  id: string
+  user_email: string
+  kind: 'widget' | 'post_video'
+  rating: number | null
+  comment: string | null
+  job_id: string | null
+  job_topic: string | null
+  source_url: string | null
+  created_at: string | null
+}
+
+export async function fetchAdminFeedbacks(params: { kind?: string; page?: number }) {
+  return fetchJson<AdminPage & { feedbacks: AdminFeedbackItem[] }>(
+    `${API_BASE}/api/v1/admin/feedbacks${adminQuery(params)}`,
+    { headers: authHeaders() },
+    'Nao foi possivel carregar os feedbacks',
+  )
+}
+
 export async function adjustUserCredits(userId: string, delta: number, reason: string) {
   return fetchJson<{ user_id: string; delta: number; previous_balance: number; new_balance: number }>(
     `${API_BASE}/api/v1/admin/users/${userId}/adjust-credits`,

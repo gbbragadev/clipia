@@ -17,13 +17,14 @@ from app.api.security import get_owned_job
 from app.auth.dependencies import get_current_admin_user, get_current_user
 from app.config import settings
 from app.db.engine import get_db
-from app.db.models import CreditAdjustment, CreditPurchase, Job, User, VoiceClone, WaitlistEntry
+from app.db.models import CreditAdjustment, CreditPurchase, Feedback, Job, User, VoiceClone, WaitlistEntry
 from app.errors import ErrorMessages, not_found_error, validate_uuid
 from app.models import (
     AdminCreditAdjustRequest,
     AISuggestRequest,
     CompositionResponse,
     EditRequest,
+    FeedbackRequest,
     GenerateRequest,
     JobStatus,
     RegenerateTTSRequest,
@@ -1530,6 +1531,89 @@ async def admin_list_jobs(
                 "error": j.error,
             }
             for j, email in rows.all()
+        ],
+    }
+
+
+@router.post(
+    "/feedback",
+    status_code=201,
+    summary="Submit feedback",
+    description="User feedback: in-app widget (rating 1-5 + comment) or post-video prompt (per job).",
+    responses={201: {"description": "Saved"}},
+)
+@limiter.limit("5/minute")
+async def submit_feedback(
+    request: Request,
+    req: FeedbackRequest,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    job_uuid = None
+    if req.job_id:
+        job_uuid = validate_uuid(req.job_id)
+        job = await db.get(Job, job_uuid)
+        if not job or job.user_id != user.id:
+            raise not_found_error()
+
+    db.add(
+        Feedback(
+            user_id=user.id,
+            kind=req.kind,
+            rating=req.rating,
+            comment=(req.comment or "").strip() or None,
+            job_id=job_uuid,
+            source_url=req.source_url,
+        )
+    )
+    await db.commit()
+    return {"status": "ok"}
+
+
+@router.get(
+    "/admin/feedbacks",
+    summary="Admin: list feedbacks",
+    description="Paginated feedback list with kind filter.",
+    responses={200: {"description": "Feedbacks"}},
+)
+async def admin_list_feedbacks(
+    kind: str = "",
+    page: int = 1,
+    page_size: int = 50,
+    _admin_user: User = Depends(get_current_admin_user),
+    db: AsyncSession = Depends(get_db),
+):
+    page, page_size = _admin_pagination(page, page_size)
+    stmt = (
+        select(Feedback, User.email, Job.topic)
+        .join(User, Feedback.user_id == User.id)
+        .outerjoin(Job, Feedback.job_id == Job.id)
+    )
+    count_stmt = select(func.count()).select_from(Feedback)
+    if kind.strip():
+        stmt = stmt.where(Feedback.kind == kind.strip())
+        count_stmt = count_stmt.where(Feedback.kind == kind.strip())
+
+    total = (await db.execute(count_stmt)).scalar() or 0
+    rows = await db.execute(stmt.order_by(Feedback.created_at.desc()).offset((page - 1) * page_size).limit(page_size))
+
+    return {
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+        "feedbacks": [
+            {
+                "id": str(f.id),
+                "user_email": email,
+                "kind": f.kind,
+                "rating": f.rating,
+                "comment": f.comment,
+                "job_id": str(f.job_id) if f.job_id else None,
+                "job_topic": topic,
+                "source_url": f.source_url,
+                "created_at": f.created_at.isoformat() if f.created_at else None,
+            }
+            for f, email, topic in rows.all()
         ],
     }
 

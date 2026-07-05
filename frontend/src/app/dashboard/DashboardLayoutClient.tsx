@@ -6,6 +6,7 @@ import { getToken } from '@/lib/auth'
 import { useAuth } from '@/contexts/AuthContext'
 import DashboardNavbar from '@/components/dashboard/DashboardNavbar'
 import { MobileBottomNav } from '@/components/dashboard/MobileBottomNav'
+import FeedbackWidget from '@/components/ui/FeedbackWidget'
 import { DashboardLoadingSkeleton } from '@/components/ui/skeletons'
 
 export default function DashboardLayout({ children }: { children: ReactNode }) {
@@ -30,6 +31,7 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
         {children}
       </main>
       <MobileBottomNav />
+      <FeedbackWidget />
     </div>
   )
 }

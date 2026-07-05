@@ -7,7 +7,10 @@ from app.db.models import User
 
 
 @pytest.mark.asyncio
-async def test_register_creates_pending_user_and_verify_grants_two_credits(client, db_session):
+async def test_register_creates_pending_user_and_verify_grants_two_credits(client, db_session, monkeypatch):
+    # Fixa o default publico (2): o .env local pode elevar WELCOME_CREDIT_BONUS no beta fechado
+    # e o teste nao pode depender do ambiente.
+    monkeypatch.setattr("app.auth.routes.settings.WELCOME_CREDIT_BONUS", 2)
     register = await client.post(
         "/api/v1/auth/register",
         json={"email": "otp@example.com", "name": "Otp User", "password": "Secret123"},

@@ -122,6 +122,21 @@ class VoiceClone(Base):
     user: Mapped["User"] = relationship(back_populates="voice_clones")
 
 
+class Feedback(Base):
+    """Feedback do usuario: widget in-app (nota 1-5 + texto) e prompt pos-video (por job)."""
+
+    __tablename__ = "feedbacks"
+
+    id: Mapped[uuid.UUID] = mapped_column(GUID(), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(GUID(), ForeignKey("users.id"), nullable=False, index=True)
+    kind: Mapped[str] = mapped_column(String(20), nullable=False)  # widget | post_video
+    rating: Mapped[int | None] = mapped_column(Integer, nullable=True)  # 1-5
+    comment: Mapped[str | None] = mapped_column(Text, nullable=True)
+    job_id: Mapped[uuid.UUID | None] = mapped_column(GUID(), ForeignKey("jobs.id"), nullable=True)
+    source_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
 class WaitlistEntry(Base):
     __tablename__ = "waitlist"
 
