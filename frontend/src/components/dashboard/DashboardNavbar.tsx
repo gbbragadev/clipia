@@ -18,6 +18,13 @@ export default function DashboardNavbar() {
 
           {user && (
             <div className="flex items-center gap-1.5 sm:gap-3">
+              <a
+                href="/suporte"
+                className="hidden text-xs font-medium transition-opacity hover:opacity-80 md:inline"
+                style={{ color: 'var(--text-secondary)' }}
+              >
+                Suporte
+              </a>
               {user.plan === 'admin' && (
                 <a
                   href="/dashboard/admin"

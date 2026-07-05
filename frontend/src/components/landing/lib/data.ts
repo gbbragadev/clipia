@@ -244,6 +244,7 @@ export const FOOTER_COLS = [
       { label: "Exemplos", href: "#exemplos" },
       { label: "Diferenciais", href: "#diferenciais" },
       { label: "FAQ", href: "#faq" },
+      { label: "Suporte", href: "/suporte" },
     ],
   },
   {
