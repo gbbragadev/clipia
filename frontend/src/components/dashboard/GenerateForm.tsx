@@ -122,17 +122,17 @@ export default function GenerateForm({ onJobComplete, onJobCreated, prefillTopic
     if (prefillStyle) {
       setStyle(prefillStyle)
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [prefillTopic, prefillTrendContext, prefillStyle])
 
-  // Aplica template prefill apenas quando templates carregam — guarda com ref para não aplicar 2x
+  // Aplica template prefill apenas quando templates carregam — guarda com ref composto (topic|templateId) para re-aplicar em nova seleção de painel
   useEffect(() => {
     if (!prefillTemplateId || templates.length === 0) return
-    if (appliedPrefillRef.current === prefillTemplateId) return // já foi aplicado
+    const prefillKey = `${prefillTopic}|${prefillTemplateId}`
+    if (appliedPrefillRef.current === prefillKey) return // já foi aplicado nesta seleção
     handleTemplateSelect(prefillTemplateId)
-    appliedPrefillRef.current = prefillTemplateId
+    appliedPrefillRef.current = prefillKey
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [prefillTemplateId, templates])
+  }, [prefillTemplateId, templates, prefillTopic])
 
   const handleTemplateSelect = (id: string) => {
     const nextTemplate = templates.find((template) => template.id === id)
