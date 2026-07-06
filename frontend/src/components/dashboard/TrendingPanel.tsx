@@ -48,7 +48,7 @@ export default function TrendingPanel({ onSelect }: TrendingPanelProps) {
         <h2 className="text-lg font-bold text-white">Em alta agora</h2>
       </div>
       <p className="text-sm text-slate-400 mb-5">
-        Temas com tração real nos últimos 30 dias. Clique para gerar um vídeo já fundamentado nos dados.
+        Sugestões com tração real nos últimos 30 dias — use uma como ponto de partida ou escreva seu próprio tema logo abaixo.
       </p>
 
       {/* Filtro por nicho */}

@@ -196,21 +196,9 @@ export default function GenerateForm({ onJobComplete, onJobCreated, prefillTopic
     <section>
       <h2 className="text-xl font-bold mb-6">Criar novo vídeo</h2>
 
-      {/* Template */}
-      <div className="mb-5">
-        <label className="block text-xs text-[var(--text-tertiary)] mb-2">Template</label>
-        <TemplateSelector
-          selected={templateId}
-          onSelect={handleTemplateSelect}
-          disabled={generating}
-          templates={templates}
-          voiceProvider={voiceProvider}
-        />
-      </div>
-
       {/* Topic */}
       <div className="mb-4">
-        <label className="block text-xs text-[var(--text-tertiary)] mb-1.5">Tema do vídeo</label>
+        <label className="block text-xs text-[var(--text-tertiary)] mb-1.5">Tema do vídeo — escreva o que quiser</label>
         <input
           type="text"
           value={topic}
@@ -223,6 +211,18 @@ export default function GenerateForm({ onJobComplete, onJobCreated, prefillTopic
       </div>
 
       <OpticalBalancePreview text={topic} />
+
+      {/* Template */}
+      <div className="mb-5">
+        <label className="block text-xs text-[var(--text-tertiary)] mb-2">Template</label>
+        <TemplateSelector
+          selected={templateId}
+          onSelect={handleTemplateSelect}
+          disabled={generating}
+          templates={templates}
+          voiceProvider={voiceProvider}
+        />
+      </div>
 
       {/* Style */}
       <div className="mb-4">
