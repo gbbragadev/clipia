@@ -96,3 +96,61 @@ def test_parse_script_json_raises_on_completely_invalid_input():
     msg = str(exc_info.value)
     assert "JSON invalido" in msg
     assert "isso nao tem nenhum objeto json valido aqui" in msg
+
+
+def test_format_adapt_instruction_in_default_template():
+    """Guardrail: prompt deve conter ADAPTACAO DE FORMATO para template default."""
+    fake = json.dumps(
+        {
+            "title": "Curiosidades do Oceano",
+            "narration": "Voce sabia que o oceano cobre mais de setenta por cento da Terra?",
+            "scenes": [
+                {
+                    "text": "Voce sabia que o oceano cobre mais de setenta por cento da Terra?",
+                    "keywords_en": ["ocean", "earth", "planet"],
+                    "duration_hint": 8,
+                }
+            ],
+            "hashtags": ["#shorts", "#oceano"],
+        }
+    )
+
+    with patch("app.services.scriptwriter.complete_text_ex") as mock_llm:
+        mock_llm.return_value = (fake, "openai")
+        result = generate_script("curiosidades do oceano", "educational", 45)
+
+    # Verify the LLM was called
+    assert mock_llm.called
+    # Extract the prompt that was sent to the LLM
+    prompt_sent = mock_llm.call_args[0][0]
+    assert "ADAPTACAO DE FORMATO" in prompt_sent
+    assert result is not None
+
+
+def test_format_adapt_instruction_in_curiosidades_lista_template():
+    """Guardrail: prompt deve conter ADAPTACAO DE FORMATO para template curiosidades_lista."""
+    fake = json.dumps(
+        {
+            "title": "Top 5 Curiosidades",
+            "narration": "Voce sabia...",
+            "scenes": [
+                {
+                    "text": "Numero 1: fato um",
+                    "keywords_en": ["fact", "curiosity"],
+                    "duration_hint": 8,
+                }
+            ],
+            "hashtags": ["#shorts"],
+        }
+    )
+
+    with patch("app.services.scriptwriter.complete_text_ex") as mock_llm:
+        mock_llm.return_value = (fake, "openai")
+        result = generate_script("top 5 curiosidades", "educational", 45, template_id="curiosidades_lista")
+
+    # Verify the LLM was called
+    assert mock_llm.called
+    # Extract the prompt that was sent to the LLM
+    prompt_sent = mock_llm.call_args[0][0]
+    assert "ADAPTACAO DE FORMATO" in prompt_sent
+    assert result is not None

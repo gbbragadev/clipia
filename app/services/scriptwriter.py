@@ -79,6 +79,16 @@ REGRAS DE DIÁLOGO:
 - Falas naturais e com ritmo de conversa real; juntas, explicam/contam o tema.
 """
 
+FORMAT_ADAPT_INSTRUCTION = """
+
+ADAPTACAO DE FORMATO:
+- Se o tema NAO se encaixar na estrutura pedida acima (ex.: tema narrativo ou historia pessoal
+  com formato de lista de fatos numerados), ADAPTE a estrutura ao tema mantendo o espirito do
+  formato (gancho forte, ritmo, CTA).
+- NUNCA invente fatos falsos apenas para preencher o formato.
+- A coerencia do roteiro com o tema tem prioridade sobre a estrutura rigida do formato.
+"""
+
 TREND_CONTEXT_INSTRUCTION = """
 
 CONTEXTO REAL (tendencia atual — ancore o roteiro nestes fatos/angulos reais, sem inventar dados):
@@ -133,6 +143,8 @@ def generate_script(
         )
 
     prompt_text += template.script.prompt_extra
+
+    prompt_text += FORMAT_ADAPT_INSTRUCTION
 
     if trend_context and trend_context.strip():
         prompt_text += TREND_CONTEXT_INSTRUCTION.format(trend_context=trend_context.strip())
