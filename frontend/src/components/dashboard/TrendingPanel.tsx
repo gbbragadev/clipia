@@ -4,8 +4,15 @@ import { useEffect, useState } from 'react'
 import { fetchTrends, type Trend } from '@/lib/editor-api'
 import { NICHES } from '@/lib/niches'
 
+export interface TrendSelection {
+  topic: string
+  trendContext: string | null
+  templateId?: string
+  style?: string
+}
+
 interface TrendingPanelProps {
-  onSelect: (topic: string, trendContext: string) => void
+  onSelect: (sel: TrendSelection) => void
 }
 
 const SOURCE_LABEL: Record<string, string> = {
@@ -72,6 +79,39 @@ export default function TrendingPanel({ onSelect }: TrendingPanelProps) {
         ))}
       </div>
 
+      {/* Temas amplos — mostrados quando um nicho está selecionado */}
+      {niche !== null && (
+        <div className="mb-5 pb-5 border-b border-white/5">
+          <div className="flex items-start gap-2 mb-3">
+            <span className="text-sm">💡</span>
+            <div className="flex-1">
+              <h3 className="text-sm font-semibold text-white">Temas amplos</h3>
+              <p className="text-[11px] text-slate-400 mt-1">Assuntos que funcionam sempre — clique para usar.</p>
+            </div>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {NICHES.find((n) => n.slug === niche)?.exampleTopics.map((topic, i) => (
+              <button
+                key={i}
+                type="button"
+                onClick={() => {
+                  const nicheDef = NICHES.find((n) => n.slug === niche)
+                  onSelect({
+                    topic,
+                    trendContext: null,
+                    templateId: nicheDef?.recommendedTemplate,
+                    style: nicheDef?.generateStyle,
+                  })
+                }}
+                className="px-3 py-1.5 rounded-full text-xs text-slate-300 border border-white/10 bg-white/[0.03] hover:border-coral/50 hover:bg-coral/5 transition cursor-pointer"
+              >
+                {topic}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
       {loading ? (
         <div className="grid sm:grid-cols-2 gap-3">
           {Array.from({ length: 4 }).map((_, i) => (
@@ -87,29 +127,37 @@ export default function TrendingPanel({ onSelect }: TrendingPanelProps) {
         </p>
       ) : (
         <div className="grid sm:grid-cols-2 gap-3">
-          {trends.map((t, i) => (
-            <div
-              key={`${t.url}-${i}`}
-              className="group flex items-start justify-between gap-3 rounded-xl border border-white/5 bg-white/[0.03] p-3 hover:border-coral/30 transition"
-            >
-              <div className="min-w-0">
-                <p className="text-sm text-slate-200 line-clamp-2">{t.title}</p>
-                <div className="flex items-center gap-2 mt-1.5">
-                  <span className="text-[10px] uppercase tracking-wide text-slate-500">
-                    {SOURCE_LABEL[t.source] ?? t.source}
-                  </span>
-                  {t.score >= 0.66 && <span className="text-[10px]">🔥</span>}
-                </div>
-              </div>
-              <button
-                type="button"
-                onClick={() => onSelect(t.title, trendContextOf(t))}
-                className="shrink-0 self-center rounded-lg bg-coral/90 px-3 py-1.5 text-[11px] font-semibold text-white hover:bg-coral transition cursor-pointer"
+          {trends.map((t, i) => {
+            const nicheDef = niche ? NICHES.find((n) => n.slug === niche) : undefined
+            return (
+              <div
+                key={`${t.url}-${i}`}
+                className="group flex items-start justify-between gap-3 rounded-xl border border-white/5 bg-white/[0.03] p-3 hover:border-coral/30 transition"
               >
-                Gerar
-              </button>
-            </div>
-          ))}
+                <div className="min-w-0">
+                  <p className="text-sm text-slate-200 line-clamp-2">{t.title}</p>
+                  <div className="flex items-center gap-2 mt-1.5">
+                    <span className="text-[10px] uppercase tracking-wide text-slate-500">
+                      {SOURCE_LABEL[t.source] ?? t.source}
+                    </span>
+                    {t.score >= 0.66 && <span className="text-[10px]">🔥</span>}
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => onSelect({
+                    topic: t.title,
+                    trendContext: trendContextOf(t),
+                    templateId: nicheDef?.recommendedTemplate,
+                    style: nicheDef?.generateStyle,
+                  })}
+                  className="shrink-0 self-center rounded-lg bg-coral/90 px-3 py-1.5 text-[11px] font-semibold text-white hover:bg-coral transition cursor-pointer"
+                >
+                  Gerar
+                </button>
+              </div>
+            )
+          })}
         </div>
       )}
     </div>

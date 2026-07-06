@@ -7,7 +7,7 @@ import { useRouter } from 'next/navigation'
 import { fetchJobs, cancelJob, ACTIVE_JOB_STATUSES, type JobSummary } from '@/lib/editor-api'
 import { useAuth } from '@/contexts/AuthContext'
 import GenerateForm from '@/components/dashboard/GenerateForm'
-import TrendingPanel from '@/components/dashboard/TrendingPanel'
+import TrendingPanel, { type TrendSelection } from '@/components/dashboard/TrendingPanel'
 import VideoGrid from '@/components/dashboard/VideoGrid'
 import ReferralCard from '@/components/dashboard/ReferralCard'
 import { InlineError, useToast } from '@/components/ui/feedback'
@@ -20,7 +20,7 @@ export default function DashboardPage() {
   const [jobs, setJobs] = useState<JobSummary[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [prefill, setPrefill] = useState<{ topic: string; trendContext: string } | null>(null)
+  const [prefill, setPrefill] = useState<TrendSelection | null>(null)
   const formRef = useRef<HTMLDivElement>(null)
 
   const loadJobs = useCallback(async () => {
@@ -125,8 +125,8 @@ export default function DashboardPage() {
 
       {/* Painel "Em alta" — descoberta de temas em tendência */}
       <TrendingPanel
-        onSelect={(topic, trendContext) => {
-          setPrefill({ topic, trendContext })
+        onSelect={(sel) => {
+          setPrefill(sel)
           formRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
         }}
       />
@@ -141,6 +141,8 @@ export default function DashboardPage() {
             onJobCreated={loadJobs}
             prefillTopic={prefill?.topic}
             prefillTrendContext={prefill?.trendContext}
+            prefillTemplateId={prefill?.templateId}
+            prefillStyle={prefill?.style}
           />
         </div>
       </div>

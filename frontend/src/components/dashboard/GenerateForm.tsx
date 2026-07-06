@@ -27,9 +27,11 @@ interface GenerateFormProps {
   onJobCreated?: () => void
   prefillTopic?: string
   prefillTrendContext?: string | null
+  prefillTemplateId?: string
+  prefillStyle?: string
 }
 
-export default function GenerateForm({ onJobComplete, onJobCreated, prefillTopic, prefillTrendContext }: GenerateFormProps) {
+export default function GenerateForm({ onJobComplete, onJobCreated, prefillTopic, prefillTrendContext, prefillTemplateId, prefillStyle }: GenerateFormProps) {
   const { user, refreshUser } = useAuth()
   const { success, error: toastError, info } = useToast()
 
@@ -111,12 +113,20 @@ export default function GenerateForm({ onJobComplete, onJobCreated, prefillTopic
   }, [])
 
   // Pre-preenche o tema (e o contexto da tendencia) quando o usuario clica num trend do painel "Em alta"
+  // Também aplica template e estilo recomendados do nicho, se disponíveis.
   useEffect(() => {
     if (prefillTopic) {
       setTopic(prefillTopic)
       setTrendContext(prefillTrendContext ?? null)
     }
-  }, [prefillTopic, prefillTrendContext])
+    if (prefillTemplateId) {
+      handleTemplateSelect(prefillTemplateId)
+    }
+    if (prefillStyle) {
+      setStyle(prefillStyle as StyleValue)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [prefillTopic, prefillTrendContext, prefillTemplateId, prefillStyle])
 
   const handleTemplateSelect = (id: string) => {
     const nextTemplate = templates.find((template) => template.id === id)
