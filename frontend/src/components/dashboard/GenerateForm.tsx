@@ -28,7 +28,7 @@ interface GenerateFormProps {
   prefillTopic?: string
   prefillTrendContext?: string | null
   prefillTemplateId?: string
-  prefillStyle?: string
+  prefillStyle?: StyleValue
 }
 
 export default function GenerateForm({ onJobComplete, onJobCreated, prefillTopic, prefillTrendContext, prefillTemplateId, prefillStyle }: GenerateFormProps) {
@@ -64,6 +64,7 @@ export default function GenerateForm({ onJobComplete, onJobCreated, prefillTopic
 
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const lastRequestRef = useRef<GenerateParams | null>(null)
+  const appliedPrefillRef = useRef<string | null>(null)
 
   // Poll active job
   const startPolling = useCallback((jobId: string) => {
@@ -113,20 +114,25 @@ export default function GenerateForm({ onJobComplete, onJobCreated, prefillTopic
   }, [])
 
   // Pre-preenche o tema (e o contexto da tendencia) quando o usuario clica num trend do painel "Em alta"
-  // Também aplica template e estilo recomendados do nicho, se disponíveis.
   useEffect(() => {
     if (prefillTopic) {
       setTopic(prefillTopic)
       setTrendContext(prefillTrendContext ?? null)
     }
-    if (prefillTemplateId) {
-      handleTemplateSelect(prefillTemplateId)
-    }
     if (prefillStyle) {
-      setStyle(prefillStyle as StyleValue)
+      setStyle(prefillStyle)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [prefillTopic, prefillTrendContext, prefillTemplateId, prefillStyle])
+  }, [prefillTopic, prefillTrendContext, prefillStyle])
+
+  // Aplica template prefill apenas quando templates carregam — guarda com ref para não aplicar 2x
+  useEffect(() => {
+    if (!prefillTemplateId || templates.length === 0) return
+    if (appliedPrefillRef.current === prefillTemplateId) return // já foi aplicado
+    handleTemplateSelect(prefillTemplateId)
+    appliedPrefillRef.current = prefillTemplateId
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [prefillTemplateId, templates])
 
   const handleTemplateSelect = (id: string) => {
     const nextTemplate = templates.find((template) => template.id === id)

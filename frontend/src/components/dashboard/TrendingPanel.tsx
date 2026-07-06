@@ -3,12 +3,13 @@
 import { useEffect, useState } from 'react'
 import { fetchTrends, type Trend } from '@/lib/editor-api'
 import { NICHES } from '@/lib/niches'
+import { type StyleValue } from './StyleSelector'
 
 export interface TrendSelection {
   topic: string
   trendContext: string | null
   templateId?: string
-  style?: string
+  style?: StyleValue
 }
 
 interface TrendingPanelProps {

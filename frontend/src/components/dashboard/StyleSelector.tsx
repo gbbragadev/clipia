@@ -5,9 +5,9 @@ const STYLES = [
   { value: 'storytelling', label: 'Storytelling', icon: '📖', desc: 'Narrativa envolvente' },
   { value: 'news', label: 'Notícias', icon: '📰', desc: 'Tom jornalístico e informativo' },
   { value: 'comedy', label: 'Comédia', icon: '😂', desc: 'Leve, divertido e descontraído' },
-]
+] as const
 
-export type StyleValue = string
+export type StyleValue = 'educational' | 'storytelling' | 'news' | 'comedy'
 
 interface StyleSelectorProps {
   selected: StyleValue
