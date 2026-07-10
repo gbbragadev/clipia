@@ -45,7 +45,7 @@ export default function CreditPackageCard({ pkg, highlight, badge, provider = 's
         <span
           className="absolute -top-3 left-1/2 -translate-x-1/2 px-3 py-0.5 rounded-full text-xs font-semibold"
           style={{
-            background: 'linear-gradient(135deg, #ff5638, #6366f1)',
+            background: 'linear-gradient(135deg, #ff5638, #3e9bff)',
             color: '#fff',
           }}
         >
@@ -74,9 +74,9 @@ export default function CreditPackageCard({ pkg, highlight, badge, provider = 's
         <span
           className="mt-2 px-2.5 py-0.5 rounded-full text-xs font-semibold"
           style={{
-            background: 'rgba(34,197,94,0.15)',
-            color: '#4ade80',
-            border: '1px solid rgba(34,197,94,0.3)',
+            background: 'rgba(67,224,173,0.12)',
+            color: '#43e0ad',
+            border: '1px solid rgba(67,224,173,0.3)',
           }}
         >
           +{pkg.bonus_credits} bônus · {totalCredits} no total
@@ -93,7 +93,7 @@ export default function CreditPackageCard({ pkg, highlight, badge, provider = 's
         className="mt-6 w-full py-2.5 rounded-xl text-sm font-semibold transition-all duration-200 cursor-pointer disabled:opacity-50"
         style={{
           background: highlight
-            ? 'linear-gradient(135deg, #ff5638, #6366f1)'
+            ? 'linear-gradient(135deg, #ff5638, #3e9bff)'
             : 'var(--bg-raised)',
           color: '#fff',
           border: highlight ? 'none' : '1px solid var(--border-subtle)',

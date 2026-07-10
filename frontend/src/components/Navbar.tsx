@@ -8,7 +8,6 @@ import { strings } from '@/lib/strings'
 import { EASE, DURATIONS, useReducedMotionState } from '@/lib/motion'
 import ScrollProgress from './ScrollProgress'
 import Logo from './brand/Logo'
-import ThemeToggle from './ThemeToggle'
 import { useAuth } from '@/contexts/AuthContext'
 
 export default function Navbar() {
@@ -50,7 +49,6 @@ export default function Navbar() {
           <div className="hidden md:flex items-center gap-5 text-sm text-2">
             <Link href="/exemplos" className="hover:opacity-80 transition">Exemplos</Link>
             <Link href="/#como-funciona" className="hover:opacity-80 transition">Como funciona</Link>
-            <ThemeToggle />
             {user ? (
               <div className="flex items-center gap-3">
                 {/* Avatar + credits */}
@@ -78,9 +76,8 @@ export default function Navbar() {
             )}
           </div>
 
-          {/* Mobile: theme toggle + hamburger */}
+          {/* Mobile: hamburger */}
           <div className="flex items-center gap-2 md:hidden">
-            <ThemeToggle />
             <button
               type="button"
               aria-label={open ? 'Fechar menu' : 'Abrir menu'}

@@ -31,7 +31,7 @@ const MOOD_COLORS: Record<string, string> = {
   Cinematico: '#3b82f6',
   Alegre: '#f472b6',
   Sombrio: '#6b7280',
-  Motivacional: '#8b5cf6',
+  Motivacional: '#fb923c',
   Onirico: '#06b6d4',
   Tecnologico: '#22d3ee',
 }

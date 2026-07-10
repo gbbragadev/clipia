@@ -42,7 +42,7 @@ export default function TrendingPanel({ onSelect }: TrendingPanelProps) {
   }, [niche])
 
   return (
-    <div className="relative rounded-3xl bg-[#110d1a] border border-white/5 p-6 md:p-8 shadow-2xl mb-10">
+    <div className="relative rounded-3xl bg-[var(--bg-raised)] border border-white/5 p-6 md:p-8 shadow-2xl mb-10">
       <div className="flex items-center gap-2 mb-1">
         <span className="text-xl">🔥</span>
         <h2 className="text-lg font-bold text-white">Em alta agora</h2>

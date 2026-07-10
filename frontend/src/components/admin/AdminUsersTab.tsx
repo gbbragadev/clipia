@@ -141,7 +141,7 @@ export default function AdminUsersTab() {
                         onClick={() => void submitAdjust(user)}
                         disabled={saving}
                         className="rounded-lg px-3 py-1.5 text-xs font-semibold disabled:opacity-50"
-                        style={{ background: 'linear-gradient(135deg, #ff5638, #6366f1)', color: '#fff' }}
+                        style={{ background: 'linear-gradient(135deg, #ff5638, #3e9bff)', color: '#fff' }}
                       >
                         {saving ? 'Salvando…' : 'Confirmar'}
                       </button>

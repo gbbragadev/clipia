@@ -104,7 +104,7 @@ export default function FeedbackWidget() {
             onClick={() => void handleSubmit()}
             disabled={sending}
             className="mt-3 w-full rounded-xl py-2.5 text-sm font-semibold transition disabled:opacity-50"
-            style={{ background: 'linear-gradient(135deg, #ff5638, #6366f1)', color: '#fff' }}
+            style={{ background: 'linear-gradient(135deg, #ff5638, #3e9bff)', color: '#fff' }}
           >
             {sending ? 'Enviando…' : 'Enviar feedback'}
           </button>
@@ -116,7 +116,7 @@ export default function FeedbackWidget() {
         aria-label="Enviar feedback"
         aria-expanded={open}
         className="fixed bottom-20 right-4 z-[60] flex h-11 w-11 items-center justify-center rounded-full shadow-lg transition hover:scale-105 md:bottom-6"
-        style={{ background: 'linear-gradient(135deg, #ff5638, #6366f1)', color: '#fff' }}
+        style={{ background: 'linear-gradient(135deg, #ff5638, #3e9bff)', color: '#fff' }}
       >
         <MessageSquare size={18} />
       </button>

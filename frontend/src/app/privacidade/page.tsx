@@ -2,7 +2,7 @@ import { strings } from '@/lib/strings'
 
 export default function PrivacidadePage() {
   return (
-    <div className="max-w-3xl mx-auto px-4 py-16 prose prose-invert prose-purple">
+    <div className="max-w-3xl mx-auto px-4 py-16 prose prose-invert prose-a:text-coral">
       <h1 className="text-3xl font-bold mb-8">Política de Privacidade</h1>
       <p className="text-slate-400 mb-8">Data de vigência: 02/07/2026</p>
 
