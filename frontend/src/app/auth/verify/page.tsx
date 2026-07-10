@@ -103,11 +103,11 @@ function VerifyForm() {
         <div className="flex justify-center mb-4">
           <Logo size="lg" />
         </div>
-        <h1 className="text-xl font-semibold text-center mb-2 text-gray-200">
+        <h1 className="font-display text-2xl font-extrabold text-center mb-2 text-white tracking-tight">
           {strings.auth.verify.title}
         </h1>
         <p className="text-slate-400 text-center text-sm mb-8">
-          Enviamos um codigo de 6 digitos para{" "}
+          Enviamos um código de 6 dígitos para{" "}
           <span className="text-white break-words">{email}</span>
         </p>
 

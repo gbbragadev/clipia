@@ -16,6 +16,7 @@ interface TurnstileApi {
       'error-callback'?: () => void
       'expired-callback'?: () => void
       theme?: 'light' | 'dark' | 'auto'
+      language?: string
     },
   ) => string
   reset: (id?: string) => void
@@ -40,6 +41,7 @@ export function TurnstileWidget({ onToken }: { onToken: (token: string) => void 
     widgetId.current = window.turnstile.render(containerRef.current, {
       sitekey: SITE_KEY,
       theme: 'dark',
+      language: 'pt-br', // widget no idioma do produto ("Verify you are human" era em ingles)
       callback: (token) => onTokenRef.current(token),
       'expired-callback': () => onTokenRef.current(''),
       'error-callback': () => onTokenRef.current(''),

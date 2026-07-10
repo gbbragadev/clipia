@@ -42,7 +42,7 @@ export default function LoginPage() {
         <div className="flex justify-center mb-6">
           <Logo size="lg" />
         </div>
-        <h1 className="text-xl sm:text-2xl font-bold text-center mb-2 text-white tracking-tight">
+        <h1 className="font-display text-2xl sm:text-3xl font-extrabold text-center mb-2 text-white tracking-tight">
           Bem-vindo de volta
         </h1>
         <p className="text-slate-400 text-center text-sm mb-8">
