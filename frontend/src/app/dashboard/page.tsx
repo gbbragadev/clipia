@@ -173,7 +173,6 @@ export default function DashboardPage() {
         <div className="absolute -top-40 -right-40 w-96 h-96 bg-coral/20 blur-[120px] rounded-full pointer-events-none"></div>
         <div className="relative z-10">
           <GenerateForm
-            onJobComplete={loadJobs}
             onJobCreated={loadJobs}
             prefillTopic={prefill?.topic}
             prefillTrendContext={prefill?.trendContext}

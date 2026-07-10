@@ -1,15 +1,12 @@
 'use client'
 
 import { strings } from '@/lib/strings';
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useAuth } from '@/contexts/AuthContext'
 import {
   generateVideo,
-  fetchJobStatus,
   fetchTemplates,
-  STEP_LABELS,
   type GenerateParams,
-  type JobStatusResponse,
   type VideoTemplateInfo,
 } from '@/lib/editor-api'
 import TemplateSelector from './TemplateSelector'
@@ -23,7 +20,6 @@ import { useToast } from '@/components/ui/feedback'
 import { Modal } from '@/components/ui/Modal'
 
 interface GenerateFormProps {
-  onJobComplete: () => void
   /** Chamado assim que o job é enfileirado — a grid mostra o card na hora e liga o polling. */
   onJobCreated?: () => void
   prefillTopic?: string
@@ -32,8 +28,8 @@ interface GenerateFormProps {
   prefillStyle?: StyleValue
 }
 
-export default function GenerateForm({ onJobComplete, onJobCreated, prefillTopic, prefillTrendContext, prefillTemplateId, prefillStyle }: GenerateFormProps) {
-  const { user, refreshUser } = useAuth()
+export default function GenerateForm({ onJobCreated, prefillTopic, prefillTrendContext, prefillTemplateId, prefillStyle }: GenerateFormProps) {
+  const { user } = useAuth()
   const { success, error: toastError, info } = useToast()
 
   const [topic, setTopic] = useState('')
@@ -41,9 +37,10 @@ export default function GenerateForm({ onJobComplete, onJobCreated, prefillTopic
   const [style, setStyle] = useState<StyleValue>('educational')
   const [templateId, setTemplateId] = useState('stock_narration')
   const [duration, setDuration] = useState(45)
+  // `generating` cobre APENAS o POST /generate (~1s): depois do 202 o formulário
+  // libera e a grid (polling próprio do dashboard) assume o acompanhamento.
   const [generating, setGenerating] = useState(false)
   const [genError, setGenError] = useState<string | null>(null)
-  const [activeJob, setActiveJob] = useState<JobStatusResponse | null>(null)
   const [showCreditsModal, setShowCreditsModal] = useState(false)
   const [script, setScript] = useState('')
   const [wpm, setWpm] = useState(150)
@@ -63,50 +60,8 @@ export default function GenerateForm({ onJobComplete, onJobCreated, prefillTopic
     ?? (isFallbackAiTemplate ? 5 : voiceProvider === 'elevenlabs' ? 2 : 1)
   const edgeCreditCost = selectedTemplate?.credit_costs?.edge ?? (isFallbackAiTemplate ? 5 : 1)
 
-  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const lastRequestRef = useRef<GenerateParams | null>(null)
   const appliedPrefillRef = useRef<string | null>(null)
-
-  // Poll active job
-  const startPolling = useCallback((jobId: string) => {
-    if (pollRef.current) clearInterval(pollRef.current)
-    let failures = 0
-    pollRef.current = setInterval(async () => {
-      try {
-        const status = await fetchJobStatus(jobId)
-        failures = 0
-        setActiveJob(status)
-        if (status.status === 'completed' || status.status === 'editable') {
-          if (pollRef.current) clearInterval(pollRef.current)
-          setGenerating(false)
-          onJobComplete()
-          refreshUser()
-        } else if (status.status === 'failed' || status.status === 'error') {
-          if (pollRef.current) clearInterval(pollRef.current)
-          setGenerating(false)
-          setGenError(status.error || 'Erro ao gerar vídeo')
-          onJobComplete()
-        }
-      } catch (err) {
-        // Tolera blips transitorios (rede/502 momentaneo); so desiste apos ~10s de falhas seguidas,
-        // em vez de engolir o erro e deixar o spinner girando pra sempre (bug do 502 do amigo).
-        failures += 1
-        if (failures >= 5) {
-          if (pollRef.current) clearInterval(pollRef.current)
-          setGenerating(false)
-          setGenError(
-            err instanceof Error
-              ? err.message
-              : 'Perdemos a conexão com o servidor. Recarregue a página para ver o status do seu vídeo.',
-          )
-        }
-      }
-    }, 2000)
-  }, [onJobComplete, refreshUser])
-
-  useEffect(() => {
-    return () => { if (pollRef.current) clearInterval(pollRef.current) }
-  }, [])
 
   useEffect(() => {
     fetchTemplates()
@@ -156,7 +111,6 @@ export default function GenerateForm({ onJobComplete, onJobCreated, prefillTopic
 
     setGenerating(true)
     setGenError(null)
-    setActiveJob(null)
     try {
       const params: GenerateParams = {
         topic: topic.trim(),
@@ -172,24 +126,19 @@ export default function GenerateForm({ onJobComplete, onJobCreated, prefillTopic
         trend_context: trendContext ?? undefined,
       }
       lastRequestRef.current = params
-      const result = await generateVideo(params)
-      startPolling(result.job_id)
+      await generateVideo(params)
+      // 202 aceito: o formulário LIBERA na hora — o card em "Seus vídeos" acompanha
+      // o progresso (polling da grid). Mantém template/estilo/duração p/ o próximo.
       onJobCreated?.()
-      success('Video enfileirado', 'A geracao foi iniciada com sucesso.')
-      setActiveJob({
-        job_id: result.job_id,
-        status: 'queued',
-        progress: 0,
-        current_step: null,
-        error: null,
-        created_at: new Date().toISOString(),
-        download_url: null,
-      })
+      success('Vídeo na fila', 'Acompanhe o progresso no card em "Seus vídeos". Pode gerar outro enquanto isso.')
+      setTopic('')
+      setTrendContext(null)
     } catch (err) {
-      setGenerating(false)
       const message = err instanceof Error ? err.message : 'Erro ao iniciar geração'
       setGenError(message)
       toastError('Não foi possível iniciar a geração', message)
+    } finally {
+      setGenerating(false)
     }
   }
 
@@ -390,26 +339,6 @@ export default function GenerateForm({ onJobComplete, onJobCreated, prefillTopic
           </div>
         )}
       </div>
-
-      {/* Progress */}
-      {activeJob && generating && (
-        <div className="p-4 rounded-xl bg-[var(--bg-surface)] border border-coral/20 mb-4">
-          <div className="flex justify-between mb-2">
-            <span className="text-xs text-[var(--text-secondary)]">
-              {activeJob.current_step ? STEP_LABELS[activeJob.current_step] || activeJob.current_step : 'Iniciando...'}
-            </span>
-            <span className="text-xs text-coral font-semibold">
-              {Math.round(activeJob.progress * 100)}%
-            </span>
-          </div>
-          <div className="h-1.5 rounded-full overflow-hidden" style={{ background: 'var(--bg-surface-hover)' }}>
-            <div
-              className="h-full bg-coral rounded-full transition-all duration-500 ease-out"
-              style={{ width: `${Math.max(5, activeJob.progress * 100)}%` }}
-            />
-          </div>
-        </div>
-      )}
 
       {/* Error */}
       {genError && (
