@@ -4,7 +4,7 @@ import { cn } from "@/components/landing/utils/cn";
 import Logo from "@/components/brand/Logo";
 import { Button } from "@/components/landing/ui/Button";
 import { Icon } from "@/components/landing/icons";
-import { NAV_LINKS, SITE } from "@/components/landing/lib/data";
+import { CTA_LABEL, NAV_LINKS, SITE, signupUrl } from "@/components/landing/lib/data";
 import { useAuth } from "@/contexts/AuthContext";
 
 export function Nav() {
@@ -62,8 +62,8 @@ export function Nav() {
               <Button href={SITE.login} variant="ghost" size="sm">
                 Entrar
               </Button>
-              <Button href={SITE.signup} variant="primary" size="sm" iconRight="arrowRight">
-                Criar 2 vídeos grátis
+              <Button href={signupUrl("nav")} variant="primary" size="sm" iconRight="arrowRight">
+                {CTA_LABEL}
               </Button>
             </>
           )}
@@ -107,8 +107,8 @@ export function Nav() {
               </Button>
             ) : (
               <>
-                <Button href={SITE.signup} variant="primary" size="lg" fullWidth iconRight="arrowRight">
-                  Criar meus 2 vídeos grátis
+                <Button href={signupUrl("nav-mobile")} variant="primary" size="lg" fullWidth iconRight="arrowRight">
+                  {CTA_LABEL}
                 </Button>
                 <Button href={SITE.login} variant="secondary" size="md" fullWidth>
                   Entrar

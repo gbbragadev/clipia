@@ -44,8 +44,8 @@ export function Footer() {
         <div className="mt-12 flex flex-col gap-4 border-t border-white/8 pt-6 text-[12px] text-mist-2 sm:flex-row sm:items-center sm:justify-between">
           <p>© {year} ClipIA. Todos os direitos reservados.</p>
           <p className="max-w-md sm:text-right">
-            Exemplos e imagens deste site são ilustrativos. A geração real dos vídeos acontece após
-            criar a conta.
+            Os vídeos de exemplo foram gerados e editados na própria plataforma. Mockups de
+            interface são ilustrativos.
           </p>
           <a
             href={SITE.url}

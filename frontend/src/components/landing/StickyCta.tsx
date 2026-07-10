@@ -1,7 +1,7 @@
 "use client";
 import { useScrolledPast } from "@/components/landing/lib/motion";
 import { Button } from "@/components/landing/ui/Button";
-import { SITE } from "@/components/landing/lib/data";
+import { CTA_LABEL, signupUrl } from "@/components/landing/lib/data";
 import { cn } from "@/components/landing/utils/cn";
 
 export function StickyCta() {
@@ -18,10 +18,10 @@ export function StickyCta() {
       <div className="border-t border-white/10 bg-ink/90 px-4 py-3 backdrop-blur-xl">
         <div className="mx-auto flex max-w-7xl items-center gap-3">
           <div className="min-w-0 leading-tight">
-            <p className="truncate text-sm font-semibold text-cloud">Criar meus 2 vídeos grátis</p>
+            <p className="truncate text-sm font-semibold text-cloud">{CTA_LABEL}</p>
             <p className="truncate text-[11px] text-mist">Sem cartão · narração em pt-BR</p>
           </div>
-          <Button href={SITE.signup} size="md" iconRight="arrowRight" className="shrink-0">
+          <Button href={signupUrl("sticky")} size="md" iconRight="arrowRight" className="shrink-0">
             Começar
           </Button>
         </div>
