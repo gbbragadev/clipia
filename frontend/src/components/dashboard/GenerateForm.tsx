@@ -195,9 +195,17 @@ export default function GenerateForm({ onJobComplete, onJobCreated, prefillTopic
 
   return (
     <section>
-      <h2 className="text-xl font-bold mb-6">Criar novo vídeo</h2>
+      <div className="mb-6 flex items-center gap-3">
+        <span className="grid h-10 w-10 place-items-center rounded-xl bg-coral/15 text-coral" aria-hidden>
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 3l1.7 4.6L18 9.3l-4.3 1.7L12 15l-1.7-4L6 9.3l4.3-1.7z"/><path d="M19 13l.7 1.9 1.9.7-1.9.7-.7 1.9-.7-1.9-1.9-.7 1.9-.7z"/></svg>
+        </span>
+        <div>
+          <h2 className="font-display text-2xl font-extrabold leading-tight">Criar novo vídeo</h2>
+          <p className="text-xs text-[var(--text-tertiary)]">Digite o tema. O resto é com a gente.</p>
+        </div>
+      </div>
 
-      {/* Topic */}
+      {/* Topic — o campo-herói do produto */}
       <div className="mb-4">
         <label className="block text-xs text-[var(--text-tertiary)] mb-1.5">Tema do vídeo — escreva o que quiser</label>
         <input
@@ -207,7 +215,7 @@ export default function GenerateForm({ onJobComplete, onJobCreated, prefillTopic
           onKeyDown={(e) => { if (e.key === 'Enter') handleGenerate() }}
           placeholder="Ex: 5 curiosidades sobre o oceano profundo"
           disabled={generating}
-          className="w-full px-4 py-3 text-sm rounded-xl border border-[var(--border-default)] bg-[var(--bg-surface)] text-[var(--text-primary)] placeholder:text-[var(--text-tertiary)] outline-none focus:border-coral/50 transition disabled:opacity-50"
+          className="w-full px-5 py-4 text-base rounded-2xl border border-[var(--border-default)] bg-[var(--bg-surface)] text-[var(--text-primary)] placeholder:text-[var(--text-tertiary)] outline-none focus:border-coral/60 focus:ring-2 focus:ring-coral/20 transition disabled:opacity-50"
         />
         {/* Transparência do prefill: o contexto da tendência viaja junto com o tema */}
         {trendContext && (

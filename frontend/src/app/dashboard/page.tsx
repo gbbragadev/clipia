@@ -102,13 +102,48 @@ export default function DashboardPage() {
   const hour = new Date().getHours()
   const timeGreeting = hour < 12 ? 'Bom dia' : hour < 18 ? 'Boa tarde' : 'Boa noite'
 
+  // Cockpit da 1ª dobra: números REAIS do criador (nada decorativo — cada chip é um atalho)
+  const readyCount = jobs.filter((j) => ['completed', 'editable'].includes(j.status)).length
+  const activeCount = jobs.filter((j) => ACTIVE_JOB_STATUSES.includes(j.status)).length
+
   return (
     <div className="max-w-6xl mx-auto px-4 py-12">
       <div className="mb-10">
-        <h1 className="text-2xl sm:text-3xl md:text-4xl font-display font-bold text-white mb-2 tracking-tight">
-          <span className="text-coral">{timeGreeting}.</span> {greeting} Pronto para criar?
+        <h1 className="font-display text-3xl sm:text-4xl md:text-[2.9rem] font-extrabold text-white mb-2.5 tracking-tight leading-[1.05]">
+          <span className="text-coral">{timeGreeting}.</span> {greeting}
+          <br className="hidden sm:block" /> Pronto para criar?
         </h1>
-        <p className="text-slate-400 text-lg">Transforme suas ideias em vídeos com apenas um clique.</p>
+        <p className="text-[var(--text-secondary)] text-lg">
+          Do tema ao vídeo pronto — narração, legendas e edição inclusas.
+        </p>
+
+        {!loading && user && (
+          <div className="mt-5 flex flex-wrap gap-2.5">
+            <button
+              type="button"
+              onClick={() => router.push('/dashboard/credits')}
+              className="flex items-center gap-2 rounded-full border border-coral/25 bg-coral/10 px-3.5 py-1.5 text-[13px] text-coral transition hover:bg-coral/15"
+            >
+              <span className="font-bold tabular-nums">{user.credits}</span> créditos
+            </button>
+            <button
+              type="button"
+              onClick={() => document.getElementById('videos')?.scrollIntoView({ behavior: 'smooth' })}
+              className="flex items-center gap-2 rounded-full border border-mint/25 bg-mint/10 px-3.5 py-1.5 text-[13px] text-mint transition hover:bg-mint/15"
+            >
+              <span className="font-bold tabular-nums">{readyCount}</span> vídeo{readyCount === 1 ? '' : 's'} pronto{readyCount === 1 ? '' : 's'}
+            </button>
+            {activeCount > 0 && (
+              <button
+                type="button"
+                onClick={() => document.getElementById('videos')?.scrollIntoView({ behavior: 'smooth' })}
+                className="flex items-center gap-2 rounded-full border border-azure/25 bg-azure/10 px-3.5 py-1.5 text-[13px] text-azure transition hover:bg-azure/15 animate-pulse"
+              >
+                <span className="font-bold tabular-nums">{activeCount}</span> gerando agora
+              </button>
+            )}
+          </div>
+        )}
       </div>
 
       {user && !user.email_verified && (
@@ -160,9 +195,9 @@ export default function DashboardPage() {
         <ReferralCard />
       </div>
 
-      <section className="mt-8">
+      <section id="videos" className="mt-8 scroll-mt-20">
         <div className="flex items-center justify-between mb-8 border-b border-white/5 pb-4">
-          <h2 className="text-2xl font-display font-bold text-white">Seus vídeos</h2>
+          <h2 className="font-display text-2xl font-extrabold text-white">Seus vídeos</h2>
           <div className="text-sm text-slate-500 font-medium bg-white/5 px-3 py-1 rounded-full border border-white/5">
             {jobs.length} vídeos
           </div>
