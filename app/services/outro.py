@@ -37,7 +37,9 @@ def append_outro(video_path: str) -> str:
 
 
 def _ffprobe(args: list[str]) -> str:
-    return subprocess.run(["ffprobe", "-v", "quiet", *args], capture_output=True, text=True, check=True).stdout.strip()
+    return subprocess.run(
+        ["ffprobe", "-v", "quiet", *args], capture_output=True, text=True, check=True, timeout=30
+    ).stdout.strip()
 
 
 def _probe_duration(path: str) -> float:

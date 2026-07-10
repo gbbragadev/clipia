@@ -74,6 +74,7 @@ def _get_duration(path: str) -> float:
         ["ffprobe", "-v", "quiet", "-print_format", "json", "-show_format", path],
         capture_output=True,
         text=True,
+        timeout=10,
     )
     data = json.loads(result.stdout)
     return float(data["format"]["duration"])
@@ -85,6 +86,7 @@ def _has_nvenc() -> bool:
         ["ffmpeg", "-hide_banner", "-encoders"],
         capture_output=True,
         text=True,
+        timeout=5,
     )
     return "h264_nvenc" in result.stdout
 
@@ -135,27 +137,35 @@ def _prepare_static_image(img_path: str, duration: float, output_clip: str, scen
         f"crop=1080:1920,setsar=1"
     )
 
+    # Sem -t de INPUT: zoompan emite d frames POR frame de entrada, entao um input
+    # de duration*fps frames viraria d*duration*fps frames (~90k/cena, horas de
+    # encode — caso real: job de 60s levou 3h39). Com 1 frame expandido pelo filtro
+    # e -frames:v limitando a saida, o clip tem exatamente duration*fps frames.
     cmd = [
         "ffmpeg",
         "-y",
         "-loop",
         "1",
-        "-t",
-        str(duration),
         "-i",
         img_path,
         "-vf",
         vf,
+        "-frames:v",
+        str(frames),
         "-r",
         str(fps),
         "-c:v",
         "libx264",
+        "-preset",
+        "veryfast",
+        "-crf",
+        "23",
         "-pix_fmt",
         "yuv420p",
         "-an",
         output_clip,
     ]
-    subprocess.run(cmd, check=True, capture_output=True)
+    _run(cmd, "prepare static image")
 
 
 def _prepare_scene(media_path: str, duration: float, output_clip: str, scene_index: int = 0) -> None:
