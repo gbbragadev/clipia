@@ -165,7 +165,12 @@ def test_celery_beat_schedule_registers_cleanup_tasks():
 
 @pytest.mark.asyncio
 async def test_reap_marks_old_queued_jobs_failed_and_refunds(test_db, db_session, job_factory, monkeypatch):
-    """Jobs queued ha >60min viram failed com reembolso; jobs recentes/outras filas nao."""
+    """Jobs queued ha >6h viram failed com reembolso; fila legitima (minutos/horas) nao.
+
+    O cutoff subiu de 60min para 6h: o Postgres fica "queued" durante todo o
+    processamento e a fila solo segura lote legitimamente por horas — 90min de
+    espera NAO e orfandade. Travamento real e coberto pelo watchdog de heartbeat.
+    """
     monkeypatch.setattr(db_engine, "worker_session", test_db["session_factory"])
 
     refunded: list[tuple] = []
@@ -176,18 +181,21 @@ async def test_reap_marks_old_queued_jobs_failed_and_refunds(test_db, db_session
     monkeypatch.setattr(worker_tasks, "_refund_job_credit", _fake_refund)
 
     orphan_job = await job_factory(status="queued")
+    waiting_in_line = await job_factory(status="queued")  # 90min: fila legitima do pool solo
     recent_queued = await job_factory(status="queued")
     processing_job = await job_factory(status="processing")
 
-    old_created = datetime.now(timezone.utc) - timedelta(minutes=90)
+    old_created = datetime.now(timezone.utc) - timedelta(hours=7)
+    in_line_created = datetime.now(timezone.utc) - timedelta(minutes=90)
     recent_created = datetime.now(timezone.utc) - timedelta(minutes=5)
     for jid in (orphan_job.id, processing_job.id):
         await db_session.execute(update(Job).where(Job.id == jid).values(created_at=old_created))
+    await db_session.execute(update(Job).where(Job.id == waiting_in_line.id).values(created_at=in_line_created))
     await db_session.execute(update(Job).where(Job.id == recent_queued.id).values(created_at=recent_created))
     await db_session.commit()
 
     # A query async (testada direto, sem asyncio.run aninhado) e deterministica:
-    # so o orphan_job (queued + >60min) deve ser coletado. O reaper roteia cada ID para
+    # so o orphan_job (queued + >6h) deve ser coletado. O reaper roteia cada ID para
     # _refund_job_credit(failed) — o teste espelha essa logica com o fake refund.
     orphan_ids = await worker_tasks._find_orphan_queued_jobs_async()
 

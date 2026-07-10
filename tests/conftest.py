@@ -57,6 +57,13 @@ class FakeRedis:
         self.data.pop(key, None)
         self.values.pop(key, None)
 
+    def scan_iter(self, match: str = "*", count: int = 100):
+        import fnmatch
+
+        for key in list(self.data.keys()) + list(self.values.keys()):
+            if fnmatch.fnmatch(key, match):
+                yield key
+
     def clear(self):
         self.data.clear()
         self.values.clear()
