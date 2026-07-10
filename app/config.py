@@ -76,7 +76,7 @@ class Settings(BaseSettings):
     SFX_ENABLED: bool = True
     # Musica de fundo automatica na geracao inicial (mood por template; faixas royalty-free locais)
     AUTO_MUSIC_ENABLED: bool = True
-    AUTO_MUSIC_VOLUME: float = 0.12
+    AUTO_MUSIC_VOLUME: float = 0.30  # audivel (era 0.12 ~inaudivel); 0.45-0.55 quando o ducking sidechain entrar (P1)
 
     # Dialogo multi-locutor (text_to_dialogue): 2 vozes ElevenLabs pt-BR. Troque por env se quiser.
     DIALOGUE_VOICE_A: str = "KHmfNHtEjHhLK9eER20w"  # Fernanda (pt-BR, feminina)

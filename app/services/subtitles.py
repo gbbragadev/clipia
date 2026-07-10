@@ -1,11 +1,12 @@
 """Generate ASS subtitle files for FFmpeg overlay."""
+
 import re
 
 
 def group_words(words: list[dict], max_words: int = 3) -> list[list[dict]]:
     chunks = []
     for i in range(0, len(words), max_words):
-        chunk = words[i:i + max_words]
+        chunk = words[i : i + max_words]
         if chunk:
             chunks.append(chunk)
     return chunks
@@ -30,7 +31,7 @@ def _hex_to_ass_color(hex_color: str) -> str:
 
 def _rgba_to_ass_bg(rgba: str) -> str:
     """Convert rgba(r,g,b,a) to ASS &HAABBGGRR format."""
-    m = re.match(r'rgba?\((\d+),\s*(\d+),\s*(\d+),?\s*([\d.]+)?\)', rgba)
+    m = re.match(r"rgba?\((\d+),\s*(\d+),\s*(\d+),?\s*([\d.]+)?\)", rgba)
     if not m:
         return "&H96000000"
     r, g, b = int(m.group(1)), int(m.group(2)), int(m.group(3))
@@ -52,7 +53,7 @@ def generate_ass_file(
     margin_v: int = 180,
     stroke_width: int = 2,
     position: str = "bottom",
-    accent_color: str = "#FFFC00",
+    accent_color: str = "#F05340",  # coral da marca (era #FFFC00 amarelo)
 ) -> str:
     """Generate an ASS subtitle file from word timestamps.
 
@@ -64,7 +65,7 @@ def generate_ass_file(
     chunks = group_words(words, max_words=3)
 
     # For karaoke: text starts as SecondaryColour and fills to PrimaryColour
-    primary_ass = _hex_to_ass_color(accent_color)   # highlight / fill-to
+    primary_ass = _hex_to_ass_color(accent_color)  # highlight / fill-to
     secondary_ass = _hex_to_ass_color(primary_color)  # normal text / fill-from
     outline = _hex_to_ass_color(outline_color)
     back = _rgba_to_ass_bg(bg_color)
