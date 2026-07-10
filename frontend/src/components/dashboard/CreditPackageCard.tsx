@@ -83,8 +83,9 @@ export default function CreditPackageCard({ pkg, highlight, badge, provider = 's
         </span>
       )}
 
+      {/* Mesma narrativa de preço da landing: custo por VÍDEO (1 crédito = 1 vídeo voz padrão) */}
       <p className="mt-1 text-xs" style={{ color: 'var(--text-tertiary)' }}>
-        R$ {pricePerCredit} por crédito
+        ≈ R$ {pricePerCredit} por vídeo com voz padrão
       </p>
 
       <button

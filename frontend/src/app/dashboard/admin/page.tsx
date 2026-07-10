@@ -50,7 +50,7 @@ export default function AdminDashboardPage() {
         const next = await fetchAdminDashboard(range)
         if (active) setData(next)
       } catch (err) {
-        if (active) setError(err instanceof Error ? err.message : 'Nao foi possivel carregar o painel')
+        if (active) setError(err instanceof Error ? err.message : 'Não foi possível carregar o painel')
       } finally {
         if (active) setLoading(false)
       }
@@ -67,7 +67,7 @@ export default function AdminDashboardPage() {
       <div className="max-w-5xl mx-auto px-4 py-8">
         <InlineError
           title="Acesso administrativo restrito"
-          description="Esta area e exclusiva para usuarios administradores."
+          description="Esta área é exclusiva para usuários administradores."
         />
       </div>
     )
@@ -91,20 +91,20 @@ export default function AdminDashboardPage() {
     </div>
   ) : error || !data ? (
     <InlineError
-      title="Nao foi possivel carregar o painel administrativo"
-      description={error || 'Sem dados disponiveis'}
+      title="Não foi possível carregar o painel administrativo"
+      description={error || 'Sem dados disponíveis'}
     />
   ) : (
     <>
       <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         <StatCard title="Receita aprovada" value={formatCurrency(data.summary.approved_revenue_brl)} hint={`${data.summary.approved_orders} pedidos aprovados`} accent="#22c55e" />
         <StatCard title="Receita pendente" value={formatCurrency(data.summary.pending_revenue_brl)} hint={`${data.summary.pending_orders} pagamentos em aberto`} accent="#f59e0b" />
-        <StatCard title="Ticket medio" value={formatCurrency(data.summary.average_ticket_brl)} hint={`${data.summary.credits_sold} creditos vendidos`} accent="#38bdf8" />
-        <StatCard title="Usuarios novos" value={String(data.summary.new_users)} hint={`${data.summary.verified_users} verificados / ${data.summary.paying_users} pagantes`} accent="#3e9bff" />
+        <StatCard title="Ticket médio" value={formatCurrency(data.summary.average_ticket_brl)} hint={`${data.summary.credits_sold} créditos vendidos`} accent="#38bdf8" />
+        <StatCard title="Usuários novos" value={String(data.summary.new_users)} hint={`${data.summary.verified_users} verificados / ${data.summary.paying_users} pagantes`} accent="#3e9bff" />
         <StatCard title="Jobs ativos" value={String(data.summary.active_jobs)} hint="fila + processamento agora" accent="#fb7185" />
-        <StatCard title="Creditos consumidos" value={String(data.summary.credits_consumed)} hint="estimado pelo volume de jobs" accent="#f97316" />
-        <StatCard title="Taxa de sucesso" value={`${data.operations.success_rate}%`} hint={`${data.operations.completed_jobs} concluidos / ${data.operations.failed_jobs} falhos`} accent="#14b8a6" />
-        <StatCard title="Storage total" value={`${formatCompactGb(data.operations.jobs_dir_size_gb + data.operations.output_dir_size_gb)} GB`} hint={`${data.operations.orphan_dirs} diretorios orfaos`} accent="#e879f9" />
+        <StatCard title="Créditos consumidos" value={String(data.summary.credits_consumed)} hint="estimado pelo volume de jobs" accent="#f97316" />
+        <StatCard title="Taxa de sucesso" value={`${data.operations.success_rate}%`} hint={`${data.operations.completed_jobs} concluídos / ${data.operations.failed_jobs} falhos`} accent="#14b8a6" />
+        <StatCard title="Storage total" value={`${formatCompactGb(data.operations.jobs_dir_size_gb + data.operations.output_dir_size_gb)} GB`} hint={`${data.operations.orphan_dirs} diretórios órfãos`} accent="#ff7a61" />
       </section>
 
       <section className="grid gap-6 xl:grid-cols-[1.4fr_1fr]">
@@ -137,7 +137,7 @@ export default function AdminDashboardPage() {
         </div>
         <div className="card p-6">
           <PanelHeader
-            eyebrow="Producao"
+            eyebrow="Produção"
             title="Jobs criados por dia"
             description="Carga operacional da plataforma."
           />
@@ -182,7 +182,7 @@ export default function AdminDashboardPage() {
           <div className="mt-5 grid gap-4 sm:grid-cols-2">
             <MetricRow label="Jobs em fila" value={String(data.operations.queued_jobs)} />
             <MetricRow label="Jobs processando" value={String(data.operations.processing_jobs)} />
-            <MetricRow label="Jobs concluidos" value={String(data.operations.completed_jobs)} />
+            <MetricRow label="Jobs concluídos" value={String(data.operations.completed_jobs)} />
             <MetricRow label="Jobs falhos" value={String(data.operations.failed_jobs)} />
             <MetricRow label="Creditos pendentes medios" value={String(data.operations.avg_pending_credits)} />
             <MetricRow label="Diretorio de jobs" value={`${formatCompactGb(data.operations.jobs_dir_size_gb)} GB`} />
@@ -310,7 +310,7 @@ export default function AdminDashboardPage() {
             aria-pressed={tab === option.value}
             className="rounded-full px-4 py-2 text-sm font-medium transition"
             style={{
-              background: tab === option.value ? 'linear-gradient(135deg, #16a34a, #0ea5e9)' : 'rgba(255,255,255,0.04)',
+              background: tab === option.value ? 'linear-gradient(135deg, #ff5638, #3e9bff)' : 'rgba(255,255,255,0.04)',
               color: tab === option.value ? '#fff' : 'var(--text-secondary)',
               border: '1px solid var(--border-subtle)',
             }}
@@ -451,7 +451,7 @@ function ActivityTable({
             {rows.length === 0 ? (
               <tr>
                 <td colSpan={columns.length} className="py-4 text-xs sm:text-sm" style={{ color: 'var(--text-secondary)' }}>
-                  Nenhum registro disponivel.
+                  Nenhum registro disponível.
                 </td>
               </tr>
             ) : (
