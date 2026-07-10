@@ -95,6 +95,8 @@ export interface JobSummary {
   current_step?: string | null
   /** Roteiro atendido pelo provedor LLM free (badge "qualidade reduzida"). */
   degraded?: boolean
+  /** Quantos jobs estão na frente na fila do worker (só quando status === 'queued'). */
+  queue_position?: number | null
 }
 
 /** Jobs nestes status ainda vão mudar sozinhos — a grid faz polling enquanto existirem. */

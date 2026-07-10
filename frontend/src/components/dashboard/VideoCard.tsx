@@ -9,6 +9,7 @@ import { GlowCard } from '@/components/ui/GlowCard'
 import { StatusBadge, jobStatusBadge } from '@/components/ui/StatusBadge'
 import { useToast } from '@/components/ui/feedback'
 import VideoPlayerModal from './VideoPlayerModal'
+import JobStepper from './JobStepper'
 
 const STYLE_GRADIENTS: Record<string, string> = {
   educational: 'from-coral/40 to-azure/40',
@@ -222,12 +223,21 @@ export default function VideoCard({ job, onEdit, onCancel }: VideoCardProps) {
             </span>
           </div>
 
-          {/* Progresso em tempo real (a grid faz polling enquanto o job está ativo) */}
+          {/* Progresso em tempo real (a grid faz polling enquanto o job está ativo):
+              stepper de macro-etapas + etapa fina + % honesto + posição real na fila */}
           {ACTIVE_JOB_STATUSES.includes(job.status) && (
-            <div className="mb-3">
-              <div className="flex items-center justify-between mb-1">
+            <div className="mb-3 space-y-1.5">
+              {job.status === 'queued' && job.queue_position != null && (
+                <p className="text-[11px] font-medium text-azure">
+                  {job.queue_position === 0
+                    ? 'Você é o próximo — começa em instantes'
+                    : `Na fila — ${job.queue_position} à frente`}
+                </p>
+              )}
+              <JobStepper step={job.current_step} queued={job.status === 'queued'} />
+              <div className="flex items-center justify-between">
                 <span className="text-[11px] font-medium text-coral">
-                  {STEP_LABELS[job.current_step ?? ''] || 'Processando...'}
+                  {STEP_LABELS[job.current_step ?? ''] || (job.status === 'queued' ? 'Aguardando o estúdio...' : 'Processando...')}
                 </span>
                 <span className="text-[11px] text-slate-500 tabular-nums">
                   {Math.round((job.progress ?? 0) * 100)}%

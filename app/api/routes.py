@@ -1163,6 +1163,30 @@ async def list_jobs(
     """List all jobs for the current user, with real-time status from Redis."""
     result = await db.execute(select(Job).where(Job.user_id == user.id).order_by(Job.created_at.desc()).limit(50))
     jobs = result.scalars().all()
+
+    # Fila global p/ "N na frente" (worker solo = 1 por vez). O Postgres fica
+    # "queued" durante todo o processamento, entao ele lista os candidatos; o
+    # Redis diz quem segue ativo de verdade (o job rodando tambem conta na fila).
+    # Lazy: so paga o custo quando o usuario tem job aguardando.
+    live_queue: list | None = None
+
+    async def _queue_ahead_of(created_at) -> int | None:
+        nonlocal live_queue
+        if created_at is None:
+            return None
+        if live_queue is None:
+            q = await db.execute(
+                select(Job.id, Job.created_at).where(Job.status == "queued").order_by(Job.created_at).limit(200)
+            )
+            live_queue = []
+            for jid, jcreated in q.all():
+                live = _redis.hgetall(f"job:{jid}")
+                live_status = live.get("status") if live else None
+                # sem hash = ainda nem comecou (na fila); ativos seguem na conta
+                if live_status in (None, "", "queued", "processing", "rendering"):
+                    live_queue.append(jcreated)
+        return sum(1 for other in live_queue if other and other < created_at)
+
     items = []
     for j in jobs:
         # Redis has the real-time status; DB may be stale
@@ -1200,6 +1224,8 @@ async def list_jobs(
                 # Redis = tempo real; script JSONB = durabilidade (sobrevive a reboot do Redis).
                 "degraded": (redis_data.get("degraded") == "1" if redis_data else False)
                 or (isinstance(j.script, dict) and j.script.get("llm_provider") == "openrouter-free"),
+                # Posicao honesta na fila do worker (solo): so para quem esta aguardando.
+                "queue_position": (await _queue_ahead_of(j.created_at)) if status == "queued" else None,
             }
         )
     return items

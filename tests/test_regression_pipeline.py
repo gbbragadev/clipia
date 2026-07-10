@@ -243,4 +243,6 @@ def test_job_list_format_unchanged(tmp_path, monkeypatch):
         "degraded",
         # F2 (2026-07-10): poster JPEG do video final (rota autenticada).
         "thumbnail_url",
+        # UX geracao (2026-07-10): posicao real na fila do worker (so p/ queued).
+        "queue_position",
     }
