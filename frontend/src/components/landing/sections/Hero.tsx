@@ -1,14 +1,22 @@
 "use client";
+import { useState } from "react";
 import { Button } from "@/components/landing/ui/Button";
 import { Container } from "@/components/landing/ui/Container";
+import { Highlight } from "@/components/landing/ui/Highlight";
 import { Icon, type IconName } from "@/components/landing/icons";
-import { EditorMockup } from "@/components/landing/EditorMockup";
 import { Reveal } from "@/components/landing/Reveal";
-import { HERO_FACTS, SITE } from "@/components/landing/lib/data";
+import { VideoPhone } from "@/components/landing/preview/VideoPhone";
+import { useAb } from "@/components/landing/lib/ab";
+import { CTA_LABEL, HERO_FACTS, SHOWCASE_HERO, accentMap } from "@/components/landing/lib/data";
+import { cn } from "@/components/landing/utils/cn";
 
 export function Hero() {
+  const ab = useAb();
+  const [idx, setIdx] = useState(0);
+  const video = SHOWCASE_HERO[idx];
+
   return (
-      <section id="top" className="relative overflow-hidden pt-28 pb-16 sm:pt-32 lg:pt-36">
+    <section id="top" className="relative overflow-hidden pt-28 pb-16 sm:pt-32 lg:pt-36">
       {/* background */}
       <div aria-hidden className="pointer-events-none absolute inset-0 -z-10">
         <div className="absolute inset-0 bg-grid opacity-[0.5] [mask-image:radial-gradient(70%_60%_at_50%_0%,#000,transparent)]" />
@@ -23,7 +31,7 @@ export function Hero() {
       </div>
 
       <Container>
-        <div className="grid items-center gap-12 lg:grid-cols-[1.05fr_0.95fr] lg:gap-10">
+        <div className="grid items-center gap-12 lg:grid-cols-[1.08fr_0.92fr] lg:gap-10">
           {/* copy */}
           <div className="flex flex-col items-start">
             <Reveal>
@@ -36,32 +44,36 @@ export function Hero() {
             </Reveal>
 
             <Reveal delay={90}>
-              <h1 className="mt-5 text-balance text-4xl font-extrabold leading-[1.03] tracking-tight text-cloud sm:text-5xl lg:text-[3.6rem]">
-                Do tema ao <span className="text-coral">vídeo vertical</span>, sem começar do zero.
+              <h1 className="font-display mt-5 text-balance text-4xl font-extrabold leading-[1.03] tracking-tight text-cloud sm:text-5xl lg:text-[3.6rem]">
+                <Highlight text={ab.headline("hero")} />
               </h1>
             </Reveal>
 
             <Reveal delay={160}>
               <p className="mt-5 max-w-xl text-pretty text-base leading-relaxed text-mist sm:text-lg">
-                O ClipIA transforma o seu assunto em roteiro, cenas, narração em português, legendas
-                animadas e edição — tudo no navegador. Você revisa no editor e baixa em MP4 9:16
-                pronto para Reels, TikTok e Shorts.
+                O ClipIA transforma o seu assunto em vídeo vertical com roteiro, narração em
+                português e legendas sincronizadas — pronto para Reels, TikTok e Shorts. Você
+                ajusta o que quiser no editor, direto no navegador.
               </p>
             </Reveal>
 
             <Reveal delay={230}>
               <div className="mt-7 flex flex-col gap-3 sm:flex-row">
-                <Button href={SITE.signup} size="lg" iconRight="arrowRight">
-                  Criar meus 2 vídeos grátis
+                <Button href={ab.signup("hero")} size="lg" iconRight="arrowRight">
+                  {CTA_LABEL}
                 </Button>
-                <Button href="#como-funciona" variant="secondary" size="lg" iconLeft="play">
-                  Ver como funciona
+                <Button href="#prova" variant="secondary" size="lg" iconLeft="play">
+                  Ver antes e depois
                 </Button>
               </div>
             </Reveal>
 
-            <Reveal delay={300}>
-              <ul className="mt-8 flex flex-wrap gap-x-5 gap-y-2.5">
+            <Reveal delay={280}>
+              <p className="mt-3 text-[13px] text-mist-2">{ab.freeClaim}</p>
+            </Reveal>
+
+            <Reveal delay={330}>
+              <ul className="mt-7 flex flex-wrap gap-x-5 gap-y-2.5">
                 {HERO_FACTS.map((f) => (
                   <li key={f.text} className="flex items-center gap-2 text-[13px] text-mist">
                     <span className="grid h-7 w-7 place-items-center rounded-lg border border-white/10 bg-white/[0.04] text-mint">
@@ -74,11 +86,45 @@ export function Hero() {
             </Reveal>
           </div>
 
-          {/* editor */}
+          {/* vídeo real do produto */}
           <Reveal delay={200} className="w-full">
-            <EditorMockup />
+            <div className="mx-auto w-full max-w-[280px] sm:max-w-[320px]">
+              <VideoPhone
+                src={video.src}
+                title={`Vídeo de exemplo: ${video.title}`}
+                accent={video.accent}
+                allowSound
+                priority
+              />
+            </div>
+
+            {/* troca de vídeo por nicho */}
+            <div className="mt-4 flex flex-wrap items-center justify-center gap-2">
+              {SHOWCASE_HERO.map((v, i) => {
+                const a = accentMap[v.accent];
+                const activeChip = i === idx;
+                return (
+                  <button
+                    key={v.id}
+                    type="button"
+                    onClick={() => setIdx(i)}
+                    aria-pressed={activeChip}
+                    className={cn(
+                      "flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-[13px] transition-all duration-200",
+                      activeChip
+                        ? cn("text-cloud", a.border, a.soft)
+                        : "border-white/10 bg-white/[0.03] text-mist hover:bg-white/[0.07] hover:text-cloud"
+                    )}
+                  >
+                    <span aria-hidden>{v.emoji}</span>
+                    {v.chip}
+                  </button>
+                );
+              })}
+            </div>
+
             <p className="mt-3 text-center font-mono text-[11px] text-mist-2">
-              Demonstração da criação · o vídeo real é gerado após criar a conta
+              Vídeos reais gerados e editados no ClipIA · toque no alto-falante para ouvir
             </p>
           </Reveal>
         </div>
