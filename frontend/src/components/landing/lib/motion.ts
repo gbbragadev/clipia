@@ -46,6 +46,33 @@ export function useInView<T extends HTMLElement = HTMLDivElement>(opts: InViewOp
   return { ref, inView };
 }
 
+/** Efeito máquina-de-escrever. Respeita prefers-reduced-motion (texto completo). */
+export function useTypewriter(text: string, active: boolean, cps = 24): string {
+  const reduced = usePrefersReducedMotion();
+  const [count, setCount] = useState(0);
+
+  useEffect(() => {
+    if (!active) return;
+    if (reduced) {
+      setCount(text.length);
+      return;
+    }
+    setCount(0);
+    const interval = setInterval(() => {
+      setCount((c) => {
+        if (c >= text.length) {
+          clearInterval(interval);
+          return c;
+        }
+        return c + 1;
+      });
+    }, 1000 / cps);
+    return () => clearInterval(interval);
+  }, [text, active, reduced, cps]);
+
+  return text.slice(0, count);
+}
+
 /** Returns true once the page has scrolled past a target element's bottom. */
 export function useScrolledPast(targetId: string): boolean {
   const [past, setPast] = useState(false);

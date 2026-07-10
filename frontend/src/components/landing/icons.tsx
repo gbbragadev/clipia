@@ -23,6 +23,7 @@ type IconName =
   | "image"
   | "shield"
   | "volume"
+  | "volumeOff"
   | "plus"
   | "edit"
   | "wand"
@@ -130,6 +131,12 @@ const P: Record<IconName, ReactNode> = {
     <>
       <path d="M11 5L6.5 9H3.5v6H6.5L11 19z" />
       <path d="M15.5 9.5a4 4 0 0 1 0 5M18 7a7.5 7.5 0 0 1 0 10" />
+    </>
+  ),
+  volumeOff: (
+    <>
+      <path d="M11 5L6.5 9H3.5v6H6.5L11 19z" />
+      <path d="M15.5 9.5l5 5M20.5 9.5l-5 5" />
     </>
   ),
   plus: <path d="M12 5v14M5 12h14" />,
