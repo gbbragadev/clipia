@@ -49,6 +49,12 @@ export default function GenerateForm({ onJobCreated, prefillTopic, prefillTrendC
   const [sfxEnabled, setSfxEnabled] = useState(true)
   const [musicEnabled, setMusicEnabled] = useState(true)
   const [templates, setTemplates] = useState<VideoTemplateInfo[]>([])
+  // Lote: variações do MESMO tema (comparar versões) OU fila de vários temas.
+  const [variations, setVariations] = useState(1)
+  const [batchMode, setBatchMode] = useState(false)
+  const [batchTopics, setBatchTopics] = useState('')
+  // Temas aguardando confirmação de custo no Modal (guardrail: custo ANTES de ação paga).
+  const [confirmTopics, setConfirmTopics] = useState<string[] | null>(null)
 
   const selectedTemplate = templates.find((template) => template.id === templateId)
   const isFallbackAiTemplate = templateId === 'novelinha_historica'
@@ -59,6 +65,16 @@ export default function GenerateForm({ onJobCreated, prefillTopic, prefillTrendC
   const creditCost = selectedTemplate?.credit_costs?.[voiceProvider]
     ?? (isFallbackAiTemplate ? 5 : voiceProvider === 'elevenlabs' ? 2 : 1)
   const edgeCreditCost = selectedTemplate?.credit_costs?.edge ?? (isFallbackAiTemplate ? 5 : 1)
+
+  const MAX_BATCH = 5 // fila solo: 1 vídeo por vez — cap evita fila de horas
+  const batchList = batchTopics
+    .split('\n')
+    .map((t) => t.trim())
+    .filter((t) => t.length >= 10)
+    .slice(0, MAX_BATCH)
+  const runCount = batchMode ? batchList.length : variations
+  const totalCost = runCount * creditCost
+  const canSubmit = batchMode ? batchList.length > 0 : topic.trim().length >= 10
 
   const lastRequestRef = useRef<GenerateParams | null>(null)
   const appliedPrefillRef = useRef<string | null>(null)
@@ -100,46 +116,72 @@ export default function GenerateForm({ onJobCreated, prefillTopic, prefillTrendC
     }
   }
 
-  const handleGenerate = async () => {
-    if (!topic.trim() || generating) return
+  const buildParams = (t: string, withTrend: boolean): GenerateParams => ({
+    topic: t,
+    style,
+    duration_target: duration,
+    template_id: templateId,
+    voice_provider: voiceProvider,
+    voice_config: voiceProvider === 'elevenlabs' && selectedTemplate?.default_voice_id
+      ? { voice_id: selectedTemplate.default_voice_id }
+      : undefined,
+    sfx_enabled: sfxEnabled,
+    music_enabled: musicEnabled,
+    trend_context: withTrend ? trendContext ?? undefined : undefined,
+  })
 
-    if (user && user.credits < creditCost) {
-      setShowCreditsModal(true)
-      info('Sem créditos suficientes', 'Adicione créditos para iniciar uma nova geração.')
-      return
-    }
-
+  /** Enfileira 1..N gerações em sequência (débito atômico e estorno são POR job no backend). */
+  const startGeneration = async (topics: string[]) => {
+    setConfirmTopics(null)
     setGenerating(true)
     setGenError(null)
+    let queued = 0
     try {
-      const params: GenerateParams = {
-        topic: topic.trim(),
-        style,
-        duration_target: duration,
-        template_id: templateId,
-        voice_provider: voiceProvider,
-        voice_config: voiceProvider === 'elevenlabs' && selectedTemplate?.default_voice_id
-          ? { voice_id: selectedTemplate.default_voice_id }
-          : undefined,
-        sfx_enabled: sfxEnabled,
-        music_enabled: musicEnabled,
-        trend_context: trendContext ?? undefined,
+      for (const t of topics) {
+        // trendContext pertence ao tema digitado: vale nas variações, não no lote multi-tema
+        const params = buildParams(t, !batchMode)
+        lastRequestRef.current = params
+        await generateVideo(params)
+        queued += 1
+        // 202 aceito: a grid mostra o card na hora e o polling dela assume o tracking
+        onJobCreated?.()
       }
-      lastRequestRef.current = params
-      await generateVideo(params)
-      // 202 aceito: o formulário LIBERA na hora — o card em "Seus vídeos" acompanha
-      // o progresso (polling da grid). Mantém template/estilo/duração p/ o próximo.
-      onJobCreated?.()
-      success('Vídeo na fila', 'Acompanhe o progresso no card em "Seus vídeos". Pode gerar outro enquanto isso.')
-      setTopic('')
-      setTrendContext(null)
+      success(
+        queued === 1 ? 'Vídeo na fila' : `${queued} vídeos na fila`,
+        'Acompanhe o progresso nos cards em "Seus vídeos". Pode gerar outros enquanto isso.',
+      )
+      if (batchMode) {
+        setBatchTopics('')
+      } else {
+        setTopic('')
+        setTrendContext(null)
+      }
+      setVariations(1)
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Erro ao iniciar geração'
-      setGenError(message)
-      toastError('Não foi possível iniciar a geração', message)
+      // Honestidade em falha parcial: diz quantos ENTRARAM antes do erro.
+      setGenError(queued > 0 ? `${queued} de ${topics.length} vídeos entraram na fila. Depois disso: ${message}` : message)
+      toastError('Não foi possível enfileirar tudo', message)
     } finally {
       setGenerating(false)
     }
+  }
+
+  const handleGenerate = () => {
+    if (generating || !canSubmit) return
+    const topics = batchMode ? batchList : Array<string>(variations).fill(topic.trim())
+
+    if (user && user.credits < topics.length * creditCost) {
+      setShowCreditsModal(true)
+      info('Sem créditos suficientes', 'Adicione créditos para iniciar as gerações.')
+      return
+    }
+    // Mais de um vídeo = custo multiplicado: SEMPRE confirmar no Modal antes.
+    if (topics.length > 1) {
+      setConfirmTopics(topics)
+      return
+    }
+    startGeneration(topics)
   }
 
   return (
@@ -154,27 +196,59 @@ export default function GenerateForm({ onJobCreated, prefillTopic, prefillTrendC
         </div>
       </div>
 
-      {/* Topic — o campo-herói do produto */}
+      {/* Topic — o campo-herói do produto (single) OU fila de temas (lote) */}
       <div className="mb-4">
-        <label className="block text-xs text-[var(--text-tertiary)] mb-1.5">Tema do vídeo — escreva o que quiser</label>
-        <input
-          type="text"
-          value={topic}
-          onChange={(e) => { setTopic(e.target.value); setTrendContext(null) }}
-          onKeyDown={(e) => { if (e.key === 'Enter') handleGenerate() }}
-          placeholder="Ex: 5 curiosidades sobre o oceano profundo"
-          disabled={generating}
-          className="w-full px-5 py-4 text-base rounded-2xl border border-[var(--border-default)] bg-[var(--bg-surface)] text-[var(--text-primary)] placeholder:text-[var(--text-tertiary)] outline-none focus:border-coral/60 focus:ring-2 focus:ring-coral/20 transition disabled:opacity-50"
-        />
-        {/* Transparência do prefill: o contexto da tendência viaja junto com o tema */}
-        {trendContext && (
-          <span className="mt-1.5 inline-flex items-center gap-1.5 rounded-full border border-coral/25 bg-coral/10 px-2.5 py-1 text-[11px] text-coral">
-            🔥 Baseado numa tendência do painel &quot;Em alta&quot; — o roteiro usa esse contexto
-          </span>
+        <div className="mb-1.5 flex items-center justify-between gap-2">
+          <label className="block text-xs text-[var(--text-tertiary)]">
+            {batchMode ? `Vários temas — um por linha (até ${MAX_BATCH})` : 'Tema do vídeo — escreva o que quiser'}
+          </label>
+          <button
+            type="button"
+            onClick={() => { setBatchMode(!batchMode); setGenError(null) }}
+            disabled={generating}
+            className="shrink-0 text-[11px] text-azure hover:text-azure/80 transition cursor-pointer disabled:opacity-50"
+          >
+            {batchMode ? '← Voltar para um tema' : 'Gerar vários de uma vez'}
+          </button>
+        </div>
+        {batchMode ? (
+          <>
+            <textarea
+              value={batchTopics}
+              onChange={(e) => setBatchTopics(e.target.value)}
+              rows={5}
+              placeholder={'Ex:\n5 curiosidades sobre o oceano profundo\nA história do café no Brasil\nPor que os gatos ronronam'}
+              disabled={generating}
+              className="w-full px-5 py-4 text-base rounded-2xl border border-[var(--border-default)] bg-[var(--bg-surface)] text-[var(--text-primary)] placeholder:text-[var(--text-tertiary)] outline-none focus:border-coral/60 focus:ring-2 focus:ring-coral/20 transition disabled:opacity-50 resize-y"
+            />
+            <p className="mt-1.5 text-[11px] text-[var(--text-tertiary)]">
+              {batchList.length === 0
+                ? 'Cada linha com pelo menos 10 caracteres vira um vídeo.'
+                : `${batchList.length} tema${batchList.length > 1 ? 's' : ''} pronto${batchList.length > 1 ? 's' : ''} para gerar — cada um vira um vídeo na fila.`}
+            </p>
+          </>
+        ) : (
+          <>
+            <input
+              type="text"
+              value={topic}
+              onChange={(e) => { setTopic(e.target.value); setTrendContext(null) }}
+              onKeyDown={(e) => { if (e.key === 'Enter') handleGenerate() }}
+              placeholder="Ex: 5 curiosidades sobre o oceano profundo"
+              disabled={generating}
+              className="w-full px-5 py-4 text-base rounded-2xl border border-[var(--border-default)] bg-[var(--bg-surface)] text-[var(--text-primary)] placeholder:text-[var(--text-tertiary)] outline-none focus:border-coral/60 focus:ring-2 focus:ring-coral/20 transition disabled:opacity-50"
+            />
+            {/* Transparência do prefill: o contexto da tendência viaja junto com o tema */}
+            {trendContext && (
+              <span className="mt-1.5 inline-flex items-center gap-1.5 rounded-full border border-coral/25 bg-coral/10 px-2.5 py-1 text-[11px] text-coral">
+                🔥 Baseado numa tendência do painel &quot;Em alta&quot; — o roteiro usa esse contexto
+              </span>
+            )}
+          </>
         )}
       </div>
 
-      <OpticalBalancePreview text={topic} />
+      {!batchMode && <OpticalBalancePreview text={topic} />}
 
       {/* Template */}
       <div className="mb-5">
@@ -340,6 +414,35 @@ export default function GenerateForm({ onJobCreated, prefillTopic, prefillTrendC
         )}
       </div>
 
+      {/* Variações — mesmo tema, N versões para comparar (só no modo single) */}
+      {!batchMode && (
+        <div className="mb-4 flex items-center justify-between gap-3 rounded-xl border border-[var(--border-default)] bg-[var(--bg-surface)] px-3.5 py-2.5">
+          <div className="min-w-0">
+            <div className="text-xs font-semibold text-[var(--text-primary)]">Variações</div>
+            <div className="text-[10px] text-[var(--text-tertiary)]">Mesmo tema, roteiros diferentes — compare e fique com o melhor</div>
+          </div>
+          <div className="flex gap-1" role="radiogroup" aria-label="Quantidade de variações">
+            {[1, 2, 3, 4, 5].map((n) => (
+              <button
+                key={n}
+                type="button"
+                role="radio"
+                aria-checked={variations === n}
+                onClick={() => setVariations(n)}
+                disabled={generating}
+                className={`h-8 w-8 rounded-lg border text-xs font-semibold transition cursor-pointer disabled:opacity-50 ${
+                  variations === n
+                    ? 'border-coral/50 bg-coral/15 text-coral'
+                    : 'border-[var(--border-default)] bg-transparent text-[var(--text-tertiary)] hover:border-coral/30'
+                }`}
+              >
+                {n}×
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* Error */}
       {genError && (
         <div className="p-3 rounded-xl bg-red-500/10 border border-red-500/20 text-red-400 text-xs mb-4 flex items-center justify-between gap-3">
@@ -365,29 +468,75 @@ export default function GenerateForm({ onJobCreated, prefillTopic, prefillTrendC
       {/* Generate button */}
       <button
         onClick={handleGenerate}
-        disabled={generating || topic.trim().length < 10}
+        disabled={generating || !canSubmit}
         className={`w-full py-3.5 rounded-xl border-none text-base font-semibold transition cursor-pointer ${
-          generating || topic.trim().length < 10
+          generating || !canSubmit
             ? 'bg-[var(--bg-surface-hover)] text-[var(--text-tertiary)] cursor-not-allowed'
             : 'bg-gradient-to-r from-coral to-azure text-white hover:opacity-90'
         }`}
       >
-        {generating ? strings.dashboard.generate.loading : 'Gerar Vídeo'}
+        {generating
+          ? strings.dashboard.generate.loading
+          : runCount > 1
+            ? `Gerar ${runCount} vídeos`
+            : 'Gerar Vídeo'}
       </button>
 
       {/* Botão desabilitado sempre explica o porquê (DESIGN.md) */}
-      {!generating && topic.trim().length < 10 && (
+      {!generating && !canSubmit && (
         <p className="text-center text-[11px] text-[var(--text-tertiary)] mt-2">
-          Escreva o tema com pelo menos 10 caracteres para liberar a geração.
+          {batchMode
+            ? 'Escreva pelo menos um tema com 10+ caracteres (um por linha) para liberar a geração.'
+            : 'Escreva o tema com pelo menos 10 caracteres para liberar a geração.'}
         </p>
       )}
 
       {/* Credits info — custo antes da ação */}
-      {user && !generating && topic.trim().length >= 10 && (
+      {user && !generating && canSubmit && (
         <p className="text-center text-[11px] text-[var(--text-tertiary)] mt-2">
-          {creditCost} crédito{creditCost > 1 ? 's' : ''} será{creditCost > 1 ? 'ão' : ''} usado{creditCost > 1 ? 's' : ''} · {user.credits} disponíve{user.credits === 1 ? 'l' : 'is'}
+          {runCount > 1
+            ? `${totalCost} créditos (${runCount} × ${creditCost}) serão usados · ${user.credits} disponíveis`
+            : `${creditCost} crédito${creditCost > 1 ? 's' : ''} será${creditCost > 1 ? 'ão' : ''} usado${creditCost > 1 ? 's' : ''} · ${user.credits} disponíve${user.credits === 1 ? 'l' : 'is'}`}
         </p>
       )}
+
+      {/* Confirmação de lote — custo N× SEMPRE antes de debitar (DESIGN.md) */}
+      <Modal open={confirmTopics !== null} onClose={() => setConfirmTopics(null)} labelledBy="lote-modal-titulo">
+        <h3 id="lote-modal-titulo" className="text-lg font-bold mb-2">
+          Gerar {confirmTopics?.length} vídeos?
+        </h3>
+        {confirmTopics && !batchMode ? (
+          <p className="text-sm text-[var(--text-secondary)] mb-3">
+            {confirmTopics.length} variações do tema <span className="text-[var(--text-primary)]">&quot;{confirmTopics[0]}&quot;</span> — roteiros diferentes para você comparar.
+          </p>
+        ) : (
+          <ul className="mb-3 max-h-40 space-y-1 overflow-y-auto text-sm text-[var(--text-secondary)]">
+            {confirmTopics?.map((t, i) => (
+              <li key={i} className="truncate rounded-lg bg-[var(--bg-surface)] px-3 py-1.5">{t}</li>
+            ))}
+          </ul>
+        )}
+        <p className="mb-5 rounded-xl border border-coral/25 bg-coral/10 px-3.5 py-2.5 text-sm text-coral">
+          Custo total: <strong>{(confirmTopics?.length ?? 0) * creditCost} créditos</strong> ({confirmTopics?.length} × {creditCost})
+          {user ? <span className="text-coral/80"> · você tem {user.credits}</span> : null}
+        </p>
+        <div className="flex gap-2">
+          <button
+            type="button"
+            onClick={() => confirmTopics && startGeneration(confirmTopics)}
+            className="flex-1 py-3 rounded-xl bg-coral text-white font-semibold text-sm hover:opacity-90 transition cursor-pointer"
+          >
+            Confirmar e gerar
+          </button>
+          <button
+            type="button"
+            onClick={() => setConfirmTopics(null)}
+            className="flex-1 py-3 rounded-xl bg-white/5 border border-white/10 text-[var(--text-secondary)] font-medium text-sm hover:bg-white/10 transition cursor-pointer"
+          >
+            Cancelar
+          </button>
+        </div>
+      </Modal>
 
       {/* Créditos insuficientes — modal acessível (portal + Esc + foco) */}
       <Modal open={showCreditsModal} onClose={() => setShowCreditsModal(false)} labelledBy="creditos-modal-titulo" className="text-center">
