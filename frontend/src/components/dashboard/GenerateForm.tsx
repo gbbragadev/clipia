@@ -20,6 +20,7 @@ import ScriptDensityHeatmap from './ScriptDensityHeatmap'
 import NarrationTimelineRuler from './NarrationTimelineRuler'
 import KineticPreviewPanel from './KineticPreviewPanel'
 import { useToast } from '@/components/ui/feedback'
+import { Modal } from '@/components/ui/Modal'
 
 interface GenerateFormProps {
   onJobComplete: () => void
@@ -208,6 +209,12 @@ export default function GenerateForm({ onJobComplete, onJobCreated, prefillTopic
           disabled={generating}
           className="w-full px-4 py-3 text-sm rounded-xl border border-[var(--border-default)] bg-[var(--bg-surface)] text-[var(--text-primary)] placeholder:text-[var(--text-tertiary)] outline-none focus:border-coral/50 transition disabled:opacity-50"
         />
+        {/* Transparência do prefill: o contexto da tendência viaja junto com o tema */}
+        {trendContext && (
+          <span className="mt-1.5 inline-flex items-center gap-1.5 rounded-full border border-coral/25 bg-coral/10 px-2.5 py-1 text-[11px] text-coral">
+            🔥 Baseado numa tendência do painel &quot;Em alta&quot; — o roteiro usa esse contexto
+          </span>
+        )}
       </div>
 
       <OpticalBalancePreview text={topic} />
@@ -266,7 +273,7 @@ export default function GenerateForm({ onJobComplete, onJobCreated, prefillTopic
           >
             <div className="font-semibold">Edge TTS</div>
             <div className="text-[10px] opacity-60 mt-0.5">
-              Edge · {edgeCreditCost} credito{edgeCreditCost > 1 ? 's' : ''}
+              Edge · {edgeCreditCost} crédito{edgeCreditCost > 1 ? 's' : ''}
             </div>
           </button>
           <button
@@ -283,7 +290,7 @@ export default function GenerateForm({ onJobComplete, onJobCreated, prefillTopic
           >
             <div className="font-semibold">ElevenLabs</div>
             <div className="text-[10px] opacity-60 mt-0.5">
-              {supportsDefaultPremiumVoice ? `Premium · ${creditCost} creditos` : 'Premium no template IA'}
+              {supportsDefaultPremiumVoice ? `Premium · ${creditCost} créditos` : 'Premium no template IA'}
             </div>
           </button>
         </div>
@@ -380,7 +387,7 @@ export default function GenerateForm({ onJobComplete, onJobCreated, prefillTopic
       {activeJob && generating && (
         <div className="p-4 rounded-xl bg-[var(--bg-surface)] border border-coral/20 mb-4">
           <div className="flex justify-between mb-2">
-            <span className="text-xs text-gray-300">
+            <span className="text-xs text-[var(--text-secondary)]">
               {activeJob.current_step ? STEP_LABELS[activeJob.current_step] || activeJob.current_step : 'Iniciando...'}
             </span>
             <span className="text-xs text-coral font-semibold">
@@ -431,36 +438,41 @@ export default function GenerateForm({ onJobComplete, onJobCreated, prefillTopic
         {generating ? strings.dashboard.generate.loading : 'Gerar Vídeo'}
       </button>
 
-      {/* Credits info */}
-      {user && !generating && (
-        <p className="text-center text-[11px] text-gray-600 mt-2">
+      {/* Botão desabilitado sempre explica o porquê (DESIGN.md) */}
+      {!generating && topic.trim().length < 10 && (
+        <p className="text-center text-[11px] text-[var(--text-tertiary)] mt-2">
+          Escreva o tema com pelo menos 10 caracteres para liberar a geração.
+        </p>
+      )}
+
+      {/* Credits info — custo antes da ação */}
+      {user && !generating && topic.trim().length >= 10 && (
+        <p className="text-center text-[11px] text-[var(--text-tertiary)] mt-2">
           {creditCost} crédito{creditCost > 1 ? 's' : ''} será{creditCost > 1 ? 'ão' : ''} usado{creditCost > 1 ? 's' : ''} · {user.credits} disponíve{user.credits === 1 ? 'l' : 'is'}
         </p>
       )}
 
-      {/* Credits modal placeholder */}
-      {showCreditsModal && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center">
-          <div className="bg-[var(--bg-surface)] border border-[var(--border-default)] rounded-2xl p-8 max-w-sm w-full mx-4 text-center">
-            <div className="text-4xl mb-4">💰</div>
-            <h3 className="text-lg font-bold mb-2">Seus créditos acabaram</h3>
-            <p className="text-sm text-gray-400 mb-1">Plano: <span className="text-gray-300 capitalize">{user?.plan || 'free'}</span></p>
-            <p className="text-xs text-[var(--text-tertiary)] mb-6">Este template consome {creditCost} crédito{creditCost > 1 ? 's' : ''}</p>
-            <a
-              href="/dashboard/credits"
-              className="block w-full py-3 rounded-xl bg-coral text-white font-medium text-sm hover:bg-coral transition mb-3"
-            >
-              Comprar créditos
-            </a>
-            <button
-              onClick={() => setShowCreditsModal(false)}
-              className="text-sm text-gray-400 hover:text-white transition cursor-pointer"
-            >
-              {strings.common.back}
-            </button>
-          </div>
-        </div>
-      )}
+      {/* Créditos insuficientes — modal acessível (portal + Esc + foco) */}
+      <Modal open={showCreditsModal} onClose={() => setShowCreditsModal(false)} labelledBy="creditos-modal-titulo" className="text-center">
+        <div className="text-4xl mb-4" aria-hidden>💰</div>
+        <h3 id="creditos-modal-titulo" className="text-lg font-bold mb-2">Seus créditos acabaram</h3>
+        <p className="text-sm text-[var(--text-secondary)] mb-1">
+          Plano: <span className="text-[var(--text-primary)] capitalize">{user?.plan || 'free'}</span>
+        </p>
+        <p className="text-xs text-[var(--text-tertiary)] mb-6">Este template consome {creditCost} crédito{creditCost > 1 ? 's' : ''}</p>
+        <a
+          href="/dashboard/credits"
+          className="block w-full py-3 rounded-xl bg-coral text-white font-medium text-sm hover:opacity-90 transition mb-3"
+        >
+          Comprar créditos
+        </a>
+        <button
+          onClick={() => setShowCreditsModal(false)}
+          className="text-sm text-[var(--text-secondary)] hover:text-white transition cursor-pointer"
+        >
+          {strings.common.back}
+        </button>
+      </Modal>
     </section>
   )
 }

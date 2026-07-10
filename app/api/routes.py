@@ -391,6 +391,38 @@ async def download_job(
     return FileResponse(str(file_path), media_type="video/mp4", filename=f"clipia-{str(job.id)[:8]}.mp4")
 
 
+@router.get(
+    "/jobs/{job_id}/thumbnail",
+    summary="Job thumbnail",
+    description="Poster JPEG do video final (frame extraido no finalize).",
+    responses={200: {"description": "JPEG"}, 404: {"description": "Not found"}},
+)
+async def job_thumbnail(
+    job_id: str,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    job = await get_owned_job(db, user, job_id)
+    file_path = Path(settings.STORAGE_DIR) / "output" / f"{job.id}.jpg"
+    if not file_path.exists():
+        raise not_found_error()
+    return FileResponse(str(file_path), media_type="image/jpeg")
+
+
+@router.get(
+    "/config",
+    summary="Public config",
+    description="Valores de oferta exibidos no frontend (nunca hardcodar copy de oferta).",
+    responses={200: {"description": "Config"}},
+)
+async def public_config():
+    """Fonte única dos números prometidos na UI (guardrail de confiança do DESIGN.md)."""
+    return {
+        "welcome_credit_bonus": settings.WELCOME_CREDIT_BONUS,
+        "purchase_bonus_percent": settings.PURCHASE_BONUS_PERCENT,
+    }
+
+
 @router.post(
     "/waitlist",
     status_code=201,
@@ -1155,6 +1187,12 @@ async def list_jobs(
                 "duration_target": j.duration_target,
                 "created_at": j.created_at.isoformat() if j.created_at else None,
                 "download_url": f"/api/v1/jobs/{j.id}/download" if downloadable else None,
+                # Poster do card (gerado no finalize; ausente em jobs antigos -> fallback no front)
+                "thumbnail_url": (
+                    f"/api/v1/jobs/{j.id}/thumbnail"
+                    if (Path(settings.STORAGE_DIR) / "output" / f"{j.id}.jpg").exists()
+                    else None
+                ),
                 # Progresso em tempo real p/ a grid reativa (o hash do Redis ja esta em maos).
                 "progress": float(redis_data.get("progress") or 0) if redis_data else 0.0,
                 "current_step": (redis_data.get("current_step") or None) if redis_data else None,

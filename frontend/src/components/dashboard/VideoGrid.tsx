@@ -66,7 +66,7 @@ export default function VideoGrid({ jobs, loading, onEdit, onCancel }: VideoGrid
 
   if (loading) {
     return (
-      <div className="grid grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
+      <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-3 sm:gap-4">
         {Array.from({ length: 6 }, (_, i) => <SkeletonCard key={i} />)}
       </div>
     )
@@ -106,7 +106,7 @@ export default function VideoGrid({ jobs, loading, onEdit, onCancel }: VideoGrid
         ]}
       />
       <motion.div
-        className="grid grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4"
+        className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-3 sm:gap-4"
         variants={staggerContainer(0.05)}
         initial={reduceMotion ? false : 'hidden'}
         animate="visible"

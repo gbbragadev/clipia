@@ -87,6 +87,8 @@ export interface JobSummary {
   duration_target: number
   created_at: string | null
   download_url: string | null
+  /** Poster JPEG do vídeo final (rota autenticada; null em jobs antigos). */
+  thumbnail_url?: string | null
   /** Fração 0..1 do pipeline (tempo real via Redis). */
   progress?: number
   /** Etapa atual do pipeline (chave de STEP_LABELS). */

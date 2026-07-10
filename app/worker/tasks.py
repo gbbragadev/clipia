@@ -3,6 +3,7 @@ import json
 import logging
 import shutil
 import smtplib
+import subprocess
 from datetime import datetime, timedelta, timezone
 from email.mime.text import MIMEText
 from pathlib import Path
@@ -25,6 +26,37 @@ from app.worker.celery_app import celery_app
 logger = logging.getLogger(__name__)
 
 _redis = get_redis()
+
+
+def _write_thumbnail(video_path: str, thumb_path: str) -> None:
+    """Poster do card no dashboard: 1 frame em ~1.5s (depois do fade de abertura).
+
+    Falha de thumbnail NUNCA falha o job — o card tem fallback de gradiente.
+    """
+    try:
+        subprocess.run(
+            [
+                "ffmpeg",
+                "-y",
+                "-ss",
+                "1.5",
+                "-i",
+                video_path,
+                "-frames:v",
+                "1",
+                "-vf",
+                "scale=360:-2",
+                "-q:v",
+                "4",
+                thumb_path,
+            ],
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=True,
+        )
+    except Exception as e:  # noqa: BLE001 — best-effort por design
+        logger.warning(f"Thumbnail nao gerado para {video_path}: {e}")
 
 
 def _read_json_file(path: Path):
@@ -775,6 +807,7 @@ def task_compose_video(self, data: dict, job_id: str, template_id: str = "stock_
             layout=template.layout,
             music_path=music_path,
             music_volume=settings.AUTO_MUSIC_VOLUME,
+            overlays=data["script"].get("overlays"),
         )
         _update_job(job_id, "processing", "compositing", 0.9, detail="Video montado.")
         if settings.QUALITY_GATE_ENABLED:
@@ -807,6 +840,7 @@ def task_finalize(self, video_path: str, job_id: str) -> str:
         shutil.copy2(final_src, final_path)
         if final_src != video_path:
             Path(final_src).unlink(missing_ok=True)
+        _write_thumbnail(final_path, str(output_dir / f"{job_id}.jpg"))
 
         # Save script to PostgreSQL for the editor (keep job dir for editing)
         try:
@@ -959,6 +993,7 @@ def task_rerender_video(self, job_id: str) -> str:
                 music_volume=comp_data.get("musicVolume", settings.AUTO_MUSIC_VOLUME),
                 subtitle_style=comp_data.get("subtitleStyle"),
                 layout=re_template.layout,
+                overlays=comp_data.get("overlays"),
             )
 
         _update_job(job_id, "rendering", "finalizing", 0.9, detail="Finalizando re-render...")
@@ -966,7 +1001,11 @@ def task_rerender_video(self, job_id: str) -> str:
         # Copy to output dir (becomes downloadable version)
         output_dir = get_output_dir()
         final_path = str(output_dir / f"{job_id}.mp4")
-        shutil.copy2(output_path, final_path)
+        final_src = append_outro(output_path)  # selo de marca tambem no export editado (no-op-safe)
+        shutil.copy2(final_src, final_path)
+        if final_src != output_path:
+            Path(final_src).unlink(missing_ok=True)
+        _write_thumbnail(final_path, str(output_dir / f"{job_id}.jpg"))
 
         _update_job(job_id, "completed", None, 1.0, detail="Re-render concluido.")
         logger.info(f"Re-render completed for job {job_id}")

@@ -12,6 +12,7 @@ import VideoGrid from '@/components/dashboard/VideoGrid'
 import ReferralCard from '@/components/dashboard/ReferralCard'
 import { InlineError, useToast } from '@/components/ui/feedback'
 import { PretextHeading } from '@/components/ui/PretextHeading'
+import { fetchPublicConfig } from '@/lib/config'
 
 export default function DashboardPage() {
   const router = useRouter()
@@ -22,6 +23,11 @@ export default function DashboardPage() {
   const [error, setError] = useState<string | null>(null)
   const [prefill, setPrefill] = useState<TrendSelection | null>(null)
   const formRef = useRef<HTMLDivElement>(null)
+  // Número prometido no banner vem do backend (guardrail: nunca hardcodar oferta).
+  const [welcomeBonus, setWelcomeBonus] = useState<number | null>(null)
+  useEffect(() => {
+    fetchPublicConfig().then((c) => setWelcomeBonus(c.welcome_credit_bonus))
+  }, [])
 
   const loadJobs = useCallback(async () => {
     setError(null)
@@ -111,7 +117,9 @@ export default function DashboardPage() {
             <Mail className="w-5 h-5 text-yellow-300 mt-0.5 shrink-0" />
             <div>
               <p className="text-yellow-200 font-semibold mb-1">{strings.auth.verify.title}</p>
-              <p className="text-yellow-200/70 text-sm">Confirme seu e-mail para receber 2 créditos grátis e começar a gerar vídeos.</p>
+              <p className="text-yellow-200/70 text-sm">
+                Confirme seu e-mail para receber {welcomeBonus ?? 'seus'} créditos grátis e começar a gerar vídeos.
+              </p>
             </div>
           </div>
           <button
@@ -123,16 +131,9 @@ export default function DashboardPage() {
         </div>
       )}
 
-      {/* Painel "Em alta" — descoberta de temas em tendência */}
-      <TrendingPanel
-        onSelect={(sel) => {
-          setPrefill(sel)
-          formRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
-        }}
-      />
-
-      {/* Studio-like Generate Form Wrapper */}
-      <div ref={formRef} id="studio" className="relative rounded-3xl bg-[var(--bg-raised)] border border-white/5 overflow-hidden p-6 md:p-10 shadow-2xl mb-16">
+      {/* Ação nº 1 do produto vem PRIMEIRO: o formulário de geração (auditoria F0 —
+          o feed de ideias abaixo é apoio, não protagonista). */}
+      <div ref={formRef} id="studio" className="relative rounded-3xl bg-[var(--bg-raised)] border border-white/5 overflow-hidden p-6 md:p-10 shadow-2xl mb-10">
         <div className="absolute inset-0 bg-[url(/noise.svg)] opacity-20 pointer-events-none mix-blend-overlay"></div>
         <div className="absolute -top-40 -right-40 w-96 h-96 bg-coral/20 blur-[120px] rounded-full pointer-events-none"></div>
         <div className="relative z-10">
@@ -146,6 +147,14 @@ export default function DashboardPage() {
           />
         </div>
       </div>
+
+      {/* Ideias e tendências — apoio à geração (clique preenche o formulário acima) */}
+      <TrendingPanel
+        onSelect={(sel) => {
+          setPrefill(sel)
+          formRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+        }}
+      />
 
       <div className="mb-10">
         <ReferralCard />
