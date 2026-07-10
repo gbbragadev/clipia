@@ -3,8 +3,10 @@ import { useEffect, useRef, useState } from "react";
 import { cn } from "@/components/landing/utils/cn";
 import { Icon } from "@/components/landing/icons";
 import { PhonePreview } from "@/components/landing/preview/PhonePreview";
+import { SceneThumb } from "@/components/landing/preview/SceneThumb";
 import { usePrefersReducedMotion } from "@/components/landing/lib/motion";
 import { HERO_SCRIPT } from "@/components/landing/lib/script";
+import type { Accent } from "@/components/landing/lib/data";
 
 const THEME = "3 curiosidades sobre o espaço";
 const TYPE_MS = 1700;
@@ -86,7 +88,8 @@ export function EditorMockup() {
   const sceneCount = scenes.length;
   const sceneLocal =
     reduced ? 0.6 : Math.min(1, Math.max(0, (playhead - activeScene / sceneCount) * sceneCount));
-  const words = scenes[activeScene].narration.split(" ");
+  const currentScene = scenes[activeScene];
+  const words = currentScene.narration.split(" ");
   const wordIndex = reduced
     ? words.length - 1
     : Math.min(words.length - 1, Math.floor(sceneLocal * words.length));
@@ -161,14 +164,12 @@ export function EditorMockup() {
                       )}
                     >
                       <div className="relative h-12 w-9 shrink-0 overflow-hidden rounded-md ring-1 ring-white/10">
-                        <img
-                          src="https://images.pexels.com/photos/25752810/pexels-photo-25752810.jpeg?auto=compress&cs=tinysrgb&fit=crop&h=400&w=300"
-                          alt=""
-                          className="h-full w-full object-cover"
+                        <SceneThumb
+                          accent={(s.accent ?? "azure") as Accent}
+                          icon={s.icon ?? "planet"}
+                          seed={i}
+                          label={i + 1}
                         />
-                        <span className="absolute bottom-0 left-0 bg-ink/70 px-1 font-mono text-[8px] text-cloud">
-                          {String(i + 1).padStart(2, "0")}
-                        </span>
                       </div>
                       <div className="min-w-0 flex-1">
                         <div className="font-mono text-[10px] uppercase tracking-wide text-coral">
@@ -203,8 +204,17 @@ export function EditorMockup() {
             {/* RIGHT: preview + voice */}
             <div className="flex flex-col items-center gap-3">
               <PhonePreview
-                image="https://images.pexels.com/photos/25752810/pexels-photo-25752810.jpeg?auto=compress&cs=tinysrgb&fit=crop&h=900&w=600"
                 alt="Prévia vertical de um vídeo sobre o espaço, com legenda animada."
+                background={
+                  <SceneThumb
+                    key={activeScene}
+                    accent={(currentScene.accent ?? "azure") as Accent}
+                    icon={currentScene.icon ?? "planet"}
+                    seed={activeScene}
+                    active={playing}
+                    className={cn("h-full w-full", playing && "anim-scene-fade")}
+                  />
+                }
                 words={narrationReady ? words : []}
                 activeIndex={narrationReady ? wordIndex : -1}
                 captionStyle="pop"
