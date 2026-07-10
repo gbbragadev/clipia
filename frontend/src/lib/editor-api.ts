@@ -244,6 +244,8 @@ export interface Trend {
   score: number
   url: string
   context: string
+  /** Tradução pt-BR do título (fontes EN); exibir title_pt || title. */
+  title_pt?: string
 }
 
 export async function fetchTrends(nicho?: string): Promise<Trend[]> {
@@ -252,6 +254,14 @@ export async function fetchTrends(nicho?: string): Promise<Trend[]> {
   if (!res.ok) return []
   const data = await res.json().catch(() => ({ trends: [] }))
   return data.trends ?? []
+}
+
+/** Temas prontos do nicho gerados por IA (renovam a cada hora). [] em falha → use o fallback estático. */
+export async function fetchExampleTopics(nicho: string): Promise<string[]> {
+  const res = await fetch(`${API_BASE}/example-topics/${encodeURIComponent(nicho)}`, { headers: getAuthHeaders() })
+  if (!res.ok) return []
+  const data = await res.json().catch(() => ({ topics: [] }))
+  return Array.isArray(data.topics) ? data.topics : []
 }
 
 export async function regenerateTTS(

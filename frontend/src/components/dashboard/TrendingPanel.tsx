@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { fetchTrends, type Trend } from '@/lib/editor-api'
+import { fetchTrends, fetchExampleTopics, type Trend } from '@/lib/editor-api'
 import { NICHES } from '@/lib/niches'
 import { type StyleValue } from './StyleSelector'
 
@@ -30,9 +30,11 @@ export default function TrendingPanel({ onSelect }: TrendingPanelProps) {
   const [niche, setNiche] = useState<string | null>(null) // null = feed geral
   const [trends, setTrends] = useState<Trend[]>([])
   const [loading, setLoading] = useState(true)
-  // O feed cru das fontes (Reddit/HN/Trends) vem majoritariamente em inglês — fica
-  // colapsado por padrão; os "temas amplos" pt-BR por nicho são o caminho principal.
+  // O feed cru das fontes (Reddit/HN/Trends) vem traduzido quando possível — segue
+  // colapsado por padrão; os "temas prontos" pt-BR por nicho são o caminho principal.
   const [showFeed, setShowFeed] = useState(false)
+  // Temas prontos por IA (renovam a cada hora no backend); [] → fallback estático.
+  const [aiTopics, setAiTopics] = useState<string[]>([])
 
   useEffect(() => {
     if (!showFeed) return
@@ -44,6 +46,16 @@ export default function TrendingPanel({ onSelect }: TrendingPanelProps) {
       .finally(() => { if (active) setLoading(false) })
     return () => { active = false }
   }, [niche, showFeed])
+
+  useEffect(() => {
+    if (!niche) { setAiTopics([]); return }
+    let active = true
+    setAiTopics([])
+    fetchExampleTopics(niche)
+      .then((topics) => { if (active) setAiTopics(topics) })
+      .catch(() => { if (active) setAiTopics([]) })
+    return () => { active = false }
+  }, [niche])
 
   return (
     <div className="relative rounded-3xl bg-[var(--bg-raised)] border border-white/5 p-6 md:p-8 shadow-2xl mb-10">
@@ -91,20 +103,24 @@ export default function TrendingPanel({ onSelect }: TrendingPanelProps) {
         </p>
       )}
 
-      {/* Temas amplos — mostrados quando um nicho está selecionado */}
+      {/* Temas prontos — IA rotativa (renovam a cada hora) com fallback estático */}
       {niche !== null && (
         <div className="mb-5 pb-5 border-b border-white/5">
           <div className="flex items-start gap-2 mb-3">
             <span className="text-sm" aria-hidden>✨</span>
             <div className="flex-1">
               <h3 className="text-sm font-semibold text-white">Temas prontos</h3>
-              <p className="text-[11px] text-[var(--text-secondary)] mt-1">Assuntos que funcionam sempre — clique para usar.</p>
+              <p className="text-[11px] text-[var(--text-secondary)] mt-1">
+                {aiTopics.length > 0
+                  ? 'Gerados por IA para este nicho — renovam a cada hora. Clique para usar.'
+                  : 'Assuntos que funcionam sempre — clique para usar.'}
+              </p>
             </div>
           </div>
           <div className="flex flex-wrap gap-2">
-            {NICHES.find((n) => n.slug === niche)?.exampleTopics.map((topic, i) => (
+            {(aiTopics.length > 0 ? aiTopics : NICHES.find((n) => n.slug === niche)?.exampleTopics ?? []).map((topic, i) => (
               <button
-                key={i}
+                key={`${topic}-${i}`}
                 type="button"
                 onClick={() => {
                   const nicheDef = NICHES.find((n) => n.slug === niche)
@@ -134,7 +150,7 @@ export default function TrendingPanel({ onSelect }: TrendingPanelProps) {
         <span className="transition-transform" style={{ transform: showFeed ? 'rotate(90deg)' : 'rotate(0deg)' }} aria-hidden>
           ▶
         </span>
-        Tendências das fontes (Reddit, Hacker News, Google Trends — muitas em inglês)
+        Tendências das fontes (Reddit, Hacker News, Google Trends — traduzidas para pt-BR)
       </button>
 
       {!showFeed ? null : loading ? (
@@ -160,10 +176,12 @@ export default function TrendingPanel({ onSelect }: TrendingPanelProps) {
                 className="group flex items-start justify-between gap-3 rounded-xl border border-white/5 bg-white/[0.03] p-3 hover:border-coral/30 transition"
               >
                 <div className="min-w-0">
-                  <p className="text-sm text-[var(--text-primary)] line-clamp-2">{t.title}</p>
+                  {/* Exibe a tradução pt-BR quando houver; o grounding do roteiro usa o original */}
+                  <p className="text-sm text-[var(--text-primary)] line-clamp-2">{t.title_pt || t.title}</p>
                   <div className="flex items-center gap-2 mt-1.5">
                     <span className="text-[10px] uppercase tracking-wide text-[var(--text-tertiary)]">
                       {SOURCE_LABEL[t.source] ?? t.source}
+                      {t.title_pt && t.title_pt !== t.title ? ' · traduzido' : ''}
                     </span>
                     {t.score >= 0.66 && <span className="text-[10px]">🔥</span>}
                   </div>
@@ -171,7 +189,7 @@ export default function TrendingPanel({ onSelect }: TrendingPanelProps) {
                 <button
                   type="button"
                   onClick={() => onSelect({
-                    topic: t.title,
+                    topic: t.title_pt || t.title,
                     trendContext: trendContextOf(t),
                     templateId: nicheDef?.recommendedTemplate,
                     style: nicheDef?.generateStyle,

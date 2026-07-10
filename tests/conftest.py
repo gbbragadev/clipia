@@ -39,7 +39,7 @@ class FakeRedis:
     def hget(self, key: str, field: str) -> str | None:
         return self.data.get(key, {}).get(field)
 
-    def set(self, key: str, value: str):
+    def set(self, key: str, value: str, ex: int | None = None):
         self.values[key] = str(value)
 
     def get(self, key: str) -> str | None:

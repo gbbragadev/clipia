@@ -35,17 +35,29 @@ _TIMEOUT = 15.0
 _ATOM_NS = {"atom": "http://www.w3.org/2005/Atom"}
 
 # nicho slug -> subreddits. Espelha os slugs de frontend/src/lib/niches.ts.
-# Mainstream EN pelo volume de temas; o roteiro e gerado em pt-BR depois.
+# Subs pt-BR PRIMEIRO (o fetch para em ~15 itens, entao a ordem prioriza portugues);
+# os mainstream EN completam pelo volume e sao traduzidos na exibicao (title_pt).
 NICHE_SUBREDDITS: dict[str, list[str]] = {
-    "curiosidades": ["todayilearned", "interestingasfuck", "Damnthatsinteresting"],
-    "religioso": ["Christianity", "religion", "TrueChristian"],
+    "curiosidades": ["PergunteReddit", "todayilearned", "interestingasfuck", "Damnthatsinteresting"],
+    "religioso": ["Catolicismo", "Christianity", "religion", "TrueChristian"],
     "motivacional": ["GetMotivated", "selfimprovement", "decidingtobebetter"],
-    "financas": ["personalfinance", "Frugal", "financialindependence"],
-    "historias": ["stories", "tifu", "nosleep"],
-    "humor": ["funny", "ContagiousLaughter", "Whatcouldgowrong"],
+    "financas": ["investimentos", "personalfinance", "Frugal", "financialindependence"],
+    "historias": ["EuSouOBabaca", "desabafos", "stories", "tifu", "nosleep"],
+    "humor": ["DiretoDoZapZap", "funny", "ContagiousLaughter", "Whatcouldgowrong"],
     "drama": ["history", "HistoryMemes", "todayilearned"],
 }
 DEFAULT_SUBREDDITS = ["todayilearned", "interestingasfuck", "Damnthatsinteresting"]
+
+# Sabor de cada nicho p/ gerar temas prontos por IA (get_example_topics).
+NICHE_FLAVOR: dict[str, str] = {
+    "curiosidades": "fatos surpreendentes de ciencia, historia, natureza e corpo humano",
+    "religioso": "reflexoes e historias biblicas/de fe, tom respeitoso e acolhedor",
+    "motivacional": "superacao, disciplina, habitos e mentalidade, tom energetico",
+    "financas": "dinheiro no dia a dia, investimentos simples, erros comuns, tom pratico",
+    "historias": "historias reais dramaticas ou surpreendentes narradas em primeira pessoa",
+    "humor": "situacoes engracadas do cotidiano brasileiro, listas comicas",
+    "drama": "dramas historicos reais, segredos, tracoes e reviravoltas do passado",
+}
 
 _STOPWORDS = {
     # pt
@@ -91,6 +103,9 @@ class Trend:
     score: float
     url: str
     context: str = ""
+    # Traducao pt-BR do titulo (fontes EN); exibicao usa title_pt || title.
+    # O grounding do roteiro segue usando o title/context ORIGINAIS.
+    title_pt: str = ""
 
 
 # ---------- parsers puros (testaveis offline) ----------
@@ -269,6 +284,43 @@ def _cache_set(key: str, value: list[dict]) -> None:
         pass
 
 
+_TRANSLATE_SOURCES = {"reddit", "hackernews"}  # google_trends geo=BR ja vem em pt
+
+
+def _translate_titles(trends: list[Trend]) -> None:
+    """Preenche title_pt dos itens de fontes EN numa UNICA chamada LLM (batch).
+
+    Roda 1x por refresh do cache (4h) — custo desprezivel. Fail-open: qualquer
+    erro deixa title_pt vazio e o painel exibe o titulo original.
+    O prompt manda repetir titulos que ja estejam em portugues (subs BR).
+    """
+    targets = [t for t in trends if t.source in _TRANSLATE_SOURCES and not t.title_pt]
+    if not targets:
+        return
+    from app.services.llm import complete_text  # lazy: evita custo/ciclo no import
+
+    titles_json = json.dumps([t.title for t in targets], ensure_ascii=False)
+    prompt = (
+        "Traduza os títulos abaixo para português do Brasil, tom jornalístico natural, "
+        "mantendo nomes próprios. Se um título já estiver em português, repita-o como está. "
+        'Responda APENAS JSON no formato {"traducoes": ["...", ...]} na MESMA ordem e quantidade.\n'
+        f"Títulos: {titles_json}"
+    )
+    try:
+        raw = complete_text(prompt, max_tokens=4000)
+        translations = json.loads(raw).get("traducoes", [])
+        if len(translations) != len(targets):
+            logger.warning(
+                "trends: traducao voltou %d itens p/ %d titulos — ignorando", len(translations), len(targets)
+            )
+            return
+        for t, translated in zip(targets, translations):
+            if isinstance(translated, str) and translated.strip():
+                t.title_pt = translated.strip()
+    except Exception as e:  # noqa: BLE001 — traducao e cosmetica, nunca derruba o painel
+        logger.warning("trends: traducao de titulos falhou (segue em EN): %s", e)
+
+
 async def fetch_trends(niche: str | None = None, limit: int = 12) -> list[dict]:
     """Temas em alta. niche None -> feed amplo (reddit+HN+Google Trends BR);
     niche definido -> reddit dos subs daquele nicho. Sempre retorna lista (parcial em falha)."""
@@ -284,7 +336,55 @@ async def fetch_trends(niche: str | None = None, limit: int = 12) -> list[dict]:
             tasks += [_fetch_hn(client), _fetch_google_trends(client)]
         groups = await asyncio.gather(*tasks)
 
-    out = [asdict(t) for t in _rank(list(groups), limit)]
+    ranked = _rank(list(groups), limit)
+    # complete_text e sync (bloquearia o event loop do FastAPI) -> thread
+    await asyncio.to_thread(_translate_titles, ranked)
+
+    out = [asdict(t) for t in ranked]
     if out:  # nao cachear vazio: falha transiente nao deve congelar o painel por 4h
         _cache_set(cache_key, out)
     return out
+
+
+# ---------- temas prontos rotativos (gerados por IA, renovam por hora) ----------
+
+EXAMPLE_TOPICS_TTL = 60 * 60  # 1h — "temas prontos" renovam a cada hora
+
+
+def _generate_example_topics(niche: str) -> list[str]:
+    """8 temas prontos pt-BR no sabor do nicho, via LLM (sync — chamar em thread)."""
+    flavor = NICHE_FLAVOR.get(niche)
+    if not flavor:
+        return []
+    from app.services.llm import complete_text  # lazy
+
+    prompt = (
+        f"Gere 8 temas para vídeos curtos (Shorts/Reels/TikTok) em português do Brasil "
+        f"sobre o nicho: {flavor}. Cada tema deve ser um título pronto, específico e clicável "
+        f"(30-70 caracteres), variado entre si, sem numeração. "
+        'Responda APENAS JSON: {"topics": ["...", ...]}'
+    )
+    raw = complete_text(prompt, max_tokens=2000)
+    topics = json.loads(raw).get("topics", [])
+    return [t.strip() for t in topics if isinstance(t, str) and 10 <= len(t.strip()) <= 90][:8]
+
+
+async def get_example_topics(niche: str) -> list[str]:
+    """Temas prontos do nicho com cache de 1h. Lista vazia em falha/nicho
+    desconhecido — o frontend cai no fallback estático (niches.ts)."""
+    cache_key = f"example_topics:{niche}"
+    cached = _cache_get(cache_key)
+    if cached is not None:
+        return cached
+
+    try:
+        topics = await asyncio.to_thread(_generate_example_topics, niche)
+    except Exception as e:  # noqa: BLE001 — painel nunca quebra por falha de LLM
+        logger.warning("example topics: geracao falhou p/ %s: %s", niche, e)
+        return []
+    if topics:
+        try:
+            _redis.set(cache_key, json.dumps(topics, ensure_ascii=False), ex=EXAMPLE_TOPICS_TTL)
+        except Exception:  # noqa: BLE001
+            pass
+    return topics

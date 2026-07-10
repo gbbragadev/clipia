@@ -36,7 +36,7 @@ from app.pricing import get_generation_credit_cost
 from app.redis_pool import get_redis
 from app.services.llm import complete_text, strip_code_fences
 from app.services.remotion import scene_sort_key
-from app.services.trends import fetch_trends
+from app.services.trends import fetch_trends, get_example_topics
 from app.templates import get_template
 from app.utils.files import bytes_to_gb, path_size_bytes
 from app.utils.locks import get_lock
@@ -341,6 +341,27 @@ async def get_trends(
         logger.warning("fetch_trends falhou para nicho=%s: %s", nicho, e)
         trends = []
     return {"trends": trends}
+
+
+@router.get(
+    "/example-topics/{nicho}",
+    summary="Temas prontos do nicho",
+    description="8 temas prontos pt-BR gerados por IA, renovados a cada hora (cache).",
+    responses={200: {"description": "Lista de temas"}},
+)
+async def example_topics(
+    nicho: str,
+    user: User = Depends(get_current_user),
+):
+    """Temas rotativos por IA (cache 1h). Lista vazia em falha — o frontend usa o
+    fallback estático de niches.ts, então o painel NUNCA fica sem sugestão.
+    Autenticado: evita farming de LLM por anônimos."""
+    try:
+        topics = await get_example_topics(nicho)
+    except Exception as e:  # noqa: BLE001 — sugestões são best-effort
+        logger.warning("example_topics falhou para nicho=%s: %s", nicho, e)
+        topics = []
+    return {"topics": topics}
 
 
 @router.get(
