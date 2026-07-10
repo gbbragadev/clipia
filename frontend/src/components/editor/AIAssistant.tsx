@@ -5,6 +5,7 @@ import { useEditor } from '@/contexts/EditorContext'
 import { getToken } from '@/lib/auth'
 import { readApiError } from '@/lib/http'
 import { useToast } from '@/components/ui/feedback'
+import { CostChip } from './CostChip'
 
 const QUICK_PROMPTS = [
   { label: 'Melhorar gancho', prompt: 'Reescreva a cena 1 com um gancho mais forte e provocativo que prenda nos primeiros 3 segundos' },
@@ -34,6 +35,9 @@ export function AIAssistant() {
   const [loading, setLoading] = useState(false)
   const [appliedSuggestions, setAppliedSuggestions] = useState<Set<string>>(new Set())
   const [applyingKey, setApplyingKey] = useState<string | null>(null)
+  // Custo diferido do ai-suggest: cada consulta soma 0,5 crédito ao pending_credits
+  // do job (cobrado no próximo export). A API devolve o acumulado — exibimos ao vivo.
+  const [pendingCredits, setPendingCredits] = useState<number | null>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -65,6 +69,7 @@ export function AIAssistant() {
       })
       if (!res.ok) throw new Error(await readApiError(res, 'Erro ao consultar IA'))
       const data = await res.json()
+      if (typeof data.pending_credits === 'number') setPendingCredits(data.pending_credits)
       setMessages(prev => [...prev, {
         role: 'assistant',
         content: data.general_feedback || '',
@@ -143,6 +148,14 @@ export function AIAssistant() {
       height: '100%',
       gap: 12,
     }}>
+      {/* Custo ANTES da ação (DESIGN.md): consulta soma 0,5 crédito ao próximo export */}
+      <div style={{ padding: '0 2px' }}>
+        <CostChip>
+          0,5 crédito por consulta, somado ao próximo export
+          {pendingCredits != null ? ` · acumulado: ${pendingCredits.toLocaleString('pt-BR')}` : ''}
+        </CostChip>
+      </div>
+
       {/* Quick prompts */}
       <div style={{
         display: 'flex',
@@ -160,8 +173,8 @@ export function AIAssistant() {
               fontSize: 12,
               borderRadius: 16,
               border: '1px solid rgba(255,255,255,0.12)',
-              background: '#2A2A2A',
-              color: '#ccc',
+              background: 'var(--bg-surface)',
+              color: 'var(--text-secondary)',
               cursor: loading ? 'not-allowed' : 'pointer',
               opacity: loading ? 0.5 : 1,
               transition: 'all 0.15s',
@@ -196,7 +209,7 @@ export function AIAssistant() {
             padding: 20,
           }}>
             <span style={{ fontSize: 28 }}>&#10022;</span>
-            <span>Pergunte a IA como melhorar seu roteiro</span>
+            <span>Pergunte à IA como melhorar seu roteiro</span>
           </div>
         )}
 
@@ -225,8 +238,8 @@ export function AIAssistant() {
               lineHeight: 1.5,
               background: msg.role === 'user'
                 ? 'rgba(255,86,56,0.15)'
-                : '#2A2A2A',
-              color: '#E8E8E8',
+                : 'var(--bg-surface)',
+              color: 'var(--text-primary)',
               border: msg.role === 'user'
                 ? '1px solid rgba(255,86,56,0.25)'
                 : '1px solid rgba(255,255,255,0.06)',
@@ -253,7 +266,7 @@ export function AIAssistant() {
                         padding: 10,
                         borderRadius: 8,
                         border: '1px solid rgba(255,86,56,0.2)',
-                        background: '#252525',
+                        background: 'var(--bg-raised)',
                       }}
                     >
                       <div style={{
@@ -266,7 +279,7 @@ export function AIAssistant() {
                       </div>
                       <div style={{
                         fontSize: 12,
-                        color: '#E8E8E8',
+                        color: 'var(--text-primary)',
                         lineHeight: 1.5,
                         marginBottom: 6,
                       }}>
@@ -289,14 +302,14 @@ export function AIAssistant() {
                           fontWeight: 600,
                           borderRadius: 6,
                           border: 'none',
-                          background: applied ? '#10b981' : applying ? 'rgba(255,86,56,0.5)' : 'var(--color-coral)',
+                          background: applied ? 'var(--color-mint)' : applying ? 'rgba(255,86,56,0.5)' : 'var(--color-coral)',
                           color: '#fff',
                           cursor: applied || applying ? 'default' : 'pointer',
                           opacity: (applyingKey !== null && !applying) ? 0.5 : 1,
                           transition: 'all 0.15s',
                         }}
                       >
-                        {applied ? 'Aplicado' : applying ? 'Regerando narracao...' : 'Aplicar'}
+                        {applied ? 'Aplicado' : applying ? 'Regerando narração...' : 'Aplicar (regenera a narração)'}
                       </button>
                     </div>
                   )
@@ -352,7 +365,7 @@ export function AIAssistant() {
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={handleKeyDown}
-          placeholder="Peca melhorias no roteiro..."
+          placeholder="Peça melhorias no roteiro..."
           disabled={loading}
           rows={1}
           style={{
@@ -361,8 +374,8 @@ export function AIAssistant() {
             fontSize: 13,
             borderRadius: 8,
             border: '1px solid rgba(255,255,255,0.08)',
-            background: '#1A1A1A',
-            color: '#E8E8E8',
+            background: 'var(--bg-base)',
+            color: 'var(--text-primary)',
             resize: 'none',
             outline: 'none',
             fontFamily: 'inherit',
