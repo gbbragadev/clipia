@@ -1099,6 +1099,7 @@ def task_rerender_video(self, job_id: str) -> str:
     try:
         if _check_cancelled(job_id):
             return ""
+        rerender_t0 = time.monotonic()
         _update_job(job_id, "rendering", "preparing", 0.05, detail="Preparando arquivos para re-render...")
         job_dir = get_job_dir(job_id)
         from app.config import BASE_DIR, settings
@@ -1215,6 +1216,38 @@ def task_rerender_video(self, job_id: str) -> str:
         if final_src != output_path:
             Path(final_src).unlink(missing_ok=True)
         _write_thumbnail(final_path, str(output_dir / f"{job_id}.jpg"))
+
+        # Telemetria do export: os t:{step} do hash sao first-write-only (colidem com a
+        # geracao), entao o rerender mede a propria duracao e apenda em Job.telemetry
+        # para a aba Economia enxergar exports do editor.
+        try:
+            from sqlalchemy import select as sa_select
+            from sqlalchemy import update as sa_update
+
+            from app.db.engine import worker_session as async_session
+            from app.db.models import Job
+
+            duration = round(time.monotonic() - rerender_t0, 1)
+
+            async def _save_rerender_telemetry():
+                async with async_session() as session:
+                    result = await session.execute(sa_select(Job.telemetry).where(Job.id == job_id))
+                    tel = dict(result.scalar_one_or_none() or {})
+                    rerenders = list(tel.get("rerenders") or [])[-9:]  # ponytail: cap 10 exports por job
+                    rerenders.append(
+                        {
+                            "engine": settings.RENDER_ENGINE,
+                            "duration_seconds": duration,
+                            "at": datetime.now(timezone.utc).isoformat(),
+                        }
+                    )
+                    tel["rerenders"] = rerenders
+                    await session.execute(sa_update(Job).where(Job.id == job_id).values(telemetry=tel))
+                    await session.commit()
+
+            asyncio.run(_save_rerender_telemetry())
+        except Exception as tel_err:  # noqa: BLE001 — telemetria nunca falha o export
+            logger.warning("telemetria do rerender %s falhou: %s", job_id, tel_err)
 
         _update_job(job_id, "completed", None, 1.0, detail="Re-render concluido.")
         logger.info(f"Re-render completed for job {job_id}")

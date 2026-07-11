@@ -191,6 +191,8 @@ export interface AdminEconomyJob {
   steps: Record<string, number>
   api_cost_usd_est: number
   credit_cost: number
+  rerenders: number
+  rerender_seconds: number
 }
 
 export interface AdminEconomyTemplateAgg {

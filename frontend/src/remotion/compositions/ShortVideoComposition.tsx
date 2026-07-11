@@ -56,6 +56,21 @@ export const ShortVideoComposition: React.FC<CompositionData> = ({
   const { fps, width, height, durationInFrames } = useVideoConfig()
   const layout = (layoutType || 'fullscreen') as LayoutType
 
+  // Overlays do usuário: um único bloco usado nos 3 layouts — antes, os early
+  // returns de split_horizontal/character_overlay descartavam overlays no export.
+  const overlayElements = overlays?.map((overlay, i) => (
+    <Sequence
+      key={`overlay-${i}`}
+      from={overlay.startFrame}
+      durationInFrames={overlay.endFrame - overlay.startFrame}
+    >
+      {overlay.type === 'questionBox' && <QuestionBox config={overlay.config as { text?: string; label?: string }} />}
+      {overlay.type === 'followCTA' && <FollowCTA config={overlay.config as { text?: string }} />}
+      {overlay.type === 'endScreen' && <EndScreen config={overlay.config as { username?: string; text?: string }} />}
+      {overlay.type === 'progressBar' && <OverlayProgressBar />}
+    </Sequence>
+  ))
+
   // Split-screen layout: dark top + gameplay bottom
   if (layout === 'split_horizontal' && mediaUrls.length === 1) {
     const splitRatio = 0.55
@@ -74,6 +89,7 @@ export const ShortVideoComposition: React.FC<CompositionData> = ({
         </div>
         {audioUrl && <Html5Audio src={audioUrl} />}
         {musicUrl && <Html5Audio src={musicUrl} volume={musicVolume ?? 0.15} />}
+        {overlayElements}
         {watermark && <Watermark text={watermark} />}
       </AbsoluteFill>
     )
@@ -84,19 +100,24 @@ export const ShortVideoComposition: React.FC<CompositionData> = ({
     return (
       <AbsoluteFill style={{ backgroundColor: '#000' }}>
         <SceneClip mediaUrl={mediaUrls[0]} />
-        {/* Character placeholder (actual character is composited by FFmpeg) */}
-        <div style={{
-          position: 'absolute', bottom: 250, left: 40,
-          width: 350, height: 350, borderRadius: '50%',
-          background: 'rgba(108, 92, 231, 0.3)', border: '3px solid rgba(108, 92, 231, 0.5)',
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          fontSize: 14, color: '#aaa', textAlign: 'center',
-        }}>
-          Personagem
-        </div>
+        {/* Placeholder SÓ no preview: o personagem real é composto pelo FFmpeg na
+            geração inicial e o re-export Remotion não tem o asset — sem este gate,
+            o círculo "Personagem" ia parar no MP4 final. */}
+        {!isRendering && (
+          <div style={{
+            position: 'absolute', bottom: 250, left: 40,
+            width: 350, height: 350, borderRadius: '50%',
+            background: 'rgba(108, 92, 231, 0.3)', border: '3px solid rgba(108, 92, 231, 0.5)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            fontSize: 14, color: '#aaa', textAlign: 'center',
+          }}>
+            Personagem
+          </div>
+        )}
         {audioUrl && <Html5Audio src={audioUrl} />}
         {musicUrl && <Html5Audio src={musicUrl} volume={musicVolume ?? 0.15} />}
         {isRendering && <SubtitleOverlay words={words} style={subtitleStyle} />}
+        {overlayElements}
         {watermark && <Watermark text={watermark} />}
       </AbsoluteFill>
     )
@@ -165,18 +186,7 @@ export const ShortVideoComposition: React.FC<CompositionData> = ({
       {isRendering && <SubtitleOverlay words={words} style={subtitleStyle} />}
 
       {/* User-added overlays */}
-      {overlays?.map((overlay, i) => (
-        <Sequence
-          key={`overlay-${i}`}
-          from={overlay.startFrame}
-          durationInFrames={overlay.endFrame - overlay.startFrame}
-        >
-          {overlay.type === 'questionBox' && <QuestionBox config={overlay.config as { text?: string; label?: string }} />}
-          {overlay.type === 'followCTA' && <FollowCTA config={overlay.config as { text?: string }} />}
-          {overlay.type === 'endScreen' && <EndScreen config={overlay.config as { username?: string; text?: string }} />}
-          {overlay.type === 'progressBar' && <OverlayProgressBar />}
-        </Sequence>
-      ))}
+      {overlayElements}
 
       {watermark && <Watermark text={watermark} />}
     </AbsoluteFill>

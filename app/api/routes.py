@@ -1394,6 +1394,7 @@ async def admin_economy(
     for j in jobs:
         tel = j.telemetry or {}
         cost = float(tel.get("api_cost_usd_est") or 0.0)
+        rerenders = tel.get("rerenders") or []
         items.append(
             {
                 "job_id": str(j.id),
@@ -1404,6 +1405,8 @@ async def admin_economy(
                 "steps": tel.get("steps") or {},
                 "api_cost_usd_est": cost,
                 "credit_cost": j.credit_cost,
+                "rerenders": len(rerenders),
+                "rerender_seconds": round(sum(float(r.get("duration_seconds") or 0.0) for r in rerenders), 1),
             }
         )
         agg = by_template.setdefault(
