@@ -43,21 +43,23 @@ O ClipIA **já tem toda a maquinaria** (Remotion, FFmpeg, legenda word-level, SF
 
 ### P0 — Quick wins (esforço S, impacto alto) — dias 1-2
 
-| # | Gap | Mudança concreta | Arquivo | Imp |
-|---|---|---|---|---|
-| 1 | Legenda destaca em **amarelo** `#FFFC00` (não coral) | `accent_color` default → `#F05340` | `subtitles.py:55/67` | 🔴 |
-| 2 | Texto do outro branco, não coral | `fontcolor=white` → coral/outline | `outro.py:90` | 🟡 |
-| 3 | **Música quase inaudível** (0.12 ≈ 4,6× baixo) | `AUTO_MUSIC_VOLUME 0.12 → 0.45` | `config.py:79` | 🔴 |
-| 4 | Sample rate heterogêneo (24k/44k/48k) = artefato | `aresample=48000` antes de cada `[N:a]` | `compositor.py:319,385,606-607` | 🟡 |
-| 5 | **Vinheta some no export Remotion** | `append_outro(final_path)` antes do copy | `tasks.py:~969` | 🔴 |
-| 6 | Overlays CTA existem mas nunca invocados | passar `overlays=script.get('overlays',[])` a `compose_short()` | `tasks.py:776-790`, `routes.py` | 🟡 |
+> **Atualizado 2026-07-11 (verificação com evidência no código):** os 6 P0 já estão implementados. O trabalho aberto de áudio é o P1 (ducking, loudnorm).
+
+| # | Gap | Mudança concreta | Arquivo | Imp | Status |
+|---|---|---|---|---|---|
+| 1 | Legenda destaca em **amarelo** `#FFFC00` (não coral) | `accent_color` default → `#F05340` | `subtitles.py:55/67` | 🔴 | ✅ FEITO |
+| 2 | Texto do outro branco, não coral | `fontcolor=white` → coral/outline | `outro.py:90` | 🟡 | ✅ FEITO |
+| 3 | **Música quase inaudível** (0.12 ≈ 4,6× baixo) | `AUTO_MUSIC_VOLUME 0.12 → 0.30` (escolhido 0.30, não 0.45 — "audível" sem competir com a voz enquanto não há ducking) | `config.py:79` | 🔴 | ✅ FEITO |
+| 4 | Sample rate heterogêneo (24k/44k/48k) = artefato | `aresample=48000` antes de cada `[N:a]` — presente nos 3 caminhos de áudio | `compositor.py:328,392,613` | 🟡 | ✅ FEITO |
+| 5 | **Vinheta some no export Remotion** | `append_outro()` na geração (`tasks.py:1042`) E no rerender (`tasks.py:1225`) | `tasks.py` | 🔴 | ✅ FEITO |
+| 6 | Overlays CTA existem mas nunca invocados | rerender passa `overlays=comp_data.get("overlays")` (`tasks.py:1217` → `compositor.py:578`). Geração inicial não passa — overlays são artefato do editor, verificar se precisa | `tasks.py`, `compositor.py` | 🟡 | ✅ FEITO (export) |
 
 ### P1 — Esforço médio, impacto alto — dias 3-7
 
 | # | Gap | Mudança concreta | Arquivo | Imp |
 |---|---|---|---|---|
-| 7 | **Sem ducking** — música compete com a voz | `sidechaincompress=threshold=0.035:ratio=7:attack=25:release=420` (split VO, duckar música sob voz) | `compositor.py:319,385,606-607` | 🔴 |
-| 8 | Loudness flutuante | `loudnorm=I=-14:TP=-1.5:LRA=11` no bus final | `compositor.py:~631` | 🟡 |
+| 7 | ~~**Sem ducking**~~ ✅ FEITO 11/07 — `_audio_mix_filter()` compartilhado pelos 3 layouts; medido −7,2dB na música sob a voz (encode real) | `sidechaincompress=threshold=0.035:ratio=7:attack=25:release=420` | `compositor.py` (helper único) | 🔴 |
+| 8 | ~~Loudness flutuante~~ ✅ FEITO 11/07 — `loudnorm` no bus final de TODOS os caminhos (com e sem música); medido −13,6 LUFS (encode real) | `loudnorm=I=-14:TP=-1.5:LRA=11` + aresample 48k pós-loudnorm | `compositor.py` (`_LOUDNORM_AF`) | 🟡 |
 | 9 | Vídeos Pexels sem drift (Ken Burns só em imagem) | `zoompan` em `_prepare_video_scene`, campo `zoom_drift` (0.03) | `compositor.py:92-119`, `templates.py` | 🟡 |
 | 10 | Imagens/screenshots full-cover (crop) vs card | novo `_prepare_card_scene` (gblur 42 + eq + fg centrado + drift) — ref `marketing/concept3-anatomia/compose.py:74-90` | `compositor.py:161-167` | 🟡 |
 | 11 | Legenda cobre money-shot | `suppress_windows` (pular chunks numa janela) | `subtitles.py:43-122`, `tasks.py:769-778` | 🟡 |

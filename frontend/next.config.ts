@@ -33,7 +33,9 @@ const nextConfig: NextConfig = {
     ];
   },
   async rewrites() {
-    const apiUrl = process.env.LOCAL_API_URL || process.env.NEXT_PUBLIC_API_URL || "http://localhost:8005";
+    // 127.0.0.1 (não localhost): o uvicorn escuta só IPv4 e o resolver desta máquina
+    // às vezes tenta ::1 primeiro → 500 intermitente no proxy (visto no audit 11/07).
+    const apiUrl = process.env.LOCAL_API_URL || process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8005";
     return [
       {
         source: "/api/:path*",

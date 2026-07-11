@@ -120,12 +120,13 @@ export function CaptionStylePicker() {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
       <div className="editor-section-header">Estilo de legenda</div>
+      {/* wrap (não scroll invisível): com overflowX + scrollbar oculta, o preset
+          ATIVO podia ficar fora da viewport do painel sem nenhuma pista visual. */}
       <div
         style={{
           display: 'flex',
           gap: 8,
-          overflowX: 'auto',
-          scrollbarWidth: 'none',
+          flexWrap: 'wrap',
           paddingBottom: 4,
         }}
       >

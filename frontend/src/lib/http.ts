@@ -50,7 +50,7 @@ export function normalizeNetworkError(error: unknown): Error {
   if (error instanceof Error) {
     return error
   }
-  return new Error('Sem conexao. Verifique sua internet e tente novamente.')
+  return new Error('Sem conexão. Verifique sua internet e tente novamente.')
 }
 
 export function isNetworkError(error: unknown): boolean {
@@ -61,7 +61,7 @@ export function isNetworkError(error: unknown): boolean {
 export async function fetchJson<T>(
   input: RequestInfo | URL,
   init: RequestInit = {},
-  fallbackMessage = 'Erro na requisicao',
+  fallbackMessage = 'Erro na requisição',
 ): Promise<T> {
   try {
     const response = await fetch(input, {
@@ -79,10 +79,12 @@ export async function fetchJson<T>(
       throw new Error(await readApiError(response, fallbackMessage))
     }
 
-    return response.json() as Promise<T>
+    // await dentro do try: sem ele, um corpo 200 com JSON invalido rejeitaria FORA
+    // do catch e chegaria cru ao caller (SyntaxError em vez de mensagem amigavel).
+    return (await response.json()) as T
   } catch (error) {
     if (error instanceof TypeError) {
-      throw new Error('Sem conexao. Verifique sua internet e tente novamente.')
+      throw new Error('Sem conexão. Verifique sua internet e tente novamente.')
     }
     throw normalizeNetworkError(error)
   }

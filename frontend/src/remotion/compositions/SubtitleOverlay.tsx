@@ -78,8 +78,11 @@ const MinimalCaptions: React.FC<{
     <AbsoluteFill
       style={{
         display: 'flex',
-        alignItems: style.position === 'bottom' ? 'flex-end' : 'center',
-        justifyContent: 'center',
+        // AbsoluteFill é flexDirection: column — justifyContent controla o eixo
+        // VERTICAL e alignItems o HORIZONTAL. Com os papéis invertidos, "bottom"
+        // renderizava a legenda no meio-direita do export (bug pego pela matriz E2E).
+        justifyContent: style.position === 'bottom' ? 'flex-end' : 'center',
+        alignItems: 'center',
         paddingBottom: style.position === 'bottom' ? style.marginBottom : 0,
       }}
     >
@@ -144,8 +147,11 @@ const KaraokeCaptions: React.FC<{
     <AbsoluteFill
       style={{
         display: 'flex',
-        alignItems: style.position === 'bottom' ? 'flex-end' : 'center',
-        justifyContent: 'center',
+        // AbsoluteFill é flexDirection: column — justifyContent controla o eixo
+        // VERTICAL e alignItems o HORIZONTAL. Com os papéis invertidos, "bottom"
+        // renderizava a legenda no meio-direita do export (bug pego pela matriz E2E).
+        justifyContent: style.position === 'bottom' ? 'flex-end' : 'center',
+        alignItems: 'center',
         paddingBottom: style.position === 'bottom' ? style.marginBottom : 0,
       }}
     >
@@ -158,6 +164,10 @@ const KaraokeCaptions: React.FC<{
               ? Math.min(1, (currentTime - word.start) / (word.end - word.start))
               : isPast ? 1 : 0
 
+            // Cor sólida por palavra: background-clip:text NÃO é suportado pelo
+            // compositor de vídeo do Remotion (renderMedia) — o gradiente virava
+            // uma CAIXA atrás do texto no MP4 (só o still renderizava certo).
+            void progress
             return (
               <span
                 key={`${chunkIdx}-${i}`}
@@ -170,11 +180,9 @@ const KaraokeCaptions: React.FC<{
                   lineHeight: 1.3,
                   WebkitTextStroke: style.strokeWidth > 0 ? `${style.strokeWidth}px ${style.outlineColor}` : undefined,
                   paintOrder: style.strokeWidth > 0 ? 'stroke fill' : undefined,
-                  background: `linear-gradient(90deg, ${style.accentColor} ${progress * 100}%, ${style.color} ${progress * 100}%)`,
-                  WebkitBackgroundClip: 'text',
-                  WebkitTextFillColor: 'transparent',
+                  color: isActive || isPast ? style.accentColor : style.color,
+                  opacity: isActive || isPast ? 1 : 0.55,
                   textShadow: isActive ? `0 0 20px ${style.accentColor}66` : `0 2px 8px ${style.outlineColor}`,
-                  filter: isActive ? undefined : isPast ? undefined : 'opacity(0.5)',
                 }}
               >
                 {word.word}
@@ -223,8 +231,11 @@ const BoxedCaptions: React.FC<{
     <AbsoluteFill
       style={{
         display: 'flex',
-        alignItems: style.position === 'bottom' ? 'flex-end' : 'center',
-        justifyContent: 'center',
+        // AbsoluteFill é flexDirection: column — justifyContent controla o eixo
+        // VERTICAL e alignItems o HORIZONTAL. Com os papéis invertidos, "bottom"
+        // renderizava a legenda no meio-direita do export (bug pego pela matriz E2E).
+        justifyContent: style.position === 'bottom' ? 'flex-end' : 'center',
+        alignItems: 'center',
         paddingBottom: style.position === 'bottom' ? style.marginBottom : 0,
       }}
     >
@@ -304,8 +315,11 @@ const ChunkCaptions: React.FC<{
     <AbsoluteFill
       style={{
         display: 'flex',
-        alignItems: style.position === 'bottom' ? 'flex-end' : 'center',
-        justifyContent: 'center',
+        // AbsoluteFill é flexDirection: column — justifyContent controla o eixo
+        // VERTICAL e alignItems o HORIZONTAL. Com os papéis invertidos, "bottom"
+        // renderizava a legenda no meio-direita do export (bug pego pela matriz E2E).
+        justifyContent: style.position === 'bottom' ? 'flex-end' : 'center',
+        alignItems: 'center',
         paddingBottom: style.position === 'bottom' ? style.marginBottom : 0,
       }}
     >

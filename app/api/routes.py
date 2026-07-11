@@ -3,6 +3,7 @@ import json
 import logging
 import math
 import shutil
+import time
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -145,11 +146,13 @@ def _ensure_storage_ready() -> None:
         raise HTTPException(status_code=503, detail=ErrorMessages.DISK_FULL)
 
 
-async def _debit_credits(db: AsyncSession, user_id, cost: int) -> None:
+async def _debit_credits(db: AsyncSession, user_id, cost: int, commit: bool = True) -> None:
     """Debito atomico de creditos (mesmo padrao da rota /generate).
 
     Faz UPDATE ... WHERE credits >= cost (sem read-modify-write) para evitar race/saldo negativo.
     Levanta 402 se nao houver saldo, 403 se o email nao estiver verificado. No-op se cost <= 0.
+    commit=False deixa o caller commitar junto com as proprias mudancas (debito + estado do job
+    na MESMA transacao — um erro no meio nao deixa credito cobrado sem o efeito aplicado).
     """
     if cost <= 0:
         return
@@ -165,7 +168,8 @@ async def _debit_credits(db: AsyncSession, user_id, cost: int) -> None:
         if not fresh.email_verified:
             raise HTTPException(status_code=403, detail=ErrorMessages.EMAIL_NOT_VERIFIED)
         raise HTTPException(status_code=402, detail=ErrorMessages.INSUFFICIENT_CREDITS)
-    await db.commit()
+    if commit:
+        await db.commit()
     record_credit_metric("debit", cost)
 
 
@@ -618,6 +622,10 @@ async def list_templates():
 # ── Voice endpoints ───────────────────────────────────────────
 
 
+# Cache do catálogo ElevenLabs (compartilhado entre users; clones ficam fora, por-user)
+_el_voices_cache: dict = {"at": 0.0, "voices": []}
+
+
 @router.get(
     "/voices",
     summary="List voices",
@@ -633,16 +641,25 @@ async def list_voices(
 
     voices = [v.__dict__ for v in EDGE_VOICES]
 
-    # ElevenLabs voices (if API key configured)
+    # ElevenLabs voices (if API key configured) — cache 10min: o catálogo muda raramente
+    # e a chamada remota a cada request segurava a aba Voz no "Carregando vozes...".
     if settings.ELEVENLABS_API_KEY:
-        try:
-            from app.services.elevenlabs_provider import ElevenLabsProvider
+        now = time.monotonic()
+        if _el_voices_cache["voices"] and now - _el_voices_cache["at"] < 600:
+            voices.extend(_el_voices_cache["voices"])
+        else:
+            try:
+                from app.services.elevenlabs_provider import ElevenLabsProvider
 
-            provider = ElevenLabsProvider()
-            el_voices = await provider.list_voices()
-            voices.extend(v.__dict__ for v in el_voices)
-        except Exception as e:
-            logger.warning(f"Failed to fetch ElevenLabs voices: {e}")
+                provider = ElevenLabsProvider()
+                el_voices = await provider.list_voices()
+                fetched = [v.__dict__ for v in el_voices]
+                _el_voices_cache.update(at=now, voices=fetched)
+                voices.extend(fetched)
+            except Exception as e:
+                logger.warning(f"Failed to fetch ElevenLabs voices: {e}")
+                # Stale-if-error: catálogo velho é melhor que aba vazia.
+                voices.extend(_el_voices_cache["voices"])
 
     # User's cloned voices from DB
     result = await db.execute(select(VoiceClone).where(VoiceClone.user_id == user.id))
@@ -1066,6 +1083,7 @@ async def regenerate_tts(
     words_path = job_dir / "words.json"
     old_words = json.loads(words_path.read_text(encoding="utf-8")) if words_path.exists() else []
     words = []
+    words_stale = False  # True = legendas podem estar dessincronizadas com o audio novo
     try:
         from app.services.transcriber import transcribe_with_timestamps
 
@@ -1074,6 +1092,12 @@ async def regenerate_tts(
     except Exception as e:
         logger.warning(f"Whisper transcription failed, keeping old timestamps: {e}")
         words = old_words
+        words_stale = True
+
+    if not words and old_words:
+        # Transcricao "bem-sucedida" mas vazia: manter as antigas e ser honesto sobre o stale.
+        words = old_words
+        words_stale = True
 
     # Save updated words
     if words:
@@ -1082,6 +1106,7 @@ async def regenerate_tts(
     return {
         "audio_url": sign_media_url(f"/storage/jobs/{job_id}/narration.wav"),
         "words": words,
+        "words_stale": words_stale,
     }
 
 
@@ -1132,6 +1157,14 @@ Regras:
     # asyncio.to_thread: complete_text usa o cliente OpenRouter SINCRONO (15-40s). Rodar direto no
     # handler async travaria o event loop inteiro -> Cloudflare estoura ~100s -> 502 em TODA requisicao
     # em voo (inclusive o polling de geracao). Em thread separada o loop fica livre.
+    # SETNX+TTL: a chamada roda 15-40s FORA de lock — dois requests paralelos do mesmo job
+    # duplicariam o custo de API. TTL 90s destrava sozinho se o processo morrer no meio.
+    inflight_key = f"ai_suggest:{job.id}:inflight"
+    if not _redis.set(inflight_key, "1", nx=True, ex=90):
+        raise HTTPException(
+            status_code=429,
+            detail="Já existe uma sugestão de IA em andamento para este vídeo. Aguarde ela terminar.",
+        )
     try:
         raw = await asyncio.to_thread(complete_text, prompt)
     except Exception as e:  # noqa: BLE001
@@ -1140,6 +1173,8 @@ Regras:
             status_code=502,
             detail="A IA está indisponível no momento. Tente novamente em instantes.",
         )
+    finally:
+        _redis.delete(inflight_key)
     raw = strip_code_fences(raw)
 
     try:
@@ -1179,7 +1214,9 @@ async def render_video(
         await db.refresh(job)
         cost = math.ceil(job.pending_credits or 0.0)
         if cost > 0:
-            await _debit_credits(db, user.id, cost)  # atomico: 402 se sem saldo, sem read-modify-write
+            # commit=False: debito e pending_credits=0 na MESMA transacao (erro no meio nao
+            # deixa credito cobrado com pending ainda acumulado, nem o inverso).
+            await _debit_credits(db, user.id, cost, commit=False)
             job.pending_credits = 0.0
             await db.commit()
 
@@ -1200,6 +1237,9 @@ async def render_video(
             "progress": 0.0,
             "current_step": "queued",
             "detail": "Re-render enfileirado...",
+            # o worker le isto p/ devolver o valor EXATO se o re-render falhar
+            # (credit_cost do job e o custo da geracao, nao do export)
+            "rerender_cost": cost,
         },
     )
     try:
@@ -1211,7 +1251,11 @@ async def render_video(
             await db.commit()
         _redis.hset(
             f"job:{job_id}",
-            mapping={"status": "completed", "detail": "Re-render nao pode ser enfileirado; credito estornado."},
+            mapping={
+                "status": "completed",
+                "detail": "Re-render nao pode ser enfileirado; credito estornado.",
+                "rerender_cost": 0,
+            },
         )
         logger.error("task_rerender_video.delay falhou job=%s: %s — credito estornado", job_id, e)
         raise HTTPException(
@@ -1239,7 +1283,9 @@ async def reset_job(
     """Reset job to original state. Costs 1 credit, clears pending_credits."""
     job = await get_owned_job(db, user, job_id)
     async with get_lock(f"reset:{job_id}"):
-        await _debit_credits(db, user.id, 1)  # atomico: 402 se sem saldo, sem read-modify-write
+        # commit=False: debito + reset do job na MESMA transacao (erro entre eles nao
+        # deixa o credito cobrado com o editor_state intacto).
+        await _debit_credits(db, user.id, 1, commit=False)
         job.pending_credits = 0.0
         job.editor_state = None
         await db.commit()
@@ -1321,30 +1367,53 @@ async def list_jobs(
             q = await db.execute(
                 select(Job.id, Job.created_at).where(Job.status == "queued").order_by(Job.created_at).limit(200)
             )
+            rows = q.all()
+
+            def _live_statuses() -> dict:
+                return {str(jid): _redis.hgetall(f"job:{jid}") for jid, _ in rows}
+
+            live_map = await asyncio.to_thread(_live_statuses)  # ate 200 hgetall fora do event loop
             live_queue = []
-            for jid, jcreated in q.all():
-                live = _redis.hgetall(f"job:{jid}")
+            for jid, jcreated in rows:
+                live = live_map.get(str(jid))
                 live_status = live.get("status") if live else None
                 # sem hash = ainda nem comecou (na fila); ativos seguem na conta
                 if live_status in (None, "", "queued", "processing", "rendering"):
                     live_queue.append(jcreated)
         return sum(1 for other in live_queue if other and other < created_at)
 
+    def _collect_live_sync() -> dict[str, dict]:
+        # Redis sync + ate 3 stat() por job rodavam soltos no handler async, bloqueando
+        # o event loop ~50-150ms a cada poll do dashboard. Uma passada em thread coleta tudo.
+        output_dir = Path(settings.STORAGE_DIR) / "output"
+        jobs_dir = Path(settings.STORAGE_DIR) / "jobs"
+        collected: dict[str, dict] = {}
+        for j in jobs:
+            jid = str(j.id)
+            collected[jid] = {
+                "redis": _redis.hgetall(f"job:{jid}"),
+                "has_video": bool(j.video_url) or (output_dir / f"{jid}.mp4").exists(),
+                "has_script": (jobs_dir / jid / "script.json").exists(),
+                "has_thumb": (output_dir / f"{jid}.jpg").exists(),
+            }
+        return collected
+
+    live_by_job = await asyncio.to_thread(_collect_live_sync)
+
     items = []
     for j in jobs:
+        live = live_by_job[str(j.id)]
         # Redis has the real-time status; DB may be stale
-        redis_data = _redis.hgetall(f"job:{j.id}")
+        redis_data = live["redis"]
         status = redis_data.get("status", j.status) if redis_data else j.status
-        has_video = j.video_url or (Path(settings.STORAGE_DIR) / "output" / f"{j.id}.mp4").exists()
+        has_video = live["has_video"]
         # Em estado ativo o arquivo em output/ pode ser a versao ANTIGA (re-render em
         # andamento): esconder o download fecha pelo dashboard a mesma corrida que o
         # editor fecha via get_job (baixar video pre-edicao).
         downloadable = has_video and status not in {"queued", "processing", "rendering", "cancelling"}
         # Treat completed jobs as editable if they have composition files
-        if status == "completed":
-            job_dir = Path(settings.STORAGE_DIR) / "jobs" / str(j.id)
-            if (job_dir / "script.json").exists():
-                status = "editable"
+        if status == "completed" and live["has_script"]:
+            status = "editable"
         items.append(
             {
                 "job_id": str(j.id),
@@ -1355,11 +1424,7 @@ async def list_jobs(
                 "created_at": j.created_at.isoformat() if j.created_at else None,
                 "download_url": f"/api/v1/jobs/{j.id}/download" if downloadable else None,
                 # Poster do card (gerado no finalize; ausente em jobs antigos -> fallback no front)
-                "thumbnail_url": (
-                    f"/api/v1/jobs/{j.id}/thumbnail"
-                    if (Path(settings.STORAGE_DIR) / "output" / f"{j.id}.jpg").exists()
-                    else None
-                ),
+                "thumbnail_url": (f"/api/v1/jobs/{j.id}/thumbnail" if live["has_thumb"] else None),
                 # Progresso em tempo real p/ a grid reativa (o hash do Redis ja esta em maos).
                 "progress": float(redis_data.get("progress") or 0) if redis_data else 0.0,
                 "current_step": (redis_data.get("current_step") or None) if redis_data else None,
@@ -1394,6 +1459,7 @@ async def admin_economy(
     for j in jobs:
         tel = j.telemetry or {}
         cost = float(tel.get("api_cost_usd_est") or 0.0)
+        rerenders = tel.get("rerenders") or []
         items.append(
             {
                 "job_id": str(j.id),
@@ -1404,6 +1470,8 @@ async def admin_economy(
                 "steps": tel.get("steps") or {},
                 "api_cost_usd_est": cost,
                 "credit_cost": j.credit_cost,
+                "rerenders": len(rerenders),
+                "rerender_seconds": round(sum(float(r.get("duration_seconds") or 0.0) for r in rerenders), 1),
             }
         )
         agg = by_template.setdefault(

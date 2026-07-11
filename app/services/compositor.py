@@ -80,15 +80,21 @@ def _get_duration(path: str) -> float:
     return float(data["format"]["duration"])
 
 
+_NVENC_AVAILABLE: bool | None = None
+
+
 def _has_nvenc() -> bool:
-    """Check if NVENC encoder is available."""
-    result = subprocess.run(
-        ["ffmpeg", "-hide_banner", "-encoders"],
-        capture_output=True,
-        text=True,
-        timeout=5,
-    )
-    return "h264_nvenc" in result.stdout
+    """Check if NVENC encoder is available (cacheado: nao muda durante o processo)."""
+    global _NVENC_AVAILABLE
+    if _NVENC_AVAILABLE is None:
+        result = subprocess.run(
+            ["ffmpeg", "-hide_banner", "-encoders"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        _NVENC_AVAILABLE = "h264_nvenc" in result.stdout
+    return _NVENC_AVAILABLE
 
 
 def _prepare_video_scene(media_path: str, duration: float, output_path: str) -> str:
@@ -184,6 +190,26 @@ def _watermark_filter() -> str:
     text = settings.WATERMARK_TEXT.replace("'", "'\\''")
     font = _get_drawtext_font()
     return f"drawtext=text='{text}':fontfile={font}" f":fontsize=22:fontcolor=white@0.5:x=w-text_w-30:y=h-50"
+
+
+# loudnorm sobe o stream para 192kHz internamente; o aresample final devolve 48kHz.
+_LOUDNORM_AF = "aresample=48000,loudnorm=I=-14:TP=-1.5:LRA=11,aresample=48000"
+
+
+def _audio_mix_filter(narr_input: int, music_input: int, music_volume: float) -> str:
+    """Mix narracao+musica com ducking e loudness broadcast (-14 LUFS).
+
+    A musica passa por sidechaincompress guiado pela narracao (abaixa sob a voz,
+    volta nas pausas) e o bus final por loudnorm single-pass, entregando volume
+    consistente entre videos. Compartilhado pelos 3 layouts (padrao, split,
+    character) para o polish de audio ser identico em todos.
+    """
+    return (
+        f"[{narr_input}:a]aresample=48000,volume=1.0,asplit=2[narr][sc];"
+        f"[{music_input}:a]aresample=48000,volume={music_volume}[mus];"
+        f"[mus][sc]sidechaincompress=threshold=0.035:ratio=7:attack=25:release=420[ducked];"
+        f"[narr][ducked]amix=inputs=2:duration=first,{_LOUDNORM_AF}[aout]"
+    )
 
 
 def _build_overlay_filters(overlays: list[dict], fps: int = 30) -> str:
@@ -325,10 +351,10 @@ def _compose_split_screen(
 
     if music_path and Path(music_path).exists():
         inputs += ["-stream_loop", "-1", "-i", music_path]
-        filter_complex += f";[1:a]aresample=48000,volume=1.0[narr];[2:a]aresample=48000,volume={music_volume}[mus];[narr][mus]amix=inputs=2:duration=first[aout]"
+        filter_complex += ";" + _audio_mix_filter(1, 2, music_volume)
         maps_and_audio += ["-map", "[aout]"]
     else:
-        maps_and_audio += ["-map", "1:a"]
+        maps_and_audio += ["-map", "1:a", "-af", _LOUDNORM_AF]
 
     cmd = [
         "ffmpeg",
@@ -389,10 +415,10 @@ def _compose_character_overlay(
 
     if music_path and Path(music_path).exists():
         inputs += ["-stream_loop", "-1", "-i", music_path]
-        filter_complex += f";[2:a]aresample=48000,volume=1.0[narr];[3:a]aresample=48000,volume={music_volume}[mus];[narr][mus]amix=inputs=2:duration=first[aout]"
+        filter_complex += ";" + _audio_mix_filter(2, 3, music_volume)
         maps_and_audio += ["-map", "[aout]"]
     else:
-        maps_and_audio += ["-map", "2:a"]
+        maps_and_audio += ["-map", "2:a", "-af", _LOUDNORM_AF]
 
     cmd = [
         "ffmpeg",
@@ -518,6 +544,15 @@ def compose_short(
     logger.info(f"Audio: {audio_duration:.1f}s, scenes: {scene_durations}")
 
     # 2. Prepare each scene clip (resize + duration)
+    if media_paths and len(media_paths) < len(scenes):
+        # fetch_media pula downloads que falham: sem isto o video saia TRUNCADO em
+        # silencio (concat curto + -shortest corta a narracao antes do fim).
+        logger.warning(
+            "compose_short: %d cenas mas %d midias — reutilizando a ultima midia nas cenas restantes",
+            len(scenes),
+            len(media_paths),
+        )
+        media_paths = list(media_paths) + [media_paths[-1]] * (len(scenes) - len(media_paths))
     prepared = []
     for i, (scene, dur) in enumerate(zip(scenes, scene_durations)):
         if i >= len(media_paths):
@@ -610,7 +645,7 @@ def compose_short(
                 "-i",
                 music_path,
                 "-filter_complex",
-                f"[1:a]aresample=48000,volume=1.0[narr];[2:a]aresample=48000,volume={music_volume}[mus];[narr][mus]amix=inputs=2:duration=first[aout]",
+                _audio_mix_filter(1, 2, music_volume),
                 "-map",
                 "0:v",
                 "-map",
@@ -646,6 +681,8 @@ def compose_short(
                 audio_path,
                 "-vf",
                 vf_chain,
+                "-af",
+                _LOUDNORM_AF,
                 "-c:v",
                 encoder,
                 *encoder_opts,

@@ -78,7 +78,7 @@ interface PhonePreviewProps {
 
 export function PhonePreview({
   image,
-  alt,
+  alt = "Prévia de vídeo vertical no formato Shorts gerado pelo ClipIA",
   background,
   words,
   activeIndex,

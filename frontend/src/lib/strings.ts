@@ -7,7 +7,7 @@ export const strings = {
       password: "Senha",
       submit: "Entrar",
       loading: "Entrando...",
-      noAccount: "Nao tem conta?",
+      noAccount: "Não tem conta?",
       register: "Criar conta",
       forgotPassword: "Esqueci minha senha",
       error: "Email ou senha incorretos",
@@ -81,8 +81,8 @@ export const strings = {
   // Errors
   errors: {
     generic: "Algo deu errado. Tente novamente.",
-    network: "Sem conexao com o servidor.",
-    sessionExpired: "Sua sessao expirou. Faca login novamente.",
+    network: "Sem conexão com o servidor.",
+    sessionExpired: "Sua sessão expirou. Faça login novamente.",
     rateLimit: "Muitas tentativas. Aguarde um momento.",
   },
 

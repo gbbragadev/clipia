@@ -50,8 +50,9 @@ export const ImpactCaptions: React.FC<{
     <AbsoluteFill
       style={{
         display: 'flex',
-        alignItems: style.position === 'bottom' ? 'flex-end' : 'center',
-        justifyContent: 'center',
+        // AbsoluteFill é column: justifyContent = vertical, alignItems = horizontal.
+        justifyContent: style.position === 'bottom' ? 'flex-end' : 'center',
+        alignItems: 'center',
         paddingBottom: style.position === 'bottom' ? style.marginBottom : 0,
       }}
     >

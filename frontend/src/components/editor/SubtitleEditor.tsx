@@ -26,7 +26,7 @@ const COLOR_PRESETS = [
 const BG_PRESETS = [
   { label: 'Escuro', value: 'rgba(0, 0, 0, 0.6)' },
   { label: 'Mais escuro', value: 'rgba(0, 0, 0, 0.85)' },
-  { label: 'Roxo', value: 'rgba(124, 58, 237, 0.5)' },
+  { label: 'Coral', value: 'rgba(255, 86, 56, 0.45)' },
   { label: 'Sem fundo', value: 'transparent' },
 ]
 
@@ -117,7 +117,7 @@ export function SubtitleEditor() {
 
       {/* Position */}
       <div>
-        <div className="editor-section-header">Posicao</div>
+        <div className="editor-section-header">Posição</div>
         <div style={{ display: 'flex', gap: 6 }}>
           {(['bottom', 'center'] as const).map((pos) => (
             <button
@@ -138,7 +138,7 @@ export function SubtitleEditor() {
 
       {/* Animation */}
       <div>
-        <div className="editor-section-header">Animacao</div>
+        <div className="editor-section-header">Animação</div>
         <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
           {ANIMATION_OPTIONS.map((opt) => (
             <button

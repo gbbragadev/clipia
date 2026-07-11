@@ -90,7 +90,8 @@ class Job(Base):
     style: Mapped[str] = mapped_column(String(50), nullable=False)
     duration_target: Mapped[int] = mapped_column(Integer, nullable=False)
     template_id: Mapped[str] = mapped_column(String(50), default="stock_narration")
-    status: Mapped[str] = mapped_column(String(50), default="queued")
+    # index: fila (WHERE status='queued' em _queue_ahead_of) e agregacoes do admin
+    status: Mapped[str] = mapped_column(String(50), default="queued", index=True)
     progress: Mapped[float] = mapped_column(Float, default=0.0)
     current_step: Mapped[str | None] = mapped_column(String(50), nullable=True)
     error: Mapped[str | None] = mapped_column(Text, nullable=True)

@@ -102,7 +102,7 @@ export async function fetchAdminDashboard(range: AdminRange): Promise<AdminDashb
   return fetchJson<AdminDashboardResponse>(
     `${API_BASE}/api/v1/admin/dashboard?range=${range}`,
     { headers: authHeaders() },
-    'Nao foi possivel carregar o painel administrativo',
+    'Não foi possível carregar o painel administrativo',
   )
 }
 
@@ -160,7 +160,7 @@ export async function fetchAdminUsers(params: { search?: string; page?: number }
   return fetchJson<AdminPage & { users: AdminUserItem[] }>(
     `${API_BASE}/api/v1/admin/users${adminQuery(params)}`,
     { headers: authHeaders() },
-    'Nao foi possivel carregar os usuarios',
+    'Não foi possível carregar os usuarios',
   )
 }
 
@@ -168,7 +168,7 @@ export async function fetchAdminPurchases(params: { status?: string; page?: numb
   return fetchJson<AdminPage & { purchases: AdminPurchaseItem[] }>(
     `${API_BASE}/api/v1/admin/purchases${adminQuery(params)}`,
     { headers: authHeaders() },
-    'Nao foi possivel carregar as compras',
+    'Não foi possível carregar as compras',
   )
 }
 
@@ -176,7 +176,7 @@ export async function fetchAdminJobs(params: { status?: string; page?: number })
   return fetchJson<AdminPage & { jobs: AdminJobItem[] }>(
     `${API_BASE}/api/v1/admin/jobs${adminQuery(params)}`,
     { headers: authHeaders() },
-    'Nao foi possivel carregar os videos',
+    'Não foi possível carregar os videos',
   )
 }
 
@@ -191,6 +191,8 @@ export interface AdminEconomyJob {
   steps: Record<string, number>
   api_cost_usd_est: number
   credit_cost: number
+  rerenders: number
+  rerender_seconds: number
 }
 
 export interface AdminEconomyTemplateAgg {
@@ -211,7 +213,7 @@ export async function fetchAdminEconomy() {
   return fetchJson<AdminEconomyResponse>(
     `${API_BASE}/api/v1/admin/economy`,
     { headers: authHeaders() },
-    'Nao foi possivel carregar a economia',
+    'Não foi possível carregar a economia',
   )
 }
 
@@ -231,7 +233,7 @@ export async function fetchAdminFeedbacks(params: { kind?: string; page?: number
   return fetchJson<AdminPage & { feedbacks: AdminFeedbackItem[] }>(
     `${API_BASE}/api/v1/admin/feedbacks${adminQuery(params)}`,
     { headers: authHeaders() },
-    'Nao foi possivel carregar os feedbacks',
+    'Não foi possível carregar os feedbacks',
   )
 }
 
@@ -239,6 +241,6 @@ export async function adjustUserCredits(userId: string, delta: number, reason: s
   return fetchJson<{ user_id: string; delta: number; previous_balance: number; new_balance: number }>(
     `${API_BASE}/api/v1/admin/users/${userId}/adjust-credits`,
     { method: 'POST', headers: authHeaders(), body: JSON.stringify({ delta, reason }) },
-    'Nao foi possivel ajustar os creditos',
+    'Não foi possível ajustar os creditos',
   )
 }

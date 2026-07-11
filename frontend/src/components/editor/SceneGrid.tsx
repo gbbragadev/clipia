@@ -122,23 +122,12 @@ export function SceneGrid() {
                 </p>
               )}
 
-              {isSelected && (
-                <div style={{ display: 'flex', gap: 4, marginTop: 6, flexWrap: 'wrap' }}>
-                  {scene.keywords_en.map((kw, ki) => (
-                    <span key={ki} style={{
-                      fontSize: 9, color: 'rgba(255,255,255,0.35)',
-                      padding: '1px 5px', background: 'rgba(255,255,255,0.04)',
-                      borderRadius: 3,
-                    }}>
-                      {kw}
-                    </span>
-                  ))}
-                </div>
-              )}
+              {/* keywords_en são termos internos de busca de mídia (Pexels, em inglês) —
+                  não são editáveis nem significam nada para o usuário; fora da UI. */}
 
               {isSelected && (
-                <div style={{ display: 'flex', gap: 4, marginTop: 6, alignItems: 'center' }}>
-                  <span style={{ fontSize: 9, color: '#666' }}>Transicao:</span>
+                <div style={{ display: 'flex', gap: 4, marginTop: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+                  <span style={{ fontSize: 9, color: '#666' }}>Transição:</span>
                   {(['none', 'fade', 'slide', 'wipe'] as const).map(t => (
                     <button
                       key={t}

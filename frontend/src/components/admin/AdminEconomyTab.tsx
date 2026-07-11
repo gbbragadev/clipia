@@ -92,7 +92,7 @@ export default function AdminEconomyTab() {
             <div className="h-40 animate-pulse rounded-2xl" style={{ background: 'rgba(255,255,255,0.04)' }} />
           ) : (
             <AdminTable
-              columns={['Quando', 'Template', 'Voz', 'Duração total', 'Etapa mais lenta', 'Custo API', 'Créditos']}
+              columns={['Quando', 'Template', 'Voz', 'Duração total', 'Etapa mais lenta', 'Custo API', 'Créditos', 'Exports']}
               rows={(data?.jobs ?? []).map((job) => {
                 const slowest = Object.entries(job.steps).sort((a, b) => b[1] - a[1])[0]
                 return [
@@ -103,6 +103,7 @@ export default function AdminEconomyTab() {
                   slowest ? `${slowest[0]} (${fmtDur(slowest[1])})` : '—',
                   fmtUsd(job.api_cost_usd_est),
                   String(job.credit_cost),
+                  job.rerenders ? `${job.rerenders}× (${fmtDur(job.rerender_seconds)})` : '—',
                 ]
               })}
             />

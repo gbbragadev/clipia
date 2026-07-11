@@ -18,6 +18,8 @@ interface EditorContextValue {
   panelCollapsed: boolean
   dirty: boolean
   saving: boolean
+  saveError: boolean
+  retrySave: () => void
   playerFrame: number
   isPlaying: boolean
   playerRef: React.RefObject<PlayerRef | null>
@@ -59,6 +61,7 @@ export function EditorProvider({ jobId, children }: { jobId: string; children: R
   const [panelCollapsed, setPanelCollapsed] = useState(false)
   const [dirty, setDirty] = useState(false)
   const [saving, setSaving] = useState(false)
+  const [saveError, setSaveError] = useState(false)
   const [playerFrame, setPlayerFrame] = useState(0)
   const [isPlaying, setIsPlaying] = useState(false)
 
@@ -110,21 +113,36 @@ export function EditorProvider({ jobId, children }: { jobId: string; children: R
     return () => clearInterval(interval)
   }, [])
 
+  // Save com 1 retry (~2s): backend piscando não pode significar edição perdida em silêncio.
+  const doSave = useCallback(async () => {
+    if (!composition) return
+    setSaving(true)
+    try {
+      await saveEditorState(jobId, { composition })
+      setDirty(false)
+      setSaveError(false)
+    } catch {
+      await new Promise((resolve) => setTimeout(resolve, 2000))
+      try {
+        await saveEditorState(jobId, { composition })
+        setDirty(false)
+        setSaveError(false)
+      } catch {
+        // Persistiu a falha: o header mostra "Falha ao salvar" com retry manual.
+        setSaveError(true)
+      }
+    } finally {
+      setSaving(false)
+    }
+  }, [composition, jobId])
+
   // Auto-save debounce
   useEffect(() => {
     if (!dirty || !composition) return
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
-    saveTimerRef.current = setTimeout(async () => {
-      setSaving(true)
-      try {
-        await saveEditorState(jobId, { composition })
-        setDirty(false)
-      } catch { /* silent */ } finally {
-        setSaving(false)
-      }
-    }, 1500)
+    saveTimerRef.current = setTimeout(() => { void doSave() }, 1500)
     return () => { if (saveTimerRef.current) clearTimeout(saveTimerRef.current) }
-  }, [dirty, composition, jobId])
+  }, [dirty, composition, jobId, doSave])
 
   // Push to history helper — uses ref to avoid stale closure
   const pushHistory = useCallback((newComp: CompositionData) => {
@@ -275,7 +293,7 @@ export function EditorProvider({ jobId, children }: { jobId: string; children: R
 
   const value: EditorContextValue = {
     jobId, composition, loading, error, selectedSceneIndex, activePanel, panelCollapsed,
-    dirty, saving, playerFrame, isPlaying, playerRef, totalFrames, narrationStale,
+    dirty, saving, saveError, retrySave: doSave, playerFrame, isPlaying, playerRef, totalFrames, narrationStale,
     selectScene, setActivePanel, updateScene, updateSubtitleStyle, updateVoiceConfig,
     updateAudio, updateMusic, addOverlay, removeOverlay, updateOverlay, getSceneStartFrame,
     setPlayerFrame, seekToFrame, togglePlayback, togglePanel,
