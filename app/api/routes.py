@@ -1367,30 +1367,53 @@ async def list_jobs(
             q = await db.execute(
                 select(Job.id, Job.created_at).where(Job.status == "queued").order_by(Job.created_at).limit(200)
             )
+            rows = q.all()
+
+            def _live_statuses() -> dict:
+                return {str(jid): _redis.hgetall(f"job:{jid}") for jid, _ in rows}
+
+            live_map = await asyncio.to_thread(_live_statuses)  # ate 200 hgetall fora do event loop
             live_queue = []
-            for jid, jcreated in q.all():
-                live = _redis.hgetall(f"job:{jid}")
+            for jid, jcreated in rows:
+                live = live_map.get(str(jid))
                 live_status = live.get("status") if live else None
                 # sem hash = ainda nem comecou (na fila); ativos seguem na conta
                 if live_status in (None, "", "queued", "processing", "rendering"):
                     live_queue.append(jcreated)
         return sum(1 for other in live_queue if other and other < created_at)
 
+    def _collect_live_sync() -> dict[str, dict]:
+        # Redis sync + ate 3 stat() por job rodavam soltos no handler async, bloqueando
+        # o event loop ~50-150ms a cada poll do dashboard. Uma passada em thread coleta tudo.
+        output_dir = Path(settings.STORAGE_DIR) / "output"
+        jobs_dir = Path(settings.STORAGE_DIR) / "jobs"
+        collected: dict[str, dict] = {}
+        for j in jobs:
+            jid = str(j.id)
+            collected[jid] = {
+                "redis": _redis.hgetall(f"job:{jid}"),
+                "has_video": bool(j.video_url) or (output_dir / f"{jid}.mp4").exists(),
+                "has_script": (jobs_dir / jid / "script.json").exists(),
+                "has_thumb": (output_dir / f"{jid}.jpg").exists(),
+            }
+        return collected
+
+    live_by_job = await asyncio.to_thread(_collect_live_sync)
+
     items = []
     for j in jobs:
+        live = live_by_job[str(j.id)]
         # Redis has the real-time status; DB may be stale
-        redis_data = _redis.hgetall(f"job:{j.id}")
+        redis_data = live["redis"]
         status = redis_data.get("status", j.status) if redis_data else j.status
-        has_video = j.video_url or (Path(settings.STORAGE_DIR) / "output" / f"{j.id}.mp4").exists()
+        has_video = live["has_video"]
         # Em estado ativo o arquivo em output/ pode ser a versao ANTIGA (re-render em
         # andamento): esconder o download fecha pelo dashboard a mesma corrida que o
         # editor fecha via get_job (baixar video pre-edicao).
         downloadable = has_video and status not in {"queued", "processing", "rendering", "cancelling"}
         # Treat completed jobs as editable if they have composition files
-        if status == "completed":
-            job_dir = Path(settings.STORAGE_DIR) / "jobs" / str(j.id)
-            if (job_dir / "script.json").exists():
-                status = "editable"
+        if status == "completed" and live["has_script"]:
+            status = "editable"
         items.append(
             {
                 "job_id": str(j.id),
@@ -1401,11 +1424,7 @@ async def list_jobs(
                 "created_at": j.created_at.isoformat() if j.created_at else None,
                 "download_url": f"/api/v1/jobs/{j.id}/download" if downloadable else None,
                 # Poster do card (gerado no finalize; ausente em jobs antigos -> fallback no front)
-                "thumbnail_url": (
-                    f"/api/v1/jobs/{j.id}/thumbnail"
-                    if (Path(settings.STORAGE_DIR) / "output" / f"{j.id}.jpg").exists()
-                    else None
-                ),
+                "thumbnail_url": (f"/api/v1/jobs/{j.id}/thumbnail" if live["has_thumb"] else None),
                 # Progresso em tempo real p/ a grid reativa (o hash do Redis ja esta em maos).
                 "progress": float(redis_data.get("progress") or 0) if redis_data else 0.0,
                 "current_step": (redis_data.get("current_step") or None) if redis_data else None,
