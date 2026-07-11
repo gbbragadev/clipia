@@ -298,7 +298,7 @@ export function VoiceSelector() {
             className="editor-btn-sm"
             style={{ width: '100%' }}
           >
-            + Descrever uma voz unica
+            + Descrever uma voz única
           </button>
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>

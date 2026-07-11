@@ -16,7 +16,7 @@ export const QuestionBox: React.FC<QuestionBoxProps> = ({ config }) => {
     extrapolateRight: 'clamp',
   })
 
-  const label = (config.label as string) || 'VOCE SABIA?'
+  const label = (config.label as string) || 'VOCÊ SABIA?'
   const text = (config.text as string) || 'Pergunta aqui'
 
   return (

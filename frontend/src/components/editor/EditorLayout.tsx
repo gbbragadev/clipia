@@ -52,7 +52,7 @@ export function EditorLayout() {
         <div className="editor-loading">
           <div className="editor-loading__spinner" />
           <div className="editor-loading__title">Preparando editor</div>
-          <div className="editor-loading__sub">Carregando composicao e midias...</div>
+          <div className="editor-loading__sub">Carregando composição e mídias...</div>
         </div>
       </div>
     )

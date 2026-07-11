@@ -144,6 +144,29 @@ export function ExportPanel({ onClose }: { onClose: () => void }) {
     return () => window.removeEventListener('keydown', onKey)
   }, [onClose])
 
+  // Render em curso ao ABRIR (disparado antes, modal fechado e reaberto): retoma o
+  // acompanhamento em vez de oferecer "Aplicar edições" por cima do render vivo
+  // (achado do audit 11/07 — o botão ficava ativo durante o render).
+  useEffect(() => {
+    let cancelled = false
+    ;(async () => {
+      try {
+        const res = await fetch(`/api/v1/jobs/${jobId}/status`, { headers: authHeaders() })
+        if (!res.ok || cancelled || unmounted.current) return
+        const data = await res.json()
+        if (data.status === 'rendering') {
+          setRenderState('rendering')
+          setRenderProgress(Number(data.progress) || 0)
+          setRenderDetail(typeof data.detail === 'string' && data.detail ? data.detail : null)
+          pollTimer.current = setTimeout(pollStatus, 2500)
+        }
+      } catch { /* sem status → modal abre normal no estado idle */ }
+    })()
+    return () => { cancelled = true }
+    // Só na montagem: pollStatus/authHeaders são estáveis o suficiente aqui.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
   const handleDownload = useCallback(async () => {
     if (downloading || renderState === 'rendering') return
     setDownloading(true)

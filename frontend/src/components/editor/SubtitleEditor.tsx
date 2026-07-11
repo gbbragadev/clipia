@@ -117,7 +117,7 @@ export function SubtitleEditor() {
 
       {/* Position */}
       <div>
-        <div className="editor-section-header">Posicao</div>
+        <div className="editor-section-header">Posição</div>
         <div style={{ display: 'flex', gap: 6 }}>
           {(['bottom', 'center'] as const).map((pos) => (
             <button
@@ -138,7 +138,7 @@ export function SubtitleEditor() {
 
       {/* Animation */}
       <div>
-        <div className="editor-section-header">Animacao</div>
+        <div className="editor-section-header">Animação</div>
         <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
           {ANIMATION_OPTIONS.map((opt) => (
             <button

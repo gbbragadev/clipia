@@ -126,7 +126,7 @@ export function SceneGrid() {
                   não são editáveis nem significam nada para o usuário; fora da UI. */}
 
               {isSelected && (
-                <div style={{ display: 'flex', gap: 4, marginTop: 6, alignItems: 'center' }}>
+                <div style={{ display: 'flex', gap: 4, marginTop: 6, alignItems: 'center', flexWrap: 'wrap' }}>
                   <span style={{ fontSize: 9, color: '#666' }}>Transição:</span>
                   {(['none', 'fade', 'slide', 'wipe'] as const).map(t => (
                     <button

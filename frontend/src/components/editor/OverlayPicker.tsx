@@ -14,18 +14,18 @@ const OVERLAY_TEMPLATES: {
     type: 'questionBox',
     label: 'Pergunta',
     icon: '❓',
-    description: 'Card "VOCE SABIA?" com animacao de entrada',
+    description: 'Card "VOCÊ SABIA?" com animação de entrada',
     getDefaults: (fps) => ({
       startFrame: 0,
       endFrame: fps * 5,
-      config: { text: 'Pergunta aqui', label: 'VOCE SABIA?' },
+      config: { text: 'Pergunta aqui', label: 'VOCÊ SABIA?' },
     }),
   },
   {
     type: 'followCTA',
     label: 'Seguir CTA',
     icon: '👆',
-    description: 'Botao flutuante "SIGA PARA MAIS"',
+    description: 'Botão flutuante "SIGA PARA MAIS"',
     getDefaults: (fps) => ({
       startFrame: fps * 15,
       endFrame: fps * 25,
@@ -36,7 +36,7 @@ const OVERLAY_TEMPLATES: {
     type: 'endScreen',
     label: 'Tela Final',
     icon: '🎬',
-    description: 'Card de finalizacao com perfil e CTA',
+    description: 'Card de finalização com perfil e CTA',
     getDefaults: (fps, totalFrames) => ({
       startFrame: Math.max(0, totalFrames - fps * 5),
       endFrame: totalFrames,
@@ -47,7 +47,7 @@ const OVERLAY_TEMPLATES: {
     type: 'progressBar',
     label: 'Barra de Progresso',
     icon: '📊',
-    description: 'Barra linear no topo do video',
+    description: 'Barra linear no topo do vídeo',
     getDefaults: (_fps, totalFrames) => ({
       startFrame: 0,
       endFrame: totalFrames,
@@ -140,10 +140,10 @@ function OverlayEditFields({
             <span style={labelStyle}>Label</span>
             <input
               type="text"
-              value={String(overlay.config.label ?? 'VOCE SABIA?')}
+              value={String(overlay.config.label ?? 'VOCÊ SABIA?')}
               onChange={(e) => handleConfigChange('label', e.target.value)}
               style={inputStyle}
-              placeholder="VOCE SABIA?"
+              placeholder="VOCÊ SABIA?"
             />
           </div>
         </>
@@ -151,7 +151,7 @@ function OverlayEditFields({
 
       {overlay.type === 'followCTA' && (
         <div>
-          <span style={labelStyle}>Texto do botao</span>
+          <span style={labelStyle}>Texto do botão</span>
           <input
             type="text"
             value={String(overlay.config.text ?? '')}
@@ -203,7 +203,7 @@ function OverlayEditFields({
         </div>
 
         <div>
-          <span style={{ ...labelStyle, fontSize: 10 }}>Inicio ({startSec.toFixed(1)}s)</span>
+          <span style={{ ...labelStyle, fontSize: 10 }}>Início ({startSec.toFixed(1)}s)</span>
           <input
             type="range"
             min={0}
