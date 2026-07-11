@@ -7,7 +7,10 @@ import {
   generateVideo,
   fetchTemplates,
   fetchVoices,
+  fetchScriptPreview,
+  refineScriptDraft,
   type GenerateParams,
+  type ScriptDraft,
   type VideoTemplateInfo,
   type VoiceInfo,
 } from '@/lib/editor-api'
@@ -44,9 +47,15 @@ export default function GenerateForm({ onJobCreated, prefillTopic, prefillTrendC
   const [generating, setGenerating] = useState(false)
   const [genError, setGenError] = useState<string | null>(null)
   const [showCreditsModal, setShowCreditsModal] = useState(false)
-  const [script, setScript] = useState('')
   const [wpm, setWpm] = useState(150)
   const [showAdvancedScript, setShowAdvancedScript] = useState(false)
+  // Rascunho de roteiro: 1º preview grátis, edição por cena, refino IA = 0,5 crédito
+  const [draft, setDraft] = useState<ScriptDraft | null>(null)
+  const [draftScenes, setDraftScenes] = useState<string[]>([])
+  const [draftLoading, setDraftLoading] = useState(false)
+  const [refineInstruction, setRefineInstruction] = useState('')
+  const [refining, setRefining] = useState(false)
+  const [refinePending, setRefinePending] = useState(0)
   const [voiceProvider, setVoiceProvider] = useState<'edge' | 'elevenlabs'>('edge')
   // Narração: single (1 voz, escolhível) ou dialogue (2 vozes — só em templates capable)
   const [narrationMode, setNarrationMode] = useState<'single' | 'dialogue'>('single')
@@ -125,6 +134,7 @@ export default function GenerateForm({ onJobCreated, prefillTopic, prefillTrendC
     const nextTemplate = templates.find((template) => template.id === id)
     setTemplateId(id)
     setVoiceId(null) // volta ao default do template novo
+    if (draft) discardDraft() // rascunho foi escrito para o template anterior
     if (!nextTemplate?.dialogue_capable) setNarrationMode('single')
     if ((nextTemplate?.default_voice_provider === 'elevenlabs' && nextTemplate.default_voice_id) || id === 'novelinha_historica') {
       setVoiceProvider('elevenlabs')
@@ -133,12 +143,28 @@ export default function GenerateForm({ onJobCreated, prefillTopic, prefillTrendC
     }
   }
 
+  /** Rascunho com as edições por cena aplicadas (narration = concatenação dos textos). */
+  const draftWithEdits = (): ScriptDraft | null => {
+    if (!draft) return null
+    const scenes = draft.scenes.map((sc, i) => ({ ...sc, text: (draftScenes[i] ?? sc.text).trim() }))
+    return { ...draft, scenes, narration: scenes.map((sc) => sc.text).join(' ') }
+  }
+
+  // Rascunho vale para 1 vídeo (mesmo tema/template/duração): descarta ao mudar o contexto
+  const discardDraft = () => {
+    setDraft(null)
+    setDraftScenes([])
+    setRefineInstruction('')
+  }
+
   const buildParams = (t: string, withTrend: boolean): GenerateParams => {
     // Voz escolhida no select > default do template (elevenlabs precisa de voice_id explícito)
     const chosenVoiceId = narrationMode === 'dialogue'
       ? undefined // as 2 vozes do diálogo são fixas no backend
       : voiceId
         ?? (voiceProvider === 'elevenlabs' ? selectedTemplate?.default_voice_id : undefined)
+    // Roteiro editado só se aplica à geração ÚNICA do mesmo tema (variações = roteiros diferentes)
+    const customScript = !batchMode && variations === 1 ? draftWithEdits() : null
     return {
       topic: t,
       style,
@@ -150,6 +176,46 @@ export default function GenerateForm({ onJobCreated, prefillTopic, prefillTrendC
       music_enabled: musicEnabled,
       trend_context: withTrend ? trendContext ?? undefined : undefined,
       narration_mode: narrationMode,
+      custom_script: customScript ?? undefined,
+    }
+  }
+
+  const handleGenerateDraft = async () => {
+    if (draftLoading || topic.trim().length < 10) return
+    setDraftLoading(true)
+    setGenError(null)
+    try {
+      const res = await fetchScriptPreview(buildParams(topic.trim(), true))
+      setDraft(res.script)
+      setDraftScenes(res.script.scenes.map((sc) => sc.text))
+      setRefinePending(res.refine_pending)
+    } catch (err) {
+      toastError('Rascunho indisponível', err instanceof Error ? err.message : 'Tente novamente.')
+    } finally {
+      setDraftLoading(false)
+    }
+  }
+
+  const handleRefine = async () => {
+    const base = draftWithEdits()
+    if (!base || refining || refineInstruction.trim().length < 5) return
+    setRefining(true)
+    try {
+      const res = await refineScriptDraft({
+        script: base,
+        instruction: refineInstruction.trim(),
+        duration_target: duration,
+        template_id: templateId,
+      })
+      setDraft(res.script)
+      setDraftScenes(res.script.scenes.map((sc) => sc.text))
+      setRefinePending(res.refine_pending)
+      setRefineInstruction('')
+      success('Rascunho refinado', '0,5 crédito somado ao custo do próximo vídeo.')
+    } catch (err) {
+      toastError('Refino indisponível', err instanceof Error ? err.message : 'Tente novamente.')
+    } finally {
+      setRefining(false)
     }
   }
 
@@ -180,6 +246,7 @@ export default function GenerateForm({ onJobCreated, prefillTopic, prefillTrendC
         setTrendContext(null)
       }
       setVariations(1)
+      discardDraft() // rascunho consumido (ou irrelevante p/ lote)
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Erro ao iniciar geração'
       // Honestidade em falha parcial: diz quantos ENTRARAM antes do erro.
@@ -255,7 +322,7 @@ export default function GenerateForm({ onJobCreated, prefillTopic, prefillTrendC
             <input
               type="text"
               value={topic}
-              onChange={(e) => { setTopic(e.target.value); setTrendContext(null) }}
+              onChange={(e) => { setTopic(e.target.value); setTrendContext(null); if (draft) discardDraft() }}
               onKeyDown={(e) => { if (e.key === 'Enter') handleGenerate() }}
               placeholder="Ex: 5 curiosidades sobre o oceano profundo"
               disabled={generating}
@@ -426,63 +493,139 @@ export default function GenerateForm({ onJobCreated, prefillTopic, prefillTrendC
         </div>
       </div>
 
-      {/* Advanced Script Section */}
-      <div className="mb-5">
-        <button
-          type="button"
-          onClick={() => setShowAdvancedScript(!showAdvancedScript)}
-          disabled={generating}
-          className="flex items-center gap-1.5 text-xs text-[var(--text-tertiary)] hover:text-[var(--text-secondary)] transition cursor-pointer disabled:opacity-50"
-        >
-          <span className="transition-transform" style={{ transform: showAdvancedScript ? 'rotate(90deg)' : 'rotate(0deg)' }}>
-            ▶
-          </span>
-          Roteiro avançado (opcional)
-        </button>
+      {/* Roteiro avançado: 1º rascunho GRÁTIS → edição por cena → refino IA (0,5cr) */}
+      {!batchMode && (
+        <div className="mb-5">
+          <button
+            type="button"
+            onClick={() => setShowAdvancedScript(!showAdvancedScript)}
+            disabled={generating}
+            className="flex items-center gap-1.5 text-xs text-[var(--text-tertiary)] hover:text-[var(--text-secondary)] transition cursor-pointer disabled:opacity-50"
+          >
+            <span className="transition-transform" style={{ transform: showAdvancedScript ? 'rotate(90deg)' : 'rotate(0deg)' }}>
+              ▶
+            </span>
+            Roteiro avançado (opcional){draft ? ' · roteiro editado ativo' : ''}
+          </button>
 
-        {showAdvancedScript && (
-          <div className="mt-3 space-y-4">
-            <p className="text-[11px] leading-relaxed text-[var(--text-tertiary)]">
-              Deixe em branco para a IA criar o roteiro a partir do tema acima. Preencha
-              apenas se quiser escrever o seu próprio — cada parágrafo vira uma cena.
-            </p>
-            <div>
-              <label className="block text-xs text-[var(--text-tertiary)] mb-1.5">
-                Seu roteiro (uma cena por parágrafo, separadas por linha em branco)
-              </label>
-              <textarea
-                value={script}
-                onChange={(e) => setScript(e.target.value)}
-                disabled={generating}
-                rows={6}
-                placeholder={"Exemplo (apague e escreva o seu):\nPrimeira cena da narração aqui.\n\nSegunda cena, depois de uma linha em branco.\nCada parágrafo vira uma cena do vídeo."}
-                className="w-full px-4 py-3 text-sm rounded-xl border border-[var(--border-default)] bg-[var(--bg-surface)] text-[var(--text-primary)] placeholder:text-[var(--text-tertiary)] outline-none focus:border-coral/50 transition disabled:opacity-50 resize-y font-mono"
-              />
+          {showAdvancedScript && (
+            <div className="mt-3 space-y-4">
+              {!draft && (
+                <>
+                  <p className="text-[11px] leading-relaxed text-[var(--text-tertiary)]">
+                    Veja e edite o roteiro ANTES de gastar o vídeo: o primeiro rascunho é
+                    grátis (incluso no custo da geração). Refinar com IA custa 0,5 crédito.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={handleGenerateDraft}
+                    disabled={draftLoading || generating || topic.trim().length < 10}
+                    className="w-full py-2.5 rounded-xl border border-azure/40 bg-azure/10 text-azure text-xs font-semibold hover:bg-azure/15 transition cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {draftLoading ? 'Escrevendo rascunho…' : '✨ Gerar rascunho do roteiro (grátis)'}
+                  </button>
+                  {topic.trim().length < 10 && (
+                    <p className="text-center text-[10px] text-[var(--text-tertiary)]">
+                      Escreva o tema acima primeiro (10+ caracteres).
+                    </p>
+                  )}
+                </>
+              )}
+
+              {draft && (
+                <>
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-[11px] text-mint">
+                      Este roteiro será usado no vídeo — edite as cenas à vontade.
+                    </p>
+                    <button
+                      type="button"
+                      onClick={discardDraft}
+                      disabled={generating || refining}
+                      className="shrink-0 text-[11px] text-[var(--text-tertiary)] hover:text-danger transition cursor-pointer disabled:opacity-50"
+                    >
+                      Descartar rascunho
+                    </button>
+                  </div>
+
+                  <div className="space-y-2">
+                    {draft.scenes.map((sc, i) => (
+                      <div key={i}>
+                        <label className="mb-1 flex items-center justify-between text-[10px] text-[var(--text-tertiary)]">
+                          <span>
+                            Cena {i + 1}
+                            {sc.speaker ? ` · voz ${sc.speaker}` : ''}
+                            {sc.duration_hint ? ` · ~${sc.duration_hint}s` : ''}
+                          </span>
+                        </label>
+                        <textarea
+                          value={draftScenes[i] ?? sc.text}
+                          onChange={(e) => {
+                            const next = [...draftScenes]
+                            next[i] = e.target.value
+                            setDraftScenes(next)
+                          }}
+                          disabled={generating || refining}
+                          rows={2}
+                          className="w-full px-3 py-2 text-xs rounded-lg border border-[var(--border-default)] bg-[var(--bg-surface)] text-[var(--text-primary)] outline-none focus:border-coral/50 transition disabled:opacity-50 resize-y"
+                        />
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* Refino IA — custo ANTES da ação (DESIGN.md), acumulado como o AI Suggest */}
+                  <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-surface)] p-3 space-y-2">
+                    <label className="block text-[11px] font-semibold text-[var(--text-primary)]">
+                      Refinar com IA <span className="font-normal text-[var(--text-tertiary)]">· 0,5 crédito por refino, somado ao próximo vídeo</span>
+                    </label>
+                    <div className="flex gap-2">
+                      <input
+                        type="text"
+                        value={refineInstruction}
+                        onChange={(e) => setRefineInstruction(e.target.value)}
+                        onKeyDown={(e) => { if (e.key === 'Enter') handleRefine() }}
+                        placeholder="Ex.: deixe a cena 2 mais dramática"
+                        disabled={refining || generating}
+                        className="flex-1 rounded-lg border border-[var(--border-default)] bg-[var(--bg-base)] px-3 py-2 text-xs text-[var(--text-primary)] placeholder:text-[var(--text-tertiary)] outline-none focus:border-azure/50 transition disabled:opacity-50"
+                      />
+                      <button
+                        type="button"
+                        onClick={handleRefine}
+                        disabled={refining || generating || refineInstruction.trim().length < 5}
+                        className="shrink-0 rounded-lg bg-azure/90 px-3 py-2 text-[11px] font-semibold text-white hover:bg-azure transition cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        {refining ? 'Refinando…' : 'Refinar · 0,5cr'}
+                      </button>
+                    </div>
+                    {refinePending > 0 && (
+                      <p className="text-[10px] text-[var(--text-tertiary)]">
+                        Refinos pendentes: {refinePending.toLocaleString('pt-BR')} crédito{refinePending === 1 ? '' : 's'} — a parte
+                        inteira é cobrada no próximo vídeo; o meio crédito restante fica anotado (2 refinos = 1 crédito).
+                      </p>
+                    )}
+                  </div>
+
+                  <WpmSlider value={wpm} onChange={setWpm} disabled={generating} />
+                  <ScriptDensityHeatmap script={draftScenes.join('\n\n')} duration={duration} wpm={wpm} />
+                  <NarrationTimelineRuler script={draftScenes.join('\n\n')} duration={duration} wpm={wpm} />
+                  <KineticPreviewPanel script={draftScenes.join('\n\n')} />
+                </>
+              )}
             </div>
-
-            <WpmSlider value={wpm} onChange={setWpm} disabled={generating} />
-
-            {script.trim() && (
-              <ScriptDensityHeatmap script={script} duration={duration} wpm={wpm} />
-            )}
-
-            {script.trim() && (
-              <NarrationTimelineRuler script={script} duration={duration} wpm={wpm} />
-            )}
-
-            {script.trim() && (
-              <KineticPreviewPanel script={script} />
-            )}
-          </div>
-        )}
-      </div>
+          )}
+        </div>
+      )}
 
       {/* Variações — mesmo tema, N versões para comparar (só no modo single) */}
       {!batchMode && (
         <div className="mb-4 flex items-center justify-between gap-3 rounded-xl border border-[var(--border-default)] bg-[var(--bg-surface)] px-3.5 py-2.5">
           <div className="min-w-0">
             <div className="text-xs font-semibold text-[var(--text-primary)]">Variações</div>
-            <div className="text-[10px] text-[var(--text-tertiary)]">Mesmo tema, roteiros diferentes — compare e fique com o melhor</div>
+            <div className="text-[10px] text-[var(--text-tertiary)]">
+              {variations > 1 && draft
+                ? 'Variações geram roteiros NOVOS — o rascunho editado não se aplica'
+                : 'Mesmo tema, roteiros diferentes — compare e fique com o melhor'}
+            </div>
           </div>
           <div className="flex gap-1" role="radiogroup" aria-label="Quantidade de variações">
             {[1, 2, 3, 4, 5].map((n) => (

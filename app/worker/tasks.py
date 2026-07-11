@@ -630,18 +630,25 @@ def task_generate_script(
     try:
         if _check_cancelled(job_id):
             return {"cancelled": True}
-        _update_job(job_id, "processing", "scripting", 0.1, detail="Gerando roteiro com IA...")
-        force_dialogue = _redis_hget(f"job:{job_id}", "narration_mode") == "dialogue"
-        script = generate_script(
-            topic,
-            style,
-            duration_target,
-            template_id=template_id,
-            trend_context=trend_context,
-            force_dialogue=force_dialogue,
-        )
         job_dir = get_job_dir(job_id)
-        (job_dir / "script.json").write_text(json.dumps(script, ensure_ascii=False, indent=2), encoding="utf-8")
+        script_path = job_dir / "script.json"
+        if script_path.exists():
+            # Roteiro pronto: custom_script do usuario (preview editado) OU retry de uma
+            # task que ja gerou — reusa sem nova chamada de LLM.
+            _update_job(job_id, "processing", "scripting", 0.1, detail="Usando roteiro pronto...")
+            script = _read_json_file(script_path)
+        else:
+            _update_job(job_id, "processing", "scripting", 0.1, detail="Gerando roteiro com IA...")
+            force_dialogue = _redis_hget(f"job:{job_id}", "narration_mode") == "dialogue"
+            script = generate_script(
+                topic,
+                style,
+                duration_target,
+                template_id=template_id,
+                trend_context=trend_context,
+                force_dialogue=force_dialogue,
+            )
+            script_path.write_text(json.dumps(script, ensure_ascii=False, indent=2), encoding="utf-8")
 
         # Validate script
         scenes = script.get("scenes", [])

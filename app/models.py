@@ -31,6 +31,10 @@ class GenerateRequest(BaseModel):
         default="single",
         description="dialogue = roteiro em conversa + 2 vozes ElevenLabs (so em templates dialogue_capable)",
     )
+    custom_script: dict | None = Field(
+        default=None,
+        description="Roteiro pronto (do /script-preview, possivelmente editado) — pula a geracao de roteiro",
+    )
 
     @field_validator("template_id")
     @classmethod
@@ -46,6 +50,42 @@ class GenerateRequest(BaseModel):
             # dialogue_duo ja e dialogo nativo (is_dialogue) — pedir o modo la e redundante mas valido
             if template and not (template.dialogue_capable or template.script.is_dialogue):
                 raise ValueError(ErrorMessages.INVALID_INPUT)
+        return self
+
+    @model_validator(mode="after")
+    def validate_custom_script(self):
+        if self.custom_script is not None:
+            if json_size_bytes(self.custom_script) > 100 * 1024:
+                raise ValueError(ErrorMessages.INVALID_INPUT)
+            scenes = self.custom_script.get("scenes")
+            narration = self.custom_script.get("narration")
+            if not isinstance(scenes, list) or not scenes or not isinstance(narration, str) or not narration.strip():
+                raise ValueError(ErrorMessages.INVALID_INPUT)
+            for sc in scenes:
+                if not isinstance(sc, dict) or not str(sc.get("text", "")).strip():
+                    raise ValueError(ErrorMessages.INVALID_INPUT)
+        return self
+
+
+class ScriptRefineRequest(BaseModel):
+    script: dict = Field(..., description="Roteiro atual (formato do /script-preview)")
+    instruction: str = Field(
+        ..., min_length=5, max_length=500, description="O que melhorar (ex: 'deixe a cena 2 mais dramática')"
+    )
+    duration_target: int = Field(default=45, ge=15, le=180)
+    template_id: str = Field(default="stock_narration")
+
+    @field_validator("template_id")
+    @classmethod
+    def validate_template_id(cls, value: str) -> str:
+        if value not in TEMPLATES:
+            raise ValueError(ErrorMessages.INVALID_INPUT)
+        return value
+
+    @model_validator(mode="after")
+    def validate_script_size(self):
+        if json_size_bytes(self.script) > 100 * 1024:
+            raise ValueError(ErrorMessages.INVALID_INPUT)
         return self
 
 

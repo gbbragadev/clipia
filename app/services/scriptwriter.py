@@ -95,6 +95,22 @@ CONTEXTO REAL (tendencia atual — ancore o roteiro nestes fatos/angulos reais, 
 {trend_context}
 """
 
+REFINE_PROMPT = """Voce e um roteirista de videos curtos virais. Melhore o roteiro abaixo seguindo a instrucao do usuario.
+
+INSTRUCAO DO USUARIO: {instruction}
+
+ROTEIRO ATUAL (JSON):
+{script_json}
+
+REGRAS:
+- Mantenha EXATAMENTE o mesmo formato JSON (mesmos campos por cena; preserve keywords_en/visual_hint/speaker quando existirem)
+- Altere APENAS o que a instrucao pede; preserve o resto
+- A soma dos duration_hint deve continuar EXATAMENTE {duration} segundos
+- A concatenacao dos "text" deve formar a narracao completa (atualize "narration" junto)
+- Portugues brasileiro natural; sem emojis
+
+Retorne APENAS o JSON do roteiro melhorado."""
+
 
 def generate_script(
     topic: str,
@@ -198,6 +214,35 @@ def generate_script(
             sc["speaker"] = "B" if str(sc.get("speaker", "A")).strip().upper() == "B" else "A"
 
     return script
+
+
+def refine_script(script: dict, instruction: str, duration_target: int, template_id: str = "stock_narration") -> dict:
+    """Refina um roteiro existente segundo a instrucao do usuario (custa 0,5 credito,
+    debitado server-side na rota). Mantem o formato e re-valida duracoes."""
+    template = get_template(template_id)
+    prompt = REFINE_PROMPT.format(
+        instruction=instruction.strip(),
+        script_json=json.dumps(script, ensure_ascii=False),
+        duration=duration_target,
+    )
+    raw, llm_provider = complete_text_ex(prompt)
+    raw = strip_code_fences(raw)
+    if not raw:
+        raise ScriptValidationError("LLM retornou resposta vazia no refino")
+    refined = _parse_script_json(raw)
+    refined["llm_provider"] = llm_provider
+    refined = _fix_durations(refined, duration_target)
+    refined = _apply_default_transitions(refined)
+    if template.script.needs_visual_hint:
+        for i, sc in enumerate(refined.get("scenes", [])):
+            if not sc.get("visual_hint", "").strip():
+                # refino nao pode perder o visual_hint: recupera da cena original correspondente
+                original = script.get("scenes") or []
+                if i < len(original) and original[i].get("visual_hint"):
+                    sc["visual_hint"] = original[i]["visual_hint"]
+                else:
+                    raise ScriptValidationError(f"cena {i+1} sem visual_hint apos o refino")
+    return refined
 
 
 def _parse_script_json(raw: str) -> dict:

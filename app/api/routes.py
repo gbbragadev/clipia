@@ -28,6 +28,7 @@ from app.models import (
     GenerateRequest,
     JobStatus,
     RegenerateTTSRequest,
+    ScriptRefineRequest,
     VoiceDesignRequest,
     WaitlistRequest,
 )
@@ -38,7 +39,7 @@ from app.services.llm import complete_text, strip_code_fences
 from app.services.remotion import scene_sort_key
 from app.services.trends import fetch_trends, get_example_topics
 from app.templates import get_template
-from app.utils.files import bytes_to_gb, path_size_bytes
+from app.utils.files import bytes_to_gb, get_job_dir, path_size_bytes
 from app.utils.locks import get_lock
 from app.utils.media_url import sign_media_url
 from app.utils.ratelimit import client_ip
@@ -196,6 +197,17 @@ async def generate(
     cost_provider = "elevenlabs" if req.narration_mode == "dialogue" else req.voice_provider
     credit_cost = get_generation_credit_cost(req.template_id, cost_provider)
 
+    # Refinos de roteiro (0,5 cada) acumulados em Redis pelo /script-preview/refine:
+    # cobra a parte INTEIRA junto da geracao e carrega o resto (2 refinos = 1 credito;
+    # 1 refino sozinho fica anotado p/ a proxima — nunca cobra a mais).
+    refine_key = f"script_refine_pending:{user.id}"
+    try:
+        refine_owed = float(_redis.get(refine_key) or 0.0)
+    except (TypeError, ValueError):
+        refine_owed = 0.0
+    refine_extra = int(refine_owed)
+    credit_cost += refine_extra
+
     # Guardrail $: video IA (Seedance) e a operacao mais cara. Teto DIARIO por usuario, vale ate p/
     # conta admin/seed (foi o vetor do gasto de ~$6). O lock por usuario serializa get->incr (sem race).
     is_ai_video = get_template(req.template_id).media.source == "ai_video"
@@ -229,6 +241,14 @@ async def generate(
         if fresh_user is None:
             raise HTTPException(status_code=401, detail=ErrorMessages.UNAUTHORIZED)
         record_credit_metric("debit", credit_cost)
+
+        # Debito ok: liquida a parte inteira dos refinos e carrega o resto (ex.: 0,5)
+        if refine_extra > 0:
+            remainder = round(refine_owed - refine_extra, 2)
+            if remainder > 0:
+                _redis.set(refine_key, str(remainder), ex=86400)
+            else:
+                _redis.delete(refine_key)
 
         job = Job(
             user_id=fresh_user.id,
@@ -267,6 +287,13 @@ async def generate(
         job_meta["narration_mode"] = req.narration_mode
     _redis.hset(f"job:{job_id}", mapping=job_meta)
 
+    # Roteiro pronto (preview editado): grava script.json ANTES do dispatch — a task
+    # generate_script detecta o arquivo e pula a chamada de LLM (1o rascunho incluso).
+    if req.custom_script is not None:
+        script_path = get_job_dir(job_id) / "script.json"
+        script_path.write_text(json.dumps(req.custom_script, ensure_ascii=False, indent=2), encoding="utf-8")
+        _redis.hset(f"job:{job_id}", mapping={"custom_script": "1"})
+
     try:
         dispatch_pipeline(
             job_id,
@@ -303,6 +330,93 @@ async def generate(
             job_id,
         )
     return {"job_id": job_id, "status": "queued", "credit_cost": credit_cost}
+
+
+# ── Rascunho de roteiro (preview gratis + refino 0,5) ────────────────────────
+
+_SCRIPT_PREVIEW_HOURLY_CAP = 10
+
+
+def _script_preview_rate_limit(user_id) -> None:
+    """Cap horario compartilhado preview+refino (anti-farming de LLM)."""
+    key = f"script_preview_rl:{user_id}:{datetime.now(timezone.utc).strftime('%Y%m%d%H')}"
+    count = _redis.incr(key)
+    _redis.expire(key, 3900)
+    if int(count) > _SCRIPT_PREVIEW_HOURLY_CAP:
+        raise HTTPException(
+            status_code=429,
+            detail=f"Limite de {_SCRIPT_PREVIEW_HOURLY_CAP} rascunhos/refinos por hora atingido. Tente mais tarde.",
+        )
+
+
+@router.post(
+    "/script-preview",
+    summary="Rascunho do roteiro (grátis)",
+    description="Gera o roteiro ANTES do vídeo para revisar/editar. O 1º rascunho é incluso no custo da geração.",
+    responses={200: {"description": "Roteiro gerado"}},
+)
+async def script_preview(
+    req: GenerateRequest,
+    user: User = Depends(get_current_user),
+):
+    """Preview do roteiro sem debitar (incluso). Anti-farming: exige saldo suficiente
+    para gerar o video deste template + cap horario."""
+    cost_provider = "elevenlabs" if req.narration_mode == "dialogue" else req.voice_provider
+    template_cost = get_generation_credit_cost(req.template_id, cost_provider)
+    if user.credits < template_cost:
+        raise HTTPException(status_code=402, detail=ErrorMessages.INSUFFICIENT_CREDITS)
+    _script_preview_rate_limit(user.id)
+
+    from app.services.scriptwriter import generate_script
+
+    try:
+        # LLM sync: thread p/ nao bloquear o event loop (gotcha do 502)
+        script = await asyncio.to_thread(
+            generate_script,
+            req.topic,
+            req.style,
+            req.duration_target,
+            req.template_id,
+            req.trend_context,
+            req.narration_mode == "dialogue",
+        )
+    except Exception as e:  # noqa: BLE001 — preview nunca cobra; erro vira 502 legivel
+        logger.warning("script-preview falhou user=%s: %s", user.id, e)
+        raise HTTPException(status_code=502, detail="Não foi possível gerar o rascunho agora. Tente novamente.")
+
+    refine_owed = float(_redis.get(f"script_refine_pending:{user.id}") or 0.0)
+    return {"script": script, "refine_cost": 0.5, "refine_pending": refine_owed}
+
+
+@router.post(
+    "/script-preview/refine",
+    summary="Refinar o rascunho (0,5 crédito)",
+    description="Melhora o roteiro conforme a instrução. Custa 0,5 crédito, somado ao custo da próxima geração.",
+    responses={200: {"description": "Roteiro refinado"}},
+)
+async def script_preview_refine(
+    req: ScriptRefineRequest,
+    user: User = Depends(get_current_user),
+):
+    """Refino = 0,5 credito ACUMULADO server-side (Redis) e liquidado no proximo
+    /generate (parte inteira; o resto carrega). Nunca um campo de custo do cliente."""
+    _script_preview_rate_limit(user.id)
+
+    from app.services.scriptwriter import refine_script
+
+    try:
+        refined = await asyncio.to_thread(
+            refine_script, req.script, req.instruction, req.duration_target, req.template_id
+        )
+    except Exception as e:  # noqa: BLE001
+        logger.warning("script-refine falhou user=%s: %s", user.id, e)
+        raise HTTPException(status_code=502, detail="Não foi possível refinar o rascunho agora. Tente novamente.")
+
+    # Debita os 0,5 SOMENTE com refino entregue
+    refine_key = f"script_refine_pending:{user.id}"
+    pending = float(_redis.get(refine_key) or 0.0) + 0.5
+    _redis.set(refine_key, str(pending), ex=86400)
+    return {"script": refined, "refine_cost": 0.5, "refine_pending": pending}
 
 
 @router.post(

@@ -135,6 +135,8 @@ export interface GenerateParams {
   music_enabled?: boolean
   /** 'dialogue' = roteiro em conversa + 2 vozes (só em templates dialogue_capable). */
   narration_mode?: 'single' | 'dialogue'
+  /** Roteiro pronto do /script-preview (possivelmente editado) — pula a geração de roteiro. */
+  custom_script?: Record<string, unknown>
 }
 
 export interface VoiceInfo {
@@ -258,6 +260,64 @@ export async function fetchTrends(nicho?: string): Promise<Trend[]> {
   if (!res.ok) return []
   const data = await res.json().catch(() => ({ trends: [] }))
   return data.trends ?? []
+}
+
+// ── Rascunho de roteiro (preview grátis + refino 0,5) ──────────────────────
+
+export interface ScriptScene {
+  text: string
+  duration_hint?: number
+  keywords_en?: string[]
+  visual_hint?: string
+  speaker?: string
+  [key: string]: unknown
+}
+
+export interface ScriptDraft {
+  title?: string
+  narration: string
+  scenes: ScriptScene[]
+  [key: string]: unknown
+}
+
+export interface ScriptPreviewResponse {
+  script: ScriptDraft
+  refine_cost: number
+  /** Refinos acumulados (0,5 cada) que serão somados ao próximo vídeo. */
+  refine_pending: number
+}
+
+/** 1º rascunho é grátis (incluso no custo da geração). Lança em falha. */
+export async function fetchScriptPreview(params: GenerateParams): Promise<ScriptPreviewResponse> {
+  const res = await fetch(`${API_BASE}/script-preview`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+    body: JSON.stringify(params),
+  })
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}))
+    throw new Error(data.detail || 'Não foi possível gerar o rascunho')
+  }
+  return res.json()
+}
+
+/** Refino custa 0,5 crédito (acumulado; liquidado no próximo vídeo). Lança em falha. */
+export async function refineScriptDraft(body: {
+  script: ScriptDraft
+  instruction: string
+  duration_target: number
+  template_id: string
+}): Promise<ScriptPreviewResponse> {
+  const res = await fetch(`${API_BASE}/script-preview/refine`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+    body: JSON.stringify(body),
+  })
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}))
+    throw new Error(data.detail || 'Não foi possível refinar o rascunho')
+  }
+  return res.json()
 }
 
 /** Temas prontos do nicho gerados por IA (renovam a cada hora). [] em falha → use o fallback estático. */
