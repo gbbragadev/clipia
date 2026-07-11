@@ -26,7 +26,7 @@ const COLOR_PRESETS = [
 const BG_PRESETS = [
   { label: 'Escuro', value: 'rgba(0, 0, 0, 0.6)' },
   { label: 'Mais escuro', value: 'rgba(0, 0, 0, 0.85)' },
-  { label: 'Roxo', value: 'rgba(124, 58, 237, 0.5)' },
+  { label: 'Coral', value: 'rgba(255, 86, 56, 0.45)' },
   { label: 'Sem fundo', value: 'transparent' },
 ]
 
