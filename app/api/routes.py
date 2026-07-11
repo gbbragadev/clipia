@@ -3,6 +3,7 @@ import json
 import logging
 import math
 import shutil
+import time
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -618,6 +619,10 @@ async def list_templates():
 # ── Voice endpoints ───────────────────────────────────────────
 
 
+# Cache do catálogo ElevenLabs (compartilhado entre users; clones ficam fora, por-user)
+_el_voices_cache: dict = {"at": 0.0, "voices": []}
+
+
 @router.get(
     "/voices",
     summary="List voices",
@@ -633,16 +638,25 @@ async def list_voices(
 
     voices = [v.__dict__ for v in EDGE_VOICES]
 
-    # ElevenLabs voices (if API key configured)
+    # ElevenLabs voices (if API key configured) — cache 10min: o catálogo muda raramente
+    # e a chamada remota a cada request segurava a aba Voz no "Carregando vozes...".
     if settings.ELEVENLABS_API_KEY:
-        try:
-            from app.services.elevenlabs_provider import ElevenLabsProvider
+        now = time.monotonic()
+        if _el_voices_cache["voices"] and now - _el_voices_cache["at"] < 600:
+            voices.extend(_el_voices_cache["voices"])
+        else:
+            try:
+                from app.services.elevenlabs_provider import ElevenLabsProvider
 
-            provider = ElevenLabsProvider()
-            el_voices = await provider.list_voices()
-            voices.extend(v.__dict__ for v in el_voices)
-        except Exception as e:
-            logger.warning(f"Failed to fetch ElevenLabs voices: {e}")
+                provider = ElevenLabsProvider()
+                el_voices = await provider.list_voices()
+                fetched = [v.__dict__ for v in el_voices]
+                _el_voices_cache.update(at=now, voices=fetched)
+                voices.extend(fetched)
+            except Exception as e:
+                logger.warning(f"Failed to fetch ElevenLabs voices: {e}")
+                # Stale-if-error: catálogo velho é melhor que aba vazia.
+                voices.extend(_el_voices_cache["voices"])
 
     # User's cloned voices from DB
     result = await db.execute(select(VoiceClone).where(VoiceClone.user_id == user.id))

@@ -1148,7 +1148,18 @@ def task_rerender_video(self, job_id: str) -> str:
                         media_paths.append(str(scene_file))
 
         if not media_paths:
+            # Jobs ai_image (novelinha etc.): cenas sao PNGs em images/ — mesmo fallback
+            # do build_composition_props. Sem isso o export do editor falhava com
+            # "No media files found" justamente nos templates premium.
+            images_dir = job_dir / "images"
+            if images_dir.exists():
+                media_paths = [str(p) for p in sorted(images_dir.glob("scene_*.png"))]
+
+        if not media_paths:
             raise RuntimeError("No media files found for re-render")
+        if settings.RENDER_ENGINE != "remotion" and all(p.endswith(".png") for p in media_paths):
+            # compose_short espera videos; job so de imagens exige o engine Remotion.
+            raise RuntimeError("Job de imagens IA: export requer RENDER_ENGINE=remotion")
 
         # Read editor_state
         editor_state_path = job_dir / "editor_state.json"
