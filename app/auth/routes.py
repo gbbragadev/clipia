@@ -3,7 +3,7 @@ import secrets
 import uuid
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, status
 from slowapi import Limiter
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -16,6 +16,7 @@ from app.auth.email import (
     send_account_deleted_email,
     send_password_reset_email,
     send_verification_email,
+    send_welcome_email,
 )
 from app.auth.schemas import (
     ChangePasswordRequest,
@@ -147,7 +148,12 @@ async def login(request: Request, body: LoginRequest, db: AsyncSession = Depends
     },
 )
 @limiter.limit("5/minute")
-async def verify_email(request: Request, body: VerifyEmailRequest, db: AsyncSession = Depends(get_db)):
+async def verify_email(
+    request: Request,
+    body: VerifyEmailRequest,
+    background_tasks: BackgroundTasks,
+    db: AsyncSession = Depends(get_db),
+):
     """Verify email using OTP."""
     async with get_lock(f"verify-email:{body.email}"):
         result = await db.execute(select(User).where(User.email == body.email))
@@ -182,9 +188,13 @@ async def verify_email(request: Request, body: VerifyEmailRequest, db: AsyncSess
         user.otp_attempts = 0
         user.verification_code = None
         user.verification_expires = None
-        user.credits = 2
+        user.credits = settings.WELCOME_CREDIT_BONUS
         await db.commit()
-        record_credit_metric("credit", 2)
+        record_credit_metric("credit", settings.WELCOME_CREDIT_BONUS)
+
+        # Boas-vindas fire-and-forget: roda APOS a resposta (threadpool); falha de SMTP
+        # e engolida dentro de send_welcome_email e nunca quebra a verificacao.
+        background_tasks.add_task(send_welcome_email, user.email, user.name, user.credits)
 
         # Credit referrer with 2 bonus credits (max 10 referrals per user)
         MAX_REFERRAL_BONUS_COUNT = 10
@@ -207,7 +217,7 @@ async def verify_email(request: Request, body: VerifyEmailRequest, db: AsyncSess
                 await db.commit()
                 record_credit_metric("referral_bonus", 2)
 
-        return {"status": "verified", "credits": 2}
+        return {"status": "verified", "credits": settings.WELCOME_CREDIT_BONUS}
 
 
 @router.post(

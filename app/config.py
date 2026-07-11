@@ -76,11 +76,20 @@ class Settings(BaseSettings):
     SFX_ENABLED: bool = True
     # Musica de fundo automatica na geracao inicial (mood por template; faixas royalty-free locais)
     AUTO_MUSIC_ENABLED: bool = True
-    AUTO_MUSIC_VOLUME: float = 0.12
+    AUTO_MUSIC_VOLUME: float = 0.30  # audivel (era 0.12 ~inaudivel); 0.45-0.55 quando o ducking sidechain entrar (P1)
 
     # Dialogo multi-locutor (text_to_dialogue): 2 vozes ElevenLabs pt-BR. Troque por env se quiser.
     DIALOGUE_VOICE_A: str = "KHmfNHtEjHhLK9eER20w"  # Fernanda (pt-BR, feminina)
     DIALOGUE_VOICE_B: str = "aRsdx5i9kl9PWUbkzxIp"  # Bruno - ClipIA (pt-BR, masculina, Voice Design)
+
+    # ── Telemetria de economia: custo ESTIMADO de API em USD por unidade ──────
+    # Estimativas ajustaveis por env; a aba Economia do admin compara com o credito
+    # cobrado ("senao estou gerando video e perdendo dinheiro"). Refine com a fatura real.
+    API_COST_LLM_PER_CALL_USD: float = 0.005  # roteiro/refino via cascata OpenRouter
+    API_COST_ELEVENLABS_PER_1K_CHARS_USD: float = 0.11
+    API_COST_GROQ_ASR_PER_JOB_USD: float = 0.001  # whisper-large no free tier ~0
+    API_COST_GPT_IMAGE_PER_IMAGE_USD: float = 0.06  # gpt-image medium 1024x1536
+    API_COST_SEEDANCE_PER_SECOND_USD: float = 0.12  # ai_video 720p
 
     # GPU
     DEVICE: str = "cuda"
@@ -127,10 +136,29 @@ class Settings(BaseSettings):
     CREDIT_COST_VOICE_DESIGN: int = 5  # criar voz custom (ElevenLabs Voice Design) — operacao paga
     CREDIT_COST_VOICE_CLONE: int = 5  # clonar voz (ElevenLabs Instant Voice Clone) — operacao paga
 
+    # Bonus de creditos ao verificar email. Default 2 (publico). Elevar temporariamente
+    # para um beta fechado (ex: 20) para que testadores consigam gerar varios videos sem
+    # comprar; voltar para 2 antes do lancamento publico. Nao afeta o bonus do referrer
+    # (sempre +2 fixo, ver app/auth/routes.py).
+    WELCOME_CREDIT_BONUS: int = 2
+
+    # Promocao de compra (beta): % de creditos BONUS sobre o pacote comprado, aplicado no
+    # credito pos-webhook (_credit_once — ponto unico MP+Stripe). 0 desliga. Ex.: 20 -> pacote
+    # popular (30) credita 36. Nao mexe em preco cobrado; rollback = voltar a 0 no .env + restart.
+    PURCHASE_BONUS_PERCENT: int = 0
+
     # Guardrail anti-burn: teto DIARIO de geracoes de video IA (Seedance ~R$0,67/s, ~R$20/Short) por
     # usuario. 0 desliga. Mesmo conta admin/seed (999k creditos) nao queima $ ilimitado num dia — foi
     # o vetor do gasto de ~$6 (tester com conta admin). Vale pra TODOS os planos, inclusive admin.
     MAX_AI_VIDEO_PER_DAY: int = 3
+
+    # Guardrail anti-burn: teto de cenas por video. Cada cena de ai_video/ai_image dispara UMA
+    # geracao PAGA (Seedance ~R$3,35/cena; gpt-image ~R$0,x/cena), enquanto o credito cobrado e
+    # FIXO por template. Um roteiro com cenas demais (LLM excede as "4-6" do prompt, ou prompt
+    # injection pedindo exaustividade) multiplica o custo sem multiplicar a receita. O clamp e
+    # PROPORCIONAL a duracao (max(6, ceil(dur/4))) p/ nao cortar videos longos legitimos, com este
+    # teto duro absoluto. Ver app/services/scriptwriter.py (aplicado apos o parse do roteiro).
+    MAX_SCENES_PER_VIDEO: int = 40
 
     # MercadoPago
     MP_ACCESS_TOKEN: str = ""
@@ -166,6 +194,12 @@ class Settings(BaseSettings):
     SMTP_USER: str = ""
     SMTP_PASSWORD: str = ""
     SMTP_FROM: str = "noreply@clipia.com.br"
+
+    # Suporte ao usuario (beta). Email vira Reply-To do welcome email; recebimento exige
+    # Cloudflare Email Routing (Resend e send-only). WhatsApp em formato wa.me (so digitos,
+    # ex: 5545999999999); vazio = link omitido do email.
+    SUPPORT_EMAIL: str = "suporte@clipia.com.br"
+    SUPPORT_WHATSAPP: str = ""
 
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
 

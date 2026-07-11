@@ -11,6 +11,8 @@ import Logo from "@/components/brand/Logo";
 import { FilmstripBackground } from "@/components/ui/FilmstripBackground";
 import { trackEvent, trackGA } from "@/components/TrackingScripts";
 import { TurnstileWidget } from "@/components/auth/TurnstileWidget";
+import { fetchPublicConfig } from "@/lib/config";
+import { useEffect } from "react";
 
 export default function RegisterPage() {
   const [name, setName] = useState("");
@@ -21,6 +23,11 @@ export default function RegisterPage() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [consentAccepted, setConsentAccepted] = useState(false);
+  // Bônus REAL de boas-vindas (backend é a fonte; nunca hardcodar oferta — DESIGN.md)
+  const [welcomeBonus, setWelcomeBonus] = useState<number | null>(null);
+  useEffect(() => {
+    fetchPublicConfig().then((c) => setWelcomeBonus(c.welcome_credit_bonus));
+  }, []);
   const { register } = useAuth();
   const router = useRouter();
 
@@ -58,11 +65,13 @@ export default function RegisterPage() {
         <div className="flex justify-center mb-6">
           <Logo size="lg" />
         </div>
-        <h1 className="text-xl sm:text-2xl font-bold text-center mb-2 text-white tracking-tight">
+        <h1 className="font-display text-2xl sm:text-3xl font-extrabold text-center mb-2 text-white tracking-tight">
           {strings.auth.register.title}
         </h1>
-        <p className="text-slate-400 text-center text-sm mb-8">
-          {strings.auth.register.subtitle}
+        <p className="text-[var(--text-secondary)] text-center text-sm mb-8">
+          {welcomeBonus
+            ? <>Confirme o e-mail e ganhe <span className="text-mint font-semibold">{welcomeBonus} créditos</span> — cada crédito é um vídeo narrado.</>
+            : strings.auth.register.subtitle}
         </p>
 
         <form onSubmit={handleSubmit} className="space-y-5">
@@ -116,7 +125,7 @@ export default function RegisterPage() {
                 required
                 minLength={8}
                 className="w-full px-4 py-3 pr-12 rounded-xl bg-white/5 border border-white/10 text-white placeholder-slate-500 focus:outline-none focus:border-coral/50 focus:bg-white/10 transition-colors"
-                placeholder="Minimo 8 caracteres"
+                placeholder="Mínimo 8 caracteres"
               />
               <button
                 type="button"

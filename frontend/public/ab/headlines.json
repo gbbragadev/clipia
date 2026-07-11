@@ -1,0 +1,29 @@
+{
+  "_doc": "Variantes de headline da landing + knobs de copy. Este arquivo é servido do disco em produção: editar aqui troca a copy SEM rebuild/redeploy. Trecho entre *asteriscos* fica coral. As chaves espelham AB_DEFAULTS em src/components/landing/lib/data.ts (fallback embutido). O CTA carrega utm_content=<secao>-<variante> para medir conversão por variante.",
+  "knobs": {
+    "showBonusBadge": true,
+    "freeClaim": "Grátis para começar: você ganha créditos de boas-vindas ao confirmar o e-mail. Sem cartão."
+  },
+  "sections": {
+    "hero": {
+      "A": "Digite o tema. *Baixe o vídeo pronto.*",
+      "B": "Sua ideia vira um *Reel narrado e legendado* em minutos.",
+      "C": "Este vídeo foi feito *inteiro por IA*. Crie o seu."
+    },
+    "criador": {
+      "A": "Você não precisa de editor. *Precisa de volume.*",
+      "B": "*Sua semana de vídeos* em uma tarde.",
+      "C": "Pare de perder a noite *editando um único Short*."
+    },
+    "agencia": {
+      "A": "Escale clientes, *não madrugadas*.",
+      "B": "A pauta do cliente entra. *A fila de Reels sai.*",
+      "C": "Mais clientes de vídeo, *sem contratar editor*."
+    },
+    "local": {
+      "A": "Seu negócio postando toda semana, *sem você aparecer*.",
+      "B": "Quem não posta, não é lembrado. *Poste sem aparecer.*",
+      "C": "Vídeo para o seu negócio: *sem câmera, sem editor*."
+    }
+  }
+}

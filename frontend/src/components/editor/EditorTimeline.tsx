@@ -4,7 +4,7 @@ import { useCallback, useRef } from 'react'
 import { useEditor } from '@/contexts/EditorContext'
 import { SubtitleTimeline } from './SubtitleTimeline'
 
-const SCENE_COLORS = ['#ff5638', '#3b82f6', '#06b6d4', '#10b981', '#f59e0b', '#ef4444']
+// Cor NÃO carrega significado por cena (auditoria F0): ativa = coral, demais neutras.
 
 function formatTime(seconds: number): string {
   const m = Math.floor(seconds / 60)
@@ -57,7 +57,6 @@ export function EditorTimeline() {
       <div className="editor-timeline__scenes" ref={scenesRef} onClick={handleSceneAreaClick}>
         {composition.scenes.map((scene, i) => {
           const widthPercent = (scene.duration_hint / totalHints) * 100
-          const color = SCENE_COLORS[i % SCENE_COLORS.length]
           const isActive = i === selectedSceneIndex
 
           return (
@@ -67,8 +66,8 @@ export function EditorTimeline() {
               style={{
                 flex: `0 0 ${widthPercent}%`,
                 background: isActive
-                  ? `linear-gradient(180deg, ${color}, ${color}aa)`
-                  : `${color}44`,
+                  ? 'linear-gradient(180deg, #ff5638, #ff5638aa)'
+                  : 'rgba(255,255,255,0.08)',
               }}
               onClick={(e) => { e.stopPropagation(); selectScene(i); seekToFrame(getSceneStartFrame(i)) }}
             >

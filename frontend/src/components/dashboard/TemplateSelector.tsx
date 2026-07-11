@@ -93,7 +93,7 @@ export default function TemplateSelector({ selected, onSelect, disabled, templat
               </div>
               <div className="text-xs mt-0.5" style={{ color: 'var(--text-tertiary)' }}>{t.description}</div>
               <div className="text-[10px] mt-1" style={{ color: 'var(--text-tertiary)' }}>
-                {cost} credito{cost > 1 ? 's' : ''}
+                {cost} crédito{cost > 1 ? 's' : ''}
               </div>
             </div>
           </button>

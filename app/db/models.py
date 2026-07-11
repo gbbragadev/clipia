@@ -15,6 +15,10 @@ class CreditPurchase(Base):
     user_id: Mapped[uuid.UUID] = mapped_column(GUID(), ForeignKey("users.id"), nullable=False)
     package_name: Mapped[str] = mapped_column(String(50), nullable=False)
     credits_amount: Mapped[int] = mapped_column(Integer, nullable=False)
+    # Bonus promocional creditado JUNTO com credits_amount no momento da aprovacao (snapshot da
+    # flag PURCHASE_BONUS_PERCENT na epoca da compra) — estorno reverte base+bonus mesmo se a
+    # promo ja tiver acabado.
+    bonus_credits: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     price_brl: Mapped[int] = mapped_column(Integer, nullable=False)  # centavos
     provider: Mapped[str] = mapped_column(
         String(20), nullable=False, default="mercadopago", server_default="mercadopago"
@@ -29,6 +33,21 @@ class CreditPurchase(Base):
     paid_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     user: Mapped["User"] = relationship(back_populates="purchases")
+
+
+class CreditAdjustment(Base):
+    """Auditoria de ajuste manual de creditos pelo admin (e dinheiro: quem, quanto, por que)."""
+
+    __tablename__ = "credit_adjustments"
+
+    id: Mapped[uuid.UUID] = mapped_column(GUID(), primary_key=True, default=uuid.uuid4)
+    admin_user_id: Mapped[uuid.UUID] = mapped_column(GUID(), ForeignKey("users.id"), nullable=False)
+    target_user_id: Mapped[uuid.UUID] = mapped_column(GUID(), ForeignKey("users.id"), nullable=False, index=True)
+    delta: Mapped[int] = mapped_column(Integer, nullable=False)
+    reason: Mapped[str] = mapped_column(String(255), nullable=False)
+    previous_balance: Mapped[int] = mapped_column(Integer, nullable=False)
+    new_balance: Mapped[int] = mapped_column(Integer, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
 class User(Base):
@@ -85,6 +104,9 @@ class Job(Base):
     credit_cost: Mapped[int] = mapped_column(Integer, default=1)
     voice_provider: Mapped[str] = mapped_column(String(50), default="edge")
     voice_config: Mapped[dict | None] = mapped_column(JsonType, nullable=True)
+    # Economia por job (consolidado no finalize): {steps: {etapa: segundos},
+    # total_seconds, api_cost_usd_est, credit_cost} — alimenta o admin/economy.
+    telemetry: Mapped[dict | None] = mapped_column(JsonType, nullable=True)
 
     user: Mapped["User"] = relationship(back_populates="jobs")
 
@@ -101,6 +123,21 @@ class VoiceClone(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     user: Mapped["User"] = relationship(back_populates="voice_clones")
+
+
+class Feedback(Base):
+    """Feedback do usuario: widget in-app (nota 1-5 + texto) e prompt pos-video (por job)."""
+
+    __tablename__ = "feedbacks"
+
+    id: Mapped[uuid.UUID] = mapped_column(GUID(), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(GUID(), ForeignKey("users.id"), nullable=False, index=True)
+    kind: Mapped[str] = mapped_column(String(20), nullable=False)  # widget | post_video
+    rating: Mapped[int | None] = mapped_column(Integer, nullable=True)  # 1-5
+    comment: Mapped[str | None] = mapped_column(Text, nullable=True)
+    job_id: Mapped[uuid.UUID | None] = mapped_column(GUID(), ForeignKey("jobs.id"), nullable=True)
+    source_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
 class WaitlistEntry(Base):

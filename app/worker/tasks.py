@@ -3,6 +3,9 @@ import json
 import logging
 import shutil
 import smtplib
+import subprocess
+import threading
+import time
 from datetime import datetime, timedelta, timezone
 from email.mime.text import MIMEText
 from pathlib import Path
@@ -27,6 +30,37 @@ logger = logging.getLogger(__name__)
 _redis = get_redis()
 
 
+def _write_thumbnail(video_path: str, thumb_path: str) -> None:
+    """Poster do card no dashboard: 1 frame em ~1.5s (depois do fade de abertura).
+
+    Falha de thumbnail NUNCA falha o job — o card tem fallback de gradiente.
+    """
+    try:
+        subprocess.run(
+            [
+                "ffmpeg",
+                "-y",
+                "-ss",
+                "1.5",
+                "-i",
+                video_path,
+                "-frames:v",
+                "1",
+                "-vf",
+                "scale=360:-2",
+                "-q:v",
+                "4",
+                thumb_path,
+            ],
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=True,
+        )
+    except Exception as e:  # noqa: BLE001 — best-effort por design
+        logger.warning(f"Thumbnail nao gerado para {video_path}: {e}")
+
+
 def _read_json_file(path: Path):
     """Read JSON tolerating legacy non-UTF-8 files (older worker wrote cp1252)."""
     raw = path.read_bytes()
@@ -46,14 +80,22 @@ def _update_job(
     error: str | None = None,
     detail: str | None = None,
 ):
+    now_iso = datetime.now(timezone.utc).isoformat()
     data = {
         "status": status,
         "current_step": step or "",
         "progress": str(progress),
         "error": error or "",
         "detail": detail or "",
+        # Heartbeat do watchdog: time limits do Celery sao no-op no pool solo
+        # (Windows); um job sem update ha mais que o limiar do step esta travado.
+        "updated_at": now_iso,
     }
-    _redis.hset(f"job:{job_id}", mapping=data)
+    key = f"job:{job_id}"
+    # Telemetria: primeiro timestamp de cada etapa (consolidado em duracao no finalize)
+    if step and not _redis_hget(key, f"t:{step}"):
+        data[f"t:{step}"] = now_iso
+    _redis.hset(key, mapping=data)
 
 
 def _redis_get(key: str) -> str | None:
@@ -301,6 +343,7 @@ def dispatch_pipeline(
     voice_provider: str = "edge",
     voice_config: dict | None = None,
     trend_context: str | None = None,
+    narration_mode: str = "single",
 ):
     from celery import chain
 
@@ -315,6 +358,7 @@ def dispatch_pipeline(
             "created_at": datetime.now(timezone.utc).isoformat(),
             "template_id": template_id,
             "voice_provider": voice_provider,
+            "narration_mode": narration_mode,
         },
     )
     # Store voice config in Redis for the worker to pick up
@@ -416,29 +460,32 @@ async def _cleanup_orphan_files_async() -> dict[str, int]:
     return {"removed_dirs": removed_dirs, "removed_outputs": removed_outputs, "reclaimed_bytes": total_reclaimed}
 
 
-ORPHAN_QUEUED_ERROR = "Job órfão: chain aparentemente abandonada (sem progresso há >60min)"
+ORPHAN_QUEUED_CUTOFF_HOURS = 6
+ORPHAN_QUEUED_ERROR = f"Job órfão: chain aparentemente abandonada (sem progresso há >{ORPHAN_QUEUED_CUTOFF_HOURS}h)"
 
 
 async def _find_orphan_queued_jobs_async() -> list[str]:
-    """Retorna os IDs de jobs em ``queued`` ha mais de 60min (chain provavelmente morta).
+    """Retorna os IDs de jobs em ``queued`` (Postgres) ha mais de 6h (chain provavelmente morta).
 
-    Worker e concurrency=1 e um job ativo atualiza progresso no Redis; um job queued ha
-    60min sem update e orfao (a chain morreu sem marcar failed). 60min e seguro porque e
-    bem maior que qualquer intervalo de poll/update de uma task legitima em processamento.
+    ATENCAO: o Postgres fica "queued" durante TODO o processamento (o status vivo anda so
+    no Redis; o Postgres muda no finalize/falha). Alem disso a fila e solo/concurrency=1:
+    com lote de temas, um job pode esperar horas em queued LEGITIMAMENTE. Por isso o cutoff
+    e 6h — o caso comum de travamento (processing estagnado) e coberto pelo watchdog de
+    heartbeat (:func:`_watchdog_pass`), que age em minutos.
     """
     from sqlalchemy import select
 
     from app.db.engine import worker_session as async_session  # NullPool: seguro com asyncio.run() por task
     from app.db.models import Job
 
-    cutoff = datetime.now(timezone.utc) - timedelta(minutes=60)
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=ORPHAN_QUEUED_CUTOFF_HOURS)
     async with async_session() as session:
         result = await session.execute(select(Job.id).where(Job.status == "queued", Job.created_at <= cutoff))
         return [str(jid) for jid in result.scalars().all()]
 
 
 def _reap_orphan_queued_jobs() -> int:
-    """Marca jobs queued orfaos (>60min) como ``failed`` e reembolsa o credito da geracao.
+    """Marca jobs queued orfaos (>6h) como ``failed`` e reembolsa o credito da geracao.
 
     Nao apaga o job (mantem para forense). Reutiliza ``_refund_job_credit`` para garantir a
     mesma logica de reembolso/integridade de creditos do resto do pipeline (job.credit_cost
@@ -447,11 +494,119 @@ def _reap_orphan_queued_jobs() -> int:
     orphan_ids = asyncio.run(_find_orphan_queued_jobs_async())
     for job_id in orphan_ids:
         logger.warning(
-            "Reaping orphan queued job %s (no progresso ha >60min) — marcando failed e reembolsando",
+            "Reaping orphan queued job %s (sem progresso ha >%dh) — marcando failed e reembolsando",
             job_id,
+            ORPHAN_QUEUED_CUTOFF_HOURS,
         )
         _refund_job_credit(job_id, "failed", ORPHAN_QUEUED_ERROR)
     return len(orphan_ids)
+
+
+# ── Watchdog de jobs travados em processamento ─────────────────────────────────
+# Time limits do Celery NAO funcionam no pool solo do Windows (comprovado: task de
+# compose com hard limit de 540s rodou 3h39). E uma task beat nao serve de vigia:
+# ela entraria na MESMA fila solo que o job travado ocupa. Por isso o watchdog roda
+# numa thread daemon do proprio processo do worker (o job ocupado esta em
+# subprocess/IO, entao o GIL nao bloqueia a thread).
+
+_WATCHDOG_INTERVAL_SECONDS = 300
+_WATCHDOG_DEFAULT_LIMIT = 900
+# Limiar de silencio (sem _update_job) por etapa, em segundos. Conservador de
+# proposito: falso-positivo = job vivo morto + estorno indevido. As etapas longas
+# (imagens IA, clipes IA) batem heartbeat por item, entao o silencio legitimo e curto.
+_WATCHDOG_STEP_LIMITS = {
+    "scripting": 300,
+    "generating_images": 600,
+    "generating_videos": 1500,
+    "tts": 600,
+    "transcribing": 300,
+    "media": 900,
+    "compositing": 1200,
+    "finalizing": 300,
+    # status "rendering" (re-render/export via Remotion)
+    "preparing": 600,
+    "encoding": 1800,
+}
+WATCHDOG_STUCK_ERROR = (
+    "Geração interrompida por falta de progresso na etapa '{step}' (sem atualização há {minutes}min). "
+    "O crédito foi devolvido."
+)
+
+
+def _watchdog_pass() -> int:
+    """Varre os hashes ``job:*`` e mata jobs ativos com heartbeat estagnado.
+
+    Acao dupla: seta a flag de cancelamento (a chain aborta no proximo checkpoint
+    ``_check_cancelled``) e marca failed + estorna via ``_refund_job_credit``
+    (idempotente — se a chain ainda estiver viva e cair no checkpoint, o cancel
+    nao estorna de novo). Retorna quantos jobs foram ceifados.
+    """
+    reaped = 0
+    now = datetime.now(timezone.utc)
+    for raw_key in _redis.scan_iter(match="job:*", count=200):
+        key = raw_key.decode() if isinstance(raw_key, bytes) else raw_key
+        if key.count(":") != 1:
+            continue  # flags auxiliares (job:{id}:cancelled etc.), nao o hash do job
+        data = _redis.hgetall(key)
+        status = data.get("status")
+        if status not in ("processing", "rendering"):
+            continue
+        job_id = key.split(":", 1)[1]
+
+        updated_raw = data.get("updated_at")
+        if not updated_raw:
+            # Job de antes do heartbeat existir: semeia a base agora e decide na
+            # proxima passada (autocura, nunca mata sem referencia de tempo).
+            _redis.hset(key, mapping={"updated_at": now.isoformat()})
+            continue
+        try:
+            last_update = datetime.fromisoformat(updated_raw)
+        except ValueError:
+            _redis.hset(key, mapping={"updated_at": now.isoformat()})
+            continue
+
+        step = data.get("current_step") or ""
+        limit = _WATCHDOG_STEP_LIMITS.get(step, _WATCHDOG_DEFAULT_LIMIT)
+        elapsed = (now - last_update).total_seconds()
+        if elapsed <= limit:
+            continue
+
+        # Re-checa na hora do abate: o finalize pode ter concluido entre o scan e ca.
+        if _redis.hgetall(key).get("status") not in ("processing", "rendering"):
+            continue
+
+        message = WATCHDOG_STUCK_ERROR.format(step=step or "?", minutes=int(elapsed // 60))
+        logger.error(
+            "Watchdog: job %s travado (%s ha %.0fs > %ds) — cancelando e estornando", job_id, step, elapsed, limit
+        )
+        _redis_set(f"job:{job_id}:cancelled", "true")
+        _refund_job_credit(job_id, "failed", message)
+        _enqueue_dead_letter(job_id, message)
+        reaped += 1
+    return reaped
+
+
+def _watchdog_loop() -> None:
+    while True:
+        try:
+            reaped = _watchdog_pass()
+            if reaped:
+                logger.warning("Watchdog reaped %d stuck job(s)", reaped)
+        except Exception:
+            logger.exception("Watchdog pass falhou (segue tentando)")
+        time.sleep(_WATCHDOG_INTERVAL_SECONDS)
+
+
+try:  # pragma: no cover - wiring do worker real; testes chamam _watchdog_pass direto
+    from celery.signals import worker_ready
+
+    @worker_ready.connect
+    def _start_watchdog_thread(**_kwargs):
+        thread = threading.Thread(target=_watchdog_loop, daemon=True, name="stuck-job-watchdog")
+        thread.start()
+        logger.info("Watchdog de jobs travados ativo (passada a cada %ds)", _WATCHDOG_INTERVAL_SECONDS)
+except ImportError:  # pragma: no cover
+    pass
 
 
 @celery_app.task(name="cleanup_old_jobs")
@@ -480,10 +635,25 @@ def task_generate_script(
     try:
         if _check_cancelled(job_id):
             return {"cancelled": True}
-        _update_job(job_id, "processing", "scripting", 0.1, detail="Gerando roteiro com IA...")
-        script = generate_script(topic, style, duration_target, template_id=template_id, trend_context=trend_context)
         job_dir = get_job_dir(job_id)
-        (job_dir / "script.json").write_text(json.dumps(script, ensure_ascii=False, indent=2), encoding="utf-8")
+        script_path = job_dir / "script.json"
+        if script_path.exists():
+            # Roteiro pronto: custom_script do usuario (preview editado) OU retry de uma
+            # task que ja gerou — reusa sem nova chamada de LLM.
+            _update_job(job_id, "processing", "scripting", 0.1, detail="Usando roteiro pronto...")
+            script = _read_json_file(script_path)
+        else:
+            _update_job(job_id, "processing", "scripting", 0.1, detail="Gerando roteiro com IA...")
+            force_dialogue = _redis_hget(f"job:{job_id}", "narration_mode") == "dialogue"
+            script = generate_script(
+                topic,
+                style,
+                duration_target,
+                template_id=template_id,
+                trend_context=trend_context,
+                force_dialogue=force_dialogue,
+            )
+            script_path.write_text(json.dumps(script, ensure_ascii=False, indent=2), encoding="utf-8")
 
         # Validate script
         scenes = script.get("scenes", [])
@@ -529,9 +699,10 @@ def task_synthesize_audio(self, script: dict, job_id: str, template_id: str = "s
         voice_provider_name = _redis_hget(f"job:{job_id}", "voice_provider") or "edge"
         voice_config_raw = _redis_hget(f"job:{job_id}", "voice_config")
         voice_config = json.loads(voice_config_raw) if voice_config_raw else None
+        narration_mode = _redis_hget(f"job:{job_id}", "narration_mode") or "single"
         template = get_template(template_id)
 
-        if template.script.is_dialogue:
+        if template.script.is_dialogue or narration_mode == "dialogue":
             from app.services.dialogue import synthesize_dialogue
 
             synthesize_dialogue(script["scenes"], output_path, duration_target=duration_target)
@@ -775,6 +946,7 @@ def task_compose_video(self, data: dict, job_id: str, template_id: str = "stock_
             layout=template.layout,
             music_path=music_path,
             music_volume=settings.AUTO_MUSIC_VOLUME,
+            overlays=data["script"].get("overlays"),
         )
         _update_job(job_id, "processing", "compositing", 0.9, detail="Video montado.")
         if settings.QUALITY_GATE_ENABLED:
@@ -795,6 +967,70 @@ def task_compose_video(self, data: dict, job_id: str, template_id: str = "stock_
         raise
 
 
+def _estimate_api_cost_usd(job_id: str, script_data: dict | None) -> float:
+    """Custo ESTIMADO de API do job em USD (constantes ajustaveis em settings).
+
+    Nao instrumenta cada provider (zero risco na pipeline): deriva do que o job
+    consumiu — template (fonte de midia), provedor de voz, tamanho da narracao,
+    numero de cenas. Estimativa honesta p/ a aba Economia; refine com a fatura.
+    """
+    key = f"job:{job_id}"
+    template = get_template(_redis_hget(key, "template_id") or "stock_narration")
+    voice_provider = _redis_hget(key, "voice_provider") or "edge"
+    narration_mode = _redis_hget(key, "narration_mode") or "single"
+    custom_script = _redis_hget(key, "custom_script") == "1"
+
+    script = script_data or {}
+    narration = script.get("narration") or ""
+    scenes = script.get("scenes") or []
+
+    cost = 0.0
+    if not custom_script:
+        cost += settings.API_COST_LLM_PER_CALL_USD  # roteiro
+    if voice_provider == "elevenlabs" or narration_mode == "dialogue" or template.voice.provider == "elevenlabs":
+        cost += (len(narration) / 1000) * settings.API_COST_ELEVENLABS_PER_1K_CHARS_USD
+    cost += settings.API_COST_GROQ_ASR_PER_JOB_USD
+    if template.media.source == "ai_image":
+        cost += len(scenes) * settings.API_COST_GPT_IMAGE_PER_IMAGE_USD
+    elif template.media.source == "ai_video":
+        total_secs = sum(float(s.get("duration_hint", 5) or 5) for s in scenes)
+        cost += total_secs * settings.API_COST_SEEDANCE_PER_SECOND_USD
+    return round(cost, 4)
+
+
+def _build_telemetry(job_id: str, script_data: dict | None) -> dict:
+    """Duracao por etapa (dos timestamps t:{step} do hash) + custo estimado de API."""
+    key = f"job:{job_id}"
+    data = _redis.hgetall(key)
+    starts: list[tuple[str, datetime]] = []
+    for field, raw in data.items():
+        if not str(field).startswith("t:"):
+            continue
+        try:
+            starts.append((str(field)[2:], datetime.fromisoformat(str(raw))))
+        except ValueError:
+            continue
+    starts.sort(key=lambda item: item[1])
+
+    now = datetime.now(timezone.utc)
+    steps: dict[str, float] = {}
+    for i, (step, started) in enumerate(starts):
+        ended = starts[i + 1][1] if i + 1 < len(starts) else now
+        steps[step] = round((ended - started).total_seconds(), 1)
+
+    created_raw = data.get("created_at")
+    try:
+        total = round((now - datetime.fromisoformat(str(created_raw))).total_seconds(), 1) if created_raw else None
+    except ValueError:
+        total = None
+
+    return {
+        "steps": steps,
+        "total_seconds": total,
+        "api_cost_usd_est": _estimate_api_cost_usd(job_id, script_data),
+    }
+
+
 @celery_app.task(name="finalize", bind=True, soft_time_limit=120, time_limit=150)
 def task_finalize(self, video_path: str, job_id: str) -> str:
     try:
@@ -807,6 +1043,7 @@ def task_finalize(self, video_path: str, job_id: str) -> str:
         shutil.copy2(final_src, final_path)
         if final_src != video_path:
             Path(final_src).unlink(missing_ok=True)
+        _write_thumbnail(final_path, str(output_dir / f"{job_id}.jpg"))
 
         # Save script to PostgreSQL for the editor (keep job dir for editing)
         try:
@@ -818,6 +1055,11 @@ def task_finalize(self, video_path: str, job_id: str) -> str:
             job_dir = get_job_dir(job_id)
             script_path = job_dir / "script.json"
             script_data = _read_json_file(script_path) if script_path.exists() else None
+            try:
+                telemetry = _build_telemetry(job_id, script_data)
+            except Exception as tel_err:  # noqa: BLE001 — telemetria nunca falha o finalize
+                logger.warning("telemetria do job %s falhou: %s", job_id, tel_err)
+                telemetry = None
 
             async def _save_script():
                 async with async_session() as session:
@@ -828,6 +1070,7 @@ def task_finalize(self, video_path: str, job_id: str) -> str:
                             script=script_data,
                             status="editable",
                             video_url=final_path,
+                            telemetry=telemetry,
                         )
                     )
                     await session.commit()
@@ -959,6 +1202,7 @@ def task_rerender_video(self, job_id: str) -> str:
                 music_volume=comp_data.get("musicVolume", settings.AUTO_MUSIC_VOLUME),
                 subtitle_style=comp_data.get("subtitleStyle"),
                 layout=re_template.layout,
+                overlays=comp_data.get("overlays"),
             )
 
         _update_job(job_id, "rendering", "finalizing", 0.9, detail="Finalizando re-render...")
@@ -966,7 +1210,11 @@ def task_rerender_video(self, job_id: str) -> str:
         # Copy to output dir (becomes downloadable version)
         output_dir = get_output_dir()
         final_path = str(output_dir / f"{job_id}.mp4")
-        shutil.copy2(output_path, final_path)
+        final_src = append_outro(output_path)  # selo de marca tambem no export editado (no-op-safe)
+        shutil.copy2(final_src, final_path)
+        if final_src != output_path:
+            Path(final_src).unlink(missing_ok=True)
+        _write_thumbnail(final_path, str(output_dir / f"{job_id}.jpg"))
 
         _update_job(job_id, "completed", None, 1.0, detail="Re-render concluido.")
         logger.info(f"Re-render completed for job {job_id}")

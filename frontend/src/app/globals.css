@@ -7,27 +7,30 @@
   --font-display: var(--font-display);
 }
 
-/* ── Theme Variables ── */
+/* ── Theme Variables ──
+   Dark-only (decisão 10/07/2026): o app logado usa a MESMA paleta coral/grafite da
+   landing (ink/panel/cloud/mist). Estes valores são espelho dos tokens @theme abaixo —
+   mudar lá exige mudar aqui. O tema claro foi aposentado. */
 :root, [data-theme="dark"] {
   --font-inter: var(--font-geist-sans), "Segoe UI", system-ui, sans-serif;
   --font-display: var(--font-sora), "Trebuchet MS", system-ui, sans-serif;
-  --bg-base: #0a0a12;
-  --bg-raised: #111118;
-  --bg-surface: #1A1A22;
-  --bg-surface-hover: #24242e;
-  --bg-nav: rgba(6, 6, 11, 0.7);
-  --border-subtle: rgba(255, 255, 255, 0.06);
-  --border-default: #333;
-  --border-hover: #555;
-  --text-primary: #f1f5f9;
-  --text-secondary: #94a3b8;
-  --text-tertiary: #666;
-  --text-muted: #555;
+  --bg-base: #0b0d15;            /* ink-2 */
+  --bg-raised: #11141d;          /* panel */
+  --bg-surface: #161a25;         /* panel-2 */
+  --bg-surface-hover: #1c2130;   /* panel-3 */
+  --bg-nav: rgba(8, 9, 15, 0.72); /* ink */
+  --border-subtle: rgba(255, 255, 255, 0.08); /* line */
+  --border-default: #2a3040;
+  --border-hover: #3d4457;
+  --text-primary: #f2f5fa;       /* cloud */
+  --text-secondary: #a6afc2;     /* mist */
+  --text-tertiary: #8b93a8;      /* mist-2 */
+  --text-muted: #7a8296;
   --surface-hover: rgba(255, 255, 255, 0.05);
   --card-bg: rgba(255, 255, 255, 0.03);
   --card-bg-hover: rgba(255, 255, 255, 0.06);
-  --card-border: rgba(255, 255, 255, 0.06);
-  --input-bg: #1A1A22;
+  --card-border: rgba(255, 255, 255, 0.08);
+  --input-bg: #161a25;
   /* Acentos da marca (coral/azure) — única fonte de verdade para o shell */
   --accent-primary: #ff5638;
   --accent-secondary: #3e9bff;
@@ -36,35 +39,6 @@
   --gradient-ambient-3: rgba(255, 122, 97, 0.04);
   --logo-text: #fff;
   --overlay-bg: rgba(0, 0, 0, 0.6);
-}
-
-[data-theme="light"] {
-  --font-inter: var(--font-geist-sans), "Segoe UI", system-ui, sans-serif;
-  --font-display: var(--font-sora), "Trebuchet MS", system-ui, sans-serif;
-  --bg-base: #f5f5f7;
-  --bg-raised: #ffffff;
-  --bg-surface: #ffffff;
-  --bg-surface-hover: #f3f4f6;
-  --bg-nav: rgba(255, 255, 255, 0.9);
-  --border-subtle: rgba(0, 0, 0, 0.08);
-  --border-default: #e5e7eb;
-  --border-hover: #9ca3af;
-  --text-primary: #111827;
-  --text-secondary: #4b5563;
-  --text-tertiary: #9ca3af;
-  --text-muted: #d1d5db;
-  --surface-hover: rgba(0, 0, 0, 0.03);
-  --card-bg: #ffffff;
-  --card-bg-hover: #f9fafb;
-  --card-border: rgba(0, 0, 0, 0.1);
-  --input-bg: #ffffff;
-  --accent-primary: #ff5638;
-  --accent-secondary: #3e9bff;
-  --gradient-ambient-1: rgba(255, 86, 56, 0.04);
-  --gradient-ambient-2: rgba(62, 155, 255, 0.03);
-  --gradient-ambient-3: rgba(255, 122, 97, 0.02);
-  --logo-text: #111827;
-  --overlay-bg: rgba(255, 255, 255, 0.8);
 }
 
 * { box-sizing: border-box; }
@@ -101,15 +75,9 @@ body::before {
   backdrop-filter: blur(8px);
   transition: all 0.2s;
 }
-[data-theme="light"] .card {
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06), 0 1px 2px rgba(0, 0, 0, 0.04);
-}
 .card:hover {
   background: var(--card-bg-hover);
   border-color: rgba(255, 86, 56, 0.25);
-}
-[data-theme="light"] .card:hover {
-  box-shadow: 0 4px 12px rgba(255, 86, 56, 0.08), 0 2px 4px rgba(0, 0, 0, 0.04);
 }
 
 /* Buttons */
@@ -170,10 +138,10 @@ body::before {
 }
 
 /* ============================================================
-   Landing redesign — paleta coral/grafite (escopada à landing).
-   Tokens novos (ink/panel/coral/azure/mint/cloud/mist/line); o token
-   'surface' do protótipo foi renomeado p/ 'panel' p/ não colidir com a
-   utility .bg-surface existente. Dashboard/editor seguem no roxo até o port.
+   Paleta coral/grafite ÚNICA (landing + app logado — port concluído 10/07/2026).
+   Tokens ink/panel/coral/azure/mint/cloud/mist/line; o token 'surface' do
+   protótipo foi renomeado p/ 'panel' p/ não colidir com a utility .bg-surface.
+   success/warn/danger são os semânticos de status (StatusBadge etc.).
    ============================================================ */
 @theme {
   --color-ink: #08090f;
@@ -189,6 +157,9 @@ body::before {
   --color-mist: #a6afc2;
   --color-mist-2: #8b93a8;
   --color-line: rgba(255, 255, 255, 0.08);
+  --color-success: #43e0ad;
+  --color-warn: #fbbf24;
+  --color-danger: #f87171;
 }
 
 @layer utilities {
@@ -241,3 +212,16 @@ body::before {
 @keyframes marquee { to { transform: translateX(-50%); } }
 .anim-marquee { animation: marquee 30s linear infinite; }
 .anim-marquee:hover { animation-play-state: paused; }
+
+/* Landing — procedural scene thumbnails (Hero storyboard + phone preview) */
+@keyframes scene-fade {
+  from { opacity: 0; transform: scale(1.03); }
+  to { opacity: 1; transform: scale(1); }
+}
+.anim-scene-fade { animation: scene-fade 480ms cubic-bezier(0.2, 0.7, 0.2, 1) both; }
+/* Slow Ken Burns zoom for the active scene in the phone preview. */
+.scene-active > div:first-child { transform: scale(1.045); }
+.scene-grain {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  background-size: 120px 120px;
+}

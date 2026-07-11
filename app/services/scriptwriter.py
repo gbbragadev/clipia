@@ -1,6 +1,7 @@
 import json
 import logging
 
+from app.config import settings
 from app.services.llm import complete_text_ex, strip_code_fences
 from app.templates import get_template
 
@@ -78,11 +79,37 @@ REGRAS DE DIÁLOGO:
 - Falas naturais e com ritmo de conversa real; juntas, explicam/contam o tema.
 """
 
+FORMAT_ADAPT_INSTRUCTION = """
+
+ADAPTACAO DE FORMATO:
+- Se o tema NAO se encaixar na estrutura pedida acima (ex.: tema narrativo ou historia pessoal
+  com formato de lista de fatos numerados), ADAPTE a estrutura ao tema mantendo o espirito do
+  formato (gancho forte, ritmo, CTA).
+- NUNCA invente fatos falsos apenas para preencher o formato.
+- A coerencia do roteiro com o tema tem prioridade sobre a estrutura rigida do formato.
+"""
+
 TREND_CONTEXT_INSTRUCTION = """
 
 CONTEXTO REAL (tendencia atual — ancore o roteiro nestes fatos/angulos reais, sem inventar dados):
 {trend_context}
 """
+
+REFINE_PROMPT = """Voce e um roteirista de videos curtos virais. Melhore o roteiro abaixo seguindo a instrucao do usuario.
+
+INSTRUCAO DO USUARIO: {instruction}
+
+ROTEIRO ATUAL (JSON):
+{script_json}
+
+REGRAS:
+- Mantenha EXATAMENTE o mesmo formato JSON (mesmos campos por cena; preserve keywords_en/visual_hint/speaker quando existirem)
+- Altere APENAS o que a instrucao pede; preserve o resto
+- A soma dos duration_hint deve continuar EXATAMENTE {duration} segundos
+- A concatenacao dos "text" deve formar a narracao completa (atualize "narration" junto)
+- Portugues brasileiro natural; sem emojis
+
+Retorne APENAS o JSON do roteiro melhorado."""
 
 
 def generate_script(
@@ -91,9 +118,13 @@ def generate_script(
     duration_target: int,
     template_id: str = "stock_narration",
     trend_context: str | None = None,
+    force_dialogue: bool = False,
 ) -> dict:
     template = get_template(template_id)
     word_count = int(duration_target * template.script.word_rate)
+    # narration_mode="dialogue" liga o roteiro em conversa em templates dialogue_capable
+    # sem tocar no preset do template (a sintese usa as 2 vozes de settings.DIALOGUE_VOICE_*)
+    is_dialogue = template.script.is_dialogue or force_dialogue
 
     prompt_text = SCRIPT_PROMPT.format(
         topic=topic,
@@ -124,7 +155,7 @@ def generate_script(
             '"visual_hint": "descricao concreta da cena",\n      "duration_hint": 7',
         )
 
-    if template.script.is_dialogue:
+    if is_dialogue:
         prompt_text += DIALOGUE_INSTRUCTION
         prompt_text = prompt_text.replace(
             '"duration_hint": 7',
@@ -132,6 +163,8 @@ def generate_script(
         )
 
     prompt_text += template.script.prompt_extra
+
+    prompt_text += FORMAT_ADAPT_INSTRUCTION
 
     if trend_context and trend_context.strip():
         prompt_text += TREND_CONTEXT_INSTRUCTION.format(trend_context=trend_context.strip())
@@ -142,6 +175,25 @@ def generate_script(
     if not raw:
         raise ScriptValidationError("LLM retornou resposta vazia (reasoning pode ter estourado o max_tokens)")
     script = _parse_script_json(raw)
+
+    # Guardrail anti-burn: clampa o nº de cenas ANTES de _fix_durations (que redistribui a
+    # duracao pelas cenas restantes). Cada cena de ai_video/ai_image = 1 geracao PAGA; sem teto,
+    # um roteiro com cenas demais (LLM excede as "4-6", ou prompt injection pedindo exaustividade)
+    # multiplica o custo com credito fixo. Teto PROPORCIONAL a duracao (>=6, no maximo 1 cena por
+    # ~4s) limitado pelo teto duro absoluto — nao corta videos longos legitimos.
+    scenes = script.get("scenes")
+    if isinstance(scenes, list):
+        max_scenes = min(settings.MAX_SCENES_PER_VIDEO, max(6, -(-duration_target // 4)))
+        if len(scenes) > max_scenes:
+            logger.warning(
+                "roteiro com %d cenas clampado para %d (duracao=%ds, template=%s) — anti-burn",
+                len(scenes),
+                max_scenes,
+                duration_target,
+                template_id,
+            )
+            script["scenes"] = scenes[:max_scenes]
+
     # Metadado de qualidade (Q7): qual provedor da cascata atendeu. Viaja dentro do
     # script (persistido no Postgres via finalize) — degradacao fica visivel sem migration.
     script["llm_provider"] = llm_provider
@@ -157,11 +209,40 @@ def generate_script(
                 raise ScriptValidationError(f"cena {i+1} sem visual_hint (template {template_id} exige)")
 
     # Dialogue: normalize speaker to A/B (default A) so synthesis always has a valid voice
-    if template.script.is_dialogue:
+    if is_dialogue:
         for sc in script.get("scenes", []):
             sc["speaker"] = "B" if str(sc.get("speaker", "A")).strip().upper() == "B" else "A"
 
     return script
+
+
+def refine_script(script: dict, instruction: str, duration_target: int, template_id: str = "stock_narration") -> dict:
+    """Refina um roteiro existente segundo a instrucao do usuario (custa 0,5 credito,
+    debitado server-side na rota). Mantem o formato e re-valida duracoes."""
+    template = get_template(template_id)
+    prompt = REFINE_PROMPT.format(
+        instruction=instruction.strip(),
+        script_json=json.dumps(script, ensure_ascii=False),
+        duration=duration_target,
+    )
+    raw, llm_provider = complete_text_ex(prompt)
+    raw = strip_code_fences(raw)
+    if not raw:
+        raise ScriptValidationError("LLM retornou resposta vazia no refino")
+    refined = _parse_script_json(raw)
+    refined["llm_provider"] = llm_provider
+    refined = _fix_durations(refined, duration_target)
+    refined = _apply_default_transitions(refined)
+    if template.script.needs_visual_hint:
+        for i, sc in enumerate(refined.get("scenes", [])):
+            if not sc.get("visual_hint", "").strip():
+                # refino nao pode perder o visual_hint: recupera da cena original correspondente
+                original = script.get("scenes") or []
+                if i < len(original) and original[i].get("visual_hint"):
+                    sc["visual_hint"] = original[i]["visual_hint"]
+                else:
+                    raise ScriptValidationError(f"cena {i+1} sem visual_hint apos o refino")
+    return refined
 
 
 def _parse_script_json(raw: str) -> dict:

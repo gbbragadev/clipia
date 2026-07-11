@@ -17,9 +17,9 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.auth.service import decode_access_token
 from app.config import settings
-from app.redis_pool import get_redis
 from app.db.engine import build_engine
 from app.db.models import CreditPurchase, Job
+from app.redis_pool import get_redis
 from app.worker.celery_app import celery_app
 
 logger = logging.getLogger("clipia.access")
@@ -161,7 +161,7 @@ def _storage_check() -> dict[str, Any]:
     return {
         "status": status,
         "writable": writable,
-        "free_gb": round(usage.free / (1024 ** 3), 2),
+        "free_gb": round(usage.free / (1024**3), 2),
     }
 
 
@@ -194,23 +194,25 @@ async def render_metrics() -> str:
         "# TYPE clipia_requests_total counter",
     ]
     for (method, path, status_code), count in sorted(request_counts.items()):
-        lines.append(
-            f'clipia_requests_total{{method="{method}",path="{path}",status="{status_code}"}} {count}'
-        )
+        lines.append(f'clipia_requests_total{{method="{method}",path="{path}",status="{status_code}"}} {count}')
 
-    lines.extend([
-        "",
-        "# HELP clipia_active_jobs Active jobs by status",
-        "# TYPE clipia_active_jobs gauge",
-    ])
+    lines.extend(
+        [
+            "",
+            "# HELP clipia_active_jobs Active jobs by status",
+            "# TYPE clipia_active_jobs gauge",
+        ]
+    )
     for status, count in sorted(active_jobs.items()):
         lines.append(f'clipia_active_jobs{{status="{status}"}} {count}')
 
-    lines.extend([
-        "",
-        "# HELP clipia_credits_total Total credits transacted",
-        "# TYPE clipia_credits_total counter",
-    ])
+    lines.extend(
+        [
+            "",
+            "# HELP clipia_credits_total Total credits transacted",
+            "# TYPE clipia_credits_total counter",
+        ]
+    )
     for kind, amount in sorted(credit_totals.items()):
         lines.append(f'clipia_credits_total{{type="{kind}"}} {amount}')
 
@@ -223,12 +225,15 @@ def _snapshot_request_counts() -> Counter[tuple[str, str, str]]:
 
 
 async def _get_active_job_counts() -> dict[str, int]:
+    # Inclui 'failed' e 'completed' (nao so os ativos): sem isso, um pico de jobs falhados nao
+    # dispara alerta via /metrics — o dono lancaria cego pra taxa de erro (objetivo: acompanhar uso).
+    _JOB_STATUSES = ("queued", "processing", "failed", "completed")
     async with _runtime_session() as session:
         result = await session.execute(
-            select(Job.status, func.count()).where(Job.status.in_(("queued", "processing"))).group_by(Job.status)
+            select(Job.status, func.count()).where(Job.status.in_(_JOB_STATUSES)).group_by(Job.status)
         )
     counts = {status: count for status, count in result.all()}
-    for status in ("queued", "processing"):
+    for status in _JOB_STATUSES:
         counts.setdefault(status, 0)
     return counts
 

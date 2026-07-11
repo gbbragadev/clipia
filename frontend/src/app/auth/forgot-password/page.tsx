@@ -34,11 +34,11 @@ export default function ForgotPasswordPage() {
         <div className="flex justify-center mb-4">
           <Logo size="lg" />
         </div>
-        <h1 className="text-xl font-semibold text-center mb-2 text-gray-200">
+        <h1 className="font-display text-2xl font-extrabold text-center mb-2 text-white tracking-tight">
           {strings.auth.login.forgotPassword}
         </h1>
         <p className="text-slate-400 text-center text-sm mb-8">
-          Enviaremos um codigo de 6 digitos para redefinir sua senha
+          Enviaremos um código de 6 dígitos para redefinir sua senha
         </p>
 
         <form onSubmit={handleSubmit} className="space-y-4">

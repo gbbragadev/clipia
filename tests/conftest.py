@@ -39,7 +39,7 @@ class FakeRedis:
     def hget(self, key: str, field: str) -> str | None:
         return self.data.get(key, {}).get(field)
 
-    def set(self, key: str, value: str):
+    def set(self, key: str, value: str, ex: int | None = None):
         self.values[key] = str(value)
 
     def get(self, key: str) -> str | None:
@@ -56,6 +56,13 @@ class FakeRedis:
     def delete(self, key: str):
         self.data.pop(key, None)
         self.values.pop(key, None)
+
+    def scan_iter(self, match: str = "*", count: int = 100):
+        import fnmatch
+
+        for key in list(self.data.keys()) + list(self.values.keys()):
+            if fnmatch.fnmatch(key, match):
+                yield key
 
     def clear(self):
         self.data.clear()

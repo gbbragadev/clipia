@@ -64,8 +64,17 @@ export function saveBlob(blob: Blob, filename: string): void {
   const anchor = document.createElement('a')
   anchor.href = objectUrl
   anchor.download = filename
+  anchor.rel = 'noopener'
+  // O anchor PRECISA estar no DOM (Firefox ignora .click() em elemento solto), e o
+  // revoke/remoção PRECISAM ser adiados um tick: revogar o objectURL no mesmo tick do
+  // click aborta o download em varios browsers — era o bug de "nao baixa o video".
+  anchor.style.display = 'none'
+  document.body.appendChild(anchor)
   anchor.click()
-  URL.revokeObjectURL(objectUrl)
+  setTimeout(() => {
+    URL.revokeObjectURL(objectUrl)
+    anchor.remove()
+  }, 0)
 }
 
 export async function fetchAuthenticatedBlobUrl(url: string, onProgress?: DownloadProgress): Promise<string> {

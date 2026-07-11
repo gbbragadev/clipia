@@ -228,6 +228,7 @@ def _extract_frame(video_path: Path):
         text=True,
         encoding="utf-8",
         errors="replace",
+        timeout=30,
     )
     try:
         dur = float(json.loads(probe.stdout)["format"]["duration"])
@@ -252,6 +253,7 @@ def _extract_frame(video_path: Path):
             "-",
         ],
         capture_output=True,
+        timeout=60,
     )
     if not out.stdout:
         return None

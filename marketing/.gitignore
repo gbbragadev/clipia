@@ -1,0 +1,10 @@
+# midia pesada fica fora do git (repo local-only, mas nao inchar)
+*.mp4
+*.mp3
+*.m4a
+*.wav
+*.webm
+*.png
+*.jpg
+**/raw/
+**/tmp/

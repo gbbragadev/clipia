@@ -2,9 +2,14 @@
 // This only produces plausible pt-BR scaffolding text — real generation happens
 // after creating an account. See the disclaimer in the demo section.
 
+import type { Accent } from "./data";
+
 export interface Scene {
   caption: string; // short on-screen label
   narration: string; // full voiceover line (used as word-by-word caption preview)
+  // Visual hints for procedural thumbnails (optional; default applied by consumers).
+  accent?: Accent;
+  icon?: string;
 }
 
 export interface GeneratedScript {
@@ -22,12 +27,12 @@ const TEMPLATES: Record<
   curiosidades: {
     hook: (t) => `${t} que parecem mentira`,
     pool: [
-      { caption: "PARECIA IMPOSSÍVEL", narration: "A primeira curiosidade sobre isso surpreende até quem já estudou o assunto." },
-      { caption: "NINGUÉM CONTA", narration: "A segunda vai mudar a forma como você enxerga isso no dia a dia." },
-      { caption: "A MAIOR SURPRESA", narration: "E a última é tão impressionante que vale o vídeo inteiro." },
-      { caption: "POR ISSO IMPORTA", narration: "É exatamente esse tipo de detalhe que prende a atenção desde o início." },
-      { caption: "CONFIRA AGORA", narration: "Fica até o final, porque a melhor curiosidade ainda está por vir." },
-      { caption: "COMENTA AÍ", narration: "Qual dessas você já conhecia? Conta nos comentários." },
+      { caption: "PARECIA IMPOSSÍVEL", narration: "A primeira curiosidade sobre isso surpreende até quem já estudou o assunto.", accent: "azure", icon: "planet" },
+      { caption: "NINGUÉM CONTA", narration: "A segunda vai mudar a forma como você enxerga isso no dia a dia.", accent: "coral", icon: "star" },
+      { caption: "A MAIOR SURPRESA", narration: "E a última é tão impressionante que vale o vídeo inteiro.", accent: "mint", icon: "galaxy" },
+      { caption: "POR ISSO IMPORTA", narration: "É exatamente esse tipo de detalhe que prende a atenção desde o início.", accent: "azure", icon: "blackhole" },
+      { caption: "CONFIRA AGORA", narration: "Fica até o final, porque a melhor curiosidade ainda está por vir.", accent: "coral", icon: "rocket" },
+      { caption: "COMENTA AÍ", narration: "Qual dessas você já conhecia? Conta nos comentários.", accent: "mint", icon: "satellite" },
     ],
   },
   motivacional: {

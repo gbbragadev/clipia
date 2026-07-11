@@ -74,6 +74,7 @@ def _get_duration(path: str) -> float:
         ["ffprobe", "-v", "quiet", "-print_format", "json", "-show_format", path],
         capture_output=True,
         text=True,
+        timeout=10,
     )
     data = json.loads(result.stdout)
     return float(data["format"]["duration"])
@@ -85,6 +86,7 @@ def _has_nvenc() -> bool:
         ["ffmpeg", "-hide_banner", "-encoders"],
         capture_output=True,
         text=True,
+        timeout=5,
     )
     return "h264_nvenc" in result.stdout
 
@@ -135,27 +137,35 @@ def _prepare_static_image(img_path: str, duration: float, output_clip: str, scen
         f"crop=1080:1920,setsar=1"
     )
 
+    # Sem -t de INPUT: zoompan emite d frames POR frame de entrada, entao um input
+    # de duration*fps frames viraria d*duration*fps frames (~90k/cena, horas de
+    # encode — caso real: job de 60s levou 3h39). Com 1 frame expandido pelo filtro
+    # e -frames:v limitando a saida, o clip tem exatamente duration*fps frames.
     cmd = [
         "ffmpeg",
         "-y",
         "-loop",
         "1",
-        "-t",
-        str(duration),
         "-i",
         img_path,
         "-vf",
         vf,
+        "-frames:v",
+        str(frames),
         "-r",
         str(fps),
         "-c:v",
         "libx264",
+        "-preset",
+        "veryfast",
+        "-crf",
+        "23",
         "-pix_fmt",
         "yuv420p",
         "-an",
         output_clip,
     ]
-    subprocess.run(cmd, check=True, capture_output=True)
+    _run(cmd, "prepare static image")
 
 
 def _prepare_scene(media_path: str, duration: float, output_clip: str, scene_index: int = 0) -> None:
@@ -315,9 +325,7 @@ def _compose_split_screen(
 
     if music_path and Path(music_path).exists():
         inputs += ["-stream_loop", "-1", "-i", music_path]
-        filter_complex += (
-            f";[1:a]volume=1.0[narr];[2:a]volume={music_volume}[mus];[narr][mus]amix=inputs=2:duration=first[aout]"
-        )
+        filter_complex += f";[1:a]aresample=48000,volume=1.0[narr];[2:a]aresample=48000,volume={music_volume}[mus];[narr][mus]amix=inputs=2:duration=first[aout]"
         maps_and_audio += ["-map", "[aout]"]
     else:
         maps_and_audio += ["-map", "1:a"]
@@ -381,9 +389,7 @@ def _compose_character_overlay(
 
     if music_path and Path(music_path).exists():
         inputs += ["-stream_loop", "-1", "-i", music_path]
-        filter_complex += (
-            f";[2:a]volume=1.0[narr];[3:a]volume={music_volume}[mus];[narr][mus]amix=inputs=2:duration=first[aout]"
-        )
+        filter_complex += f";[2:a]aresample=48000,volume=1.0[narr];[3:a]aresample=48000,volume={music_volume}[mus];[narr][mus]amix=inputs=2:duration=first[aout]"
         maps_and_audio += ["-map", "[aout]"]
     else:
         maps_and_audio += ["-map", "2:a"]
@@ -434,7 +440,7 @@ def compose_short(
 
     # For non-fullscreen layouts with a single looped media, dispatch to specialized composers
     if layout and layout.type != "fullscreen" and len(media_paths) == 1:
-        ss = subtitle_style or {}
+        ss = subtitle_style or {}  # fullscreen path
 
         # For split-screen, position subtitles in the top region
         position = ss.get("position", "bottom")
@@ -458,7 +464,7 @@ def compose_short(
             margin_v=margin_v,
             stroke_width=ss.get("strokeWidth", 2),
             position=position,
-            accent_color=ss.get("accentColor", "#FFFC00"),
+            accent_color=ss.get("accentColor", "#F05340"),
         )
 
         bg_path = str(job_dir / "bg_loop.mp4")
@@ -564,7 +570,7 @@ def compose_short(
         margin_v=ss.get("marginBottom", 180),
         stroke_width=ss.get("strokeWidth", 2),
         position=ss.get("position", "bottom"),
-        accent_color=ss.get("accentColor", "#FFFC00"),
+        accent_color=ss.get("accentColor", "#F05340"),
     )
 
     # 6. Build video filter chain: subtitles + overlays + watermark
@@ -604,7 +610,7 @@ def compose_short(
                 "-i",
                 music_path,
                 "-filter_complex",
-                f"[1:a]volume=1.0[narr];[2:a]volume={music_volume}[mus];[narr][mus]amix=inputs=2:duration=first[aout]",
+                f"[1:a]aresample=48000,volume=1.0[narr];[2:a]aresample=48000,volume={music_volume}[mus];[narr][mus]amix=inputs=2:duration=first[aout]",
                 "-map",
                 "0:v",
                 "-map",

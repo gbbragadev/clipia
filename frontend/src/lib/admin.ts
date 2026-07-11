@@ -105,3 +105,140 @@ export async function fetchAdminDashboard(range: AdminRange): Promise<AdminDashb
     'Nao foi possivel carregar o painel administrativo',
   )
 }
+
+export interface AdminUserItem {
+  id: string
+  email: string
+  name: string
+  credits: number
+  plan: string
+  email_verified: boolean
+  created_at: string | null
+  is_paying: boolean
+}
+
+export interface AdminPurchaseItem {
+  id: string
+  user_email: string
+  package_name: string
+  credits_amount: number
+  bonus_credits: number
+  price_brl: number
+  provider: string
+  status: string
+  created_at: string | null
+  paid_at: string | null
+}
+
+export interface AdminJobItem {
+  id: string
+  user_email: string
+  topic: string
+  template_id: string
+  status: string
+  credit_cost: number
+  created_at: string | null
+  error: string | null
+}
+
+interface AdminPage {
+  total: number
+  page: number
+  page_size: number
+}
+
+function adminQuery(params: Record<string, string | number | undefined>): string {
+  const search = new URLSearchParams()
+  for (const [key, value] of Object.entries(params)) {
+    if (value !== undefined && value !== '') search.set(key, String(value))
+  }
+  const qs = search.toString()
+  return qs ? `?${qs}` : ''
+}
+
+export async function fetchAdminUsers(params: { search?: string; page?: number }) {
+  return fetchJson<AdminPage & { users: AdminUserItem[] }>(
+    `${API_BASE}/api/v1/admin/users${adminQuery(params)}`,
+    { headers: authHeaders() },
+    'Nao foi possivel carregar os usuarios',
+  )
+}
+
+export async function fetchAdminPurchases(params: { status?: string; page?: number }) {
+  return fetchJson<AdminPage & { purchases: AdminPurchaseItem[] }>(
+    `${API_BASE}/api/v1/admin/purchases${adminQuery(params)}`,
+    { headers: authHeaders() },
+    'Nao foi possivel carregar as compras',
+  )
+}
+
+export async function fetchAdminJobs(params: { status?: string; page?: number }) {
+  return fetchJson<AdminPage & { jobs: AdminJobItem[] }>(
+    `${API_BASE}/api/v1/admin/jobs${adminQuery(params)}`,
+    { headers: authHeaders() },
+    'Nao foi possivel carregar os videos',
+  )
+}
+
+// ── Economia por job (telemetria consolidada no finalize) ──────────────────
+
+export interface AdminEconomyJob {
+  job_id: string
+  template_id: string
+  voice_provider: string
+  created_at: string | null
+  total_seconds: number | null
+  steps: Record<string, number>
+  api_cost_usd_est: number
+  credit_cost: number
+}
+
+export interface AdminEconomyTemplateAgg {
+  count: number
+  api_cost_usd_est: number
+  credits: number
+  total_seconds: number
+  avg_cost_usd: number
+  avg_seconds: number
+}
+
+export interface AdminEconomyResponse {
+  jobs: AdminEconomyJob[]
+  by_template: Record<string, AdminEconomyTemplateAgg>
+}
+
+export async function fetchAdminEconomy() {
+  return fetchJson<AdminEconomyResponse>(
+    `${API_BASE}/api/v1/admin/economy`,
+    { headers: authHeaders() },
+    'Nao foi possivel carregar a economia',
+  )
+}
+
+export interface AdminFeedbackItem {
+  id: string
+  user_email: string
+  kind: 'widget' | 'post_video'
+  rating: number | null
+  comment: string | null
+  job_id: string | null
+  job_topic: string | null
+  source_url: string | null
+  created_at: string | null
+}
+
+export async function fetchAdminFeedbacks(params: { kind?: string; page?: number }) {
+  return fetchJson<AdminPage & { feedbacks: AdminFeedbackItem[] }>(
+    `${API_BASE}/api/v1/admin/feedbacks${adminQuery(params)}`,
+    { headers: authHeaders() },
+    'Nao foi possivel carregar os feedbacks',
+  )
+}
+
+export async function adjustUserCredits(userId: string, delta: number, reason: string) {
+  return fetchJson<{ user_id: string; delta: number; previous_balance: number; new_balance: number }>(
+    `${API_BASE}/api/v1/admin/users/${userId}/adjust-credits`,
+    { method: 'POST', headers: authHeaders(), body: JSON.stringify({ delta, reason }) },
+    'Nao foi possivel ajustar os creditos',
+  )
+}

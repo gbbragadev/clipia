@@ -5,6 +5,7 @@ import { createPortal } from 'react-dom'
 import { Download, Loader2, Pencil, Share2, X } from 'lucide-react'
 import { motion } from 'motion/react'
 import { fetchAuthenticatedBlob, saveBlob } from '@/lib/download'
+import { markPostVideoFeedbackGiven, postVideoFeedbackGiven, submitFeedback } from '@/lib/feedback'
 import { DURATIONS, EASE, useReducedMotionState } from '@/lib/motion'
 import { useToast } from '@/components/ui/feedback'
 import type { JobSummary } from '@/lib/editor-api'
@@ -28,6 +29,19 @@ export default function VideoPlayerModal({ job, onClose, onEdit }: VideoPlayerMo
   const [loadError, setLoadError] = useState<string | null>(null)
   const [retryKey, setRetryKey] = useState(0)
   const blobRef = useRef<{ blob: Blob; filename: string | null } | null>(null)
+  // Prompt pós-vídeo: 1x por job (localStorage), dismissível, some após responder.
+  const [askFeedback, setAskFeedback] = useState(() => !postVideoFeedbackGiven(job.job_id))
+
+  const sendPostVideoFeedback = useCallback(
+    (liked: boolean) => {
+      markPostVideoFeedbackGiven(job.job_id)
+      setAskFeedback(false)
+      submitFeedback({ kind: 'post_video', rating: liked ? 5 : 1, job_id: job.job_id })
+        .then(() => toastSuccess('Valeu pelo feedback!', liked ? 'Bom saber que curtiu. 🎬' : 'Vamos melhorar — obrigado por avisar.'))
+        .catch(() => { /* feedback é best-effort; não incomodar o usuário com erro */ })
+    },
+    [job.job_id, toastSuccess],
+  )
 
   const fallbackFilename = `clipia-${job.job_id.slice(0, 8)}.mp4`
   const canEdit = onEdit && ['completed', 'editable'].includes(job.status)
@@ -159,6 +173,39 @@ export default function VideoPlayerModal({ job, onClose, onEdit }: VideoPlayerMo
             </div>
           )}
         </div>
+
+        {/* Prompt pós-vídeo (1x por job) */}
+        {askFeedback && src && (
+          <div className="flex items-center justify-between gap-2 border-t border-white/5 px-4 py-2.5">
+            <p className="text-xs text-slate-400">O vídeo ficou bom?</p>
+            <div className="flex items-center gap-1.5">
+              <button
+                type="button"
+                onClick={() => sendPostVideoFeedback(true)}
+                aria-label="Gostei do vídeo"
+                className="rounded-lg bg-white/5 px-3 py-1.5 text-sm transition hover:bg-white/15"
+              >
+                👍
+              </button>
+              <button
+                type="button"
+                onClick={() => sendPostVideoFeedback(false)}
+                aria-label="Não gostei do vídeo"
+                className="rounded-lg bg-white/5 px-3 py-1.5 text-sm transition hover:bg-white/15"
+              >
+                👎
+              </button>
+              <button
+                type="button"
+                onClick={() => { markPostVideoFeedbackGiven(job.job_id); setAskFeedback(false) }}
+                aria-label="Dispensar pergunta de feedback"
+                className="rounded-lg p-1.5 text-slate-500 transition hover:bg-white/10 hover:text-white"
+              >
+                <X size={12} />
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* Ações */}
         <div className="flex gap-2 border-t border-white/5 p-3">

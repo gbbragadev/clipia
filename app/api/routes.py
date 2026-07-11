@@ -17,15 +17,18 @@ from app.api.security import get_owned_job
 from app.auth.dependencies import get_current_admin_user, get_current_user
 from app.config import settings
 from app.db.engine import get_db
-from app.db.models import CreditPurchase, Job, User, VoiceClone, WaitlistEntry
+from app.db.models import CreditAdjustment, CreditPurchase, Feedback, Job, User, VoiceClone, WaitlistEntry
 from app.errors import ErrorMessages, not_found_error, validate_uuid
 from app.models import (
+    AdminCreditAdjustRequest,
     AISuggestRequest,
     CompositionResponse,
     EditRequest,
+    FeedbackRequest,
     GenerateRequest,
     JobStatus,
     RegenerateTTSRequest,
+    ScriptRefineRequest,
     VoiceDesignRequest,
     WaitlistRequest,
 )
@@ -34,9 +37,9 @@ from app.pricing import get_generation_credit_cost
 from app.redis_pool import get_redis
 from app.services.llm import complete_text, strip_code_fences
 from app.services.remotion import scene_sort_key
-from app.services.trends import fetch_trends
+from app.services.trends import fetch_trends, get_example_topics
 from app.templates import get_template
-from app.utils.files import bytes_to_gb, path_size_bytes
+from app.utils.files import bytes_to_gb, get_job_dir, path_size_bytes
 from app.utils.locks import get_lock
 from app.utils.media_url import sign_media_url
 from app.utils.ratelimit import client_ip
@@ -189,7 +192,21 @@ async def generate(
     db: AsyncSession = Depends(get_db),
 ):
     """Queue a video generation job."""
-    credit_cost = get_generation_credit_cost(req.template_id, req.voice_provider)
+    # Dialogo usa 2 vozes ElevenLabs na sintese: o custo e SEMPRE o pricing elevenlabs,
+    # decidido aqui (server-side) — nunca por campo de custo vindo do cliente.
+    cost_provider = "elevenlabs" if req.narration_mode == "dialogue" else req.voice_provider
+    credit_cost = get_generation_credit_cost(req.template_id, cost_provider)
+
+    # Refinos de roteiro (0,5 cada) acumulados em Redis pelo /script-preview/refine:
+    # cobra a parte INTEIRA junto da geracao e carrega o resto (2 refinos = 1 credito;
+    # 1 refino sozinho fica anotado p/ a proxima — nunca cobra a mais).
+    refine_key = f"script_refine_pending:{user.id}"
+    try:
+        refine_owed = float(_redis.get(refine_key) or 0.0)
+    except (TypeError, ValueError):
+        refine_owed = 0.0
+    refine_extra = int(refine_owed)
+    credit_cost += refine_extra
 
     # Guardrail $: video IA (Seedance) e a operacao mais cara. Teto DIARIO por usuario, vale ate p/
     # conta admin/seed (foi o vetor do gasto de ~$6). O lock por usuario serializa get->incr (sem race).
@@ -225,6 +242,14 @@ async def generate(
             raise HTTPException(status_code=401, detail=ErrorMessages.UNAUTHORIZED)
         record_credit_metric("debit", credit_cost)
 
+        # Debito ok: liquida a parte inteira dos refinos e carrega o resto (ex.: 0,5)
+        if refine_extra > 0:
+            remainder = round(refine_owed - refine_extra, 2)
+            if remainder > 0:
+                _redis.set(refine_key, str(remainder), ex=86400)
+            else:
+                _redis.delete(refine_key)
+
         job = Job(
             user_id=fresh_user.id,
             topic=req.topic,
@@ -258,18 +283,42 @@ async def generate(
         job_meta["sfx_enabled"] = "1" if req.sfx_enabled else "0"
     if req.music_enabled is not None:
         job_meta["music_enabled"] = "1" if req.music_enabled else "0"
+    if req.narration_mode != "single":
+        job_meta["narration_mode"] = req.narration_mode
     _redis.hset(f"job:{job_id}", mapping=job_meta)
 
-    dispatch_pipeline(
-        job_id,
-        req.topic,
-        req.style,
-        req.duration_target,
-        template_id=req.template_id,
-        voice_provider=req.voice_provider,
-        voice_config=req.voice_config,
-        trend_context=req.trend_context,
-    )
+    # Roteiro pronto (preview editado): grava script.json ANTES do dispatch — a task
+    # generate_script detecta o arquivo e pula a chamada de LLM (1o rascunho incluso).
+    if req.custom_script is not None:
+        script_path = get_job_dir(job_id) / "script.json"
+        script_path.write_text(json.dumps(req.custom_script, ensure_ascii=False, indent=2), encoding="utf-8")
+        _redis.hset(f"job:{job_id}", mapping={"custom_script": "1"})
+
+    try:
+        dispatch_pipeline(
+            job_id,
+            req.topic,
+            req.style,
+            req.duration_target,
+            template_id=req.template_id,
+            voice_provider=req.voice_provider,
+            voice_config=req.voice_config,
+            trend_context=req.trend_context,
+            narration_mode=req.narration_mode,
+        )
+    except Exception as e:  # noqa: BLE001 — enfileirar falhou (Celery/Redis down): estorna p/ nao cobrar sem gerar
+        await _refund_credits(db, user.id, credit_cost)
+        if cap_key:
+            _redis.decr(cap_key)  # devolve a cota diaria de ai_video consumida na linha ~243
+        _redis.hset(
+            f"job:{job_id}",
+            mapping={"status": "failed", "error": "Falha ao enfileirar a geracao. Credito estornado."},
+        )
+        logger.error("dispatch_pipeline falhou job=%s user=%s: %s — credito estornado", job_id, user.id, e)
+        raise HTTPException(
+            status_code=503,
+            detail="Nao foi possivel iniciar a geracao agora. Seu credito foi estornado, tente novamente em instantes.",
+        )
 
     if is_ai_video:
         # Telemetria de custo p/ medir gasto real (dono pediu): Seedance ~R$0,67/s.
@@ -281,6 +330,93 @@ async def generate(
             job_id,
         )
     return {"job_id": job_id, "status": "queued", "credit_cost": credit_cost}
+
+
+# ── Rascunho de roteiro (preview gratis + refino 0,5) ────────────────────────
+
+_SCRIPT_PREVIEW_HOURLY_CAP = 10
+
+
+def _script_preview_rate_limit(user_id) -> None:
+    """Cap horario compartilhado preview+refino (anti-farming de LLM)."""
+    key = f"script_preview_rl:{user_id}:{datetime.now(timezone.utc).strftime('%Y%m%d%H')}"
+    count = _redis.incr(key)
+    _redis.expire(key, 3900)
+    if int(count) > _SCRIPT_PREVIEW_HOURLY_CAP:
+        raise HTTPException(
+            status_code=429,
+            detail=f"Limite de {_SCRIPT_PREVIEW_HOURLY_CAP} rascunhos/refinos por hora atingido. Tente mais tarde.",
+        )
+
+
+@router.post(
+    "/script-preview",
+    summary="Rascunho do roteiro (grátis)",
+    description="Gera o roteiro ANTES do vídeo para revisar/editar. O 1º rascunho é incluso no custo da geração.",
+    responses={200: {"description": "Roteiro gerado"}},
+)
+async def script_preview(
+    req: GenerateRequest,
+    user: User = Depends(get_current_user),
+):
+    """Preview do roteiro sem debitar (incluso). Anti-farming: exige saldo suficiente
+    para gerar o video deste template + cap horario."""
+    cost_provider = "elevenlabs" if req.narration_mode == "dialogue" else req.voice_provider
+    template_cost = get_generation_credit_cost(req.template_id, cost_provider)
+    if user.credits < template_cost:
+        raise HTTPException(status_code=402, detail=ErrorMessages.INSUFFICIENT_CREDITS)
+    _script_preview_rate_limit(user.id)
+
+    from app.services.scriptwriter import generate_script
+
+    try:
+        # LLM sync: thread p/ nao bloquear o event loop (gotcha do 502)
+        script = await asyncio.to_thread(
+            generate_script,
+            req.topic,
+            req.style,
+            req.duration_target,
+            req.template_id,
+            req.trend_context,
+            req.narration_mode == "dialogue",
+        )
+    except Exception as e:  # noqa: BLE001 — preview nunca cobra; erro vira 502 legivel
+        logger.warning("script-preview falhou user=%s: %s", user.id, e)
+        raise HTTPException(status_code=502, detail="Não foi possível gerar o rascunho agora. Tente novamente.")
+
+    refine_owed = float(_redis.get(f"script_refine_pending:{user.id}") or 0.0)
+    return {"script": script, "refine_cost": 0.5, "refine_pending": refine_owed}
+
+
+@router.post(
+    "/script-preview/refine",
+    summary="Refinar o rascunho (0,5 crédito)",
+    description="Melhora o roteiro conforme a instrução. Custa 0,5 crédito, somado ao custo da próxima geração.",
+    responses={200: {"description": "Roteiro refinado"}},
+)
+async def script_preview_refine(
+    req: ScriptRefineRequest,
+    user: User = Depends(get_current_user),
+):
+    """Refino = 0,5 credito ACUMULADO server-side (Redis) e liquidado no proximo
+    /generate (parte inteira; o resto carrega). Nunca um campo de custo do cliente."""
+    _script_preview_rate_limit(user.id)
+
+    from app.services.scriptwriter import refine_script
+
+    try:
+        refined = await asyncio.to_thread(
+            refine_script, req.script, req.instruction, req.duration_target, req.template_id
+        )
+    except Exception as e:  # noqa: BLE001
+        logger.warning("script-refine falhou user=%s: %s", user.id, e)
+        raise HTTPException(status_code=502, detail="Não foi possível refinar o rascunho agora. Tente novamente.")
+
+    # Debita os 0,5 SOMENTE com refino entregue
+    refine_key = f"script_refine_pending:{user.id}"
+    pending = float(_redis.get(refine_key) or 0.0) + 0.5
+    _redis.set(refine_key, str(pending), ex=86400)
+    return {"script": refined, "refine_cost": 0.5, "refine_pending": pending}
 
 
 @router.post(
@@ -325,6 +461,27 @@ async def get_trends(
         logger.warning("fetch_trends falhou para nicho=%s: %s", nicho, e)
         trends = []
     return {"trends": trends}
+
+
+@router.get(
+    "/example-topics/{nicho}",
+    summary="Temas prontos do nicho",
+    description="8 temas prontos pt-BR gerados por IA, renovados a cada hora (cache).",
+    responses={200: {"description": "Lista de temas"}},
+)
+async def example_topics(
+    nicho: str,
+    user: User = Depends(get_current_user),
+):
+    """Temas rotativos por IA (cache 1h). Lista vazia em falha — o frontend usa o
+    fallback estático de niches.ts, então o painel NUNCA fica sem sugestão.
+    Autenticado: evita farming de LLM por anônimos."""
+    try:
+        topics = await get_example_topics(nicho)
+    except Exception as e:  # noqa: BLE001 — sugestões são best-effort
+        logger.warning("example_topics falhou para nicho=%s: %s", nicho, e)
+        topics = []
+    return {"topics": topics}
 
 
 @router.get(
@@ -375,6 +532,38 @@ async def download_job(
     return FileResponse(str(file_path), media_type="video/mp4", filename=f"clipia-{str(job.id)[:8]}.mp4")
 
 
+@router.get(
+    "/jobs/{job_id}/thumbnail",
+    summary="Job thumbnail",
+    description="Poster JPEG do video final (frame extraido no finalize).",
+    responses={200: {"description": "JPEG"}, 404: {"description": "Not found"}},
+)
+async def job_thumbnail(
+    job_id: str,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    job = await get_owned_job(db, user, job_id)
+    file_path = Path(settings.STORAGE_DIR) / "output" / f"{job.id}.jpg"
+    if not file_path.exists():
+        raise not_found_error()
+    return FileResponse(str(file_path), media_type="image/jpeg")
+
+
+@router.get(
+    "/config",
+    summary="Public config",
+    description="Valores de oferta exibidos no frontend (nunca hardcodar copy de oferta).",
+    responses={200: {"description": "Config"}},
+)
+async def public_config():
+    """Fonte única dos números prometidos na UI (guardrail de confiança do DESIGN.md)."""
+    return {
+        "welcome_credit_bonus": settings.WELCOME_CREDIT_BONUS,
+        "purchase_bonus_percent": settings.PURCHASE_BONUS_PERCENT,
+    }
+
+
 @router.post(
     "/waitlist",
     status_code=201,
@@ -414,6 +603,8 @@ async def list_templates():
             "media_source": t.media.source,
             "default_voice_provider": t.voice.provider,
             "default_voice_id": t.voice.voice_id,
+            # Aceita o modo dialogo (2 vozes)? dialogue_duo ja E dialogo nativo -> False (sem toggle).
+            "dialogue_capable": t.dialogue_capable,
             "credit_costs": {
                 "edge": get_generation_credit_cost(t.id, "edge"),
                 "elevenlabs": get_generation_credit_cost(t.id, "elevenlabs"),
@@ -1011,7 +1202,22 @@ async def render_video(
             "detail": "Re-render enfileirado...",
         },
     )
-    task_rerender_video.delay(job_id)
+    try:
+        task_rerender_video.delay(job_id)
+    except Exception as e:  # noqa: BLE001 — enfileirar falhou (Celery/Redis down): estorna e reverte
+        if cost > 0:
+            await _refund_credits(db, user.id, cost)
+            job.pending_credits = float(cost)  # restaura p/ a re-tentativa cobrar de novo
+            await db.commit()
+        _redis.hset(
+            f"job:{job_id}",
+            mapping={"status": "completed", "detail": "Re-render nao pode ser enfileirado; credito estornado."},
+        )
+        logger.error("task_rerender_video.delay falhou job=%s: %s — credito estornado", job_id, e)
+        raise HTTPException(
+            status_code=503,
+            detail="Nao foi possivel iniciar o re-render agora. Seu credito foi estornado, tente novamente.",
+        )
 
     return {
         "status": "rendering",
@@ -1100,6 +1306,30 @@ async def list_jobs(
     """List all jobs for the current user, with real-time status from Redis."""
     result = await db.execute(select(Job).where(Job.user_id == user.id).order_by(Job.created_at.desc()).limit(50))
     jobs = result.scalars().all()
+
+    # Fila global p/ "N na frente" (worker solo = 1 por vez). O Postgres fica
+    # "queued" durante todo o processamento, entao ele lista os candidatos; o
+    # Redis diz quem segue ativo de verdade (o job rodando tambem conta na fila).
+    # Lazy: so paga o custo quando o usuario tem job aguardando.
+    live_queue: list | None = None
+
+    async def _queue_ahead_of(created_at) -> int | None:
+        nonlocal live_queue
+        if created_at is None:
+            return None
+        if live_queue is None:
+            q = await db.execute(
+                select(Job.id, Job.created_at).where(Job.status == "queued").order_by(Job.created_at).limit(200)
+            )
+            live_queue = []
+            for jid, jcreated in q.all():
+                live = _redis.hgetall(f"job:{jid}")
+                live_status = live.get("status") if live else None
+                # sem hash = ainda nem comecou (na fila); ativos seguem na conta
+                if live_status in (None, "", "queued", "processing", "rendering"):
+                    live_queue.append(jcreated)
+        return sum(1 for other in live_queue if other and other < created_at)
+
     items = []
     for j in jobs:
         # Redis has the real-time status; DB may be stale
@@ -1124,6 +1354,12 @@ async def list_jobs(
                 "duration_target": j.duration_target,
                 "created_at": j.created_at.isoformat() if j.created_at else None,
                 "download_url": f"/api/v1/jobs/{j.id}/download" if downloadable else None,
+                # Poster do card (gerado no finalize; ausente em jobs antigos -> fallback no front)
+                "thumbnail_url": (
+                    f"/api/v1/jobs/{j.id}/thumbnail"
+                    if (Path(settings.STORAGE_DIR) / "output" / f"{j.id}.jpg").exists()
+                    else None
+                ),
                 # Progresso em tempo real p/ a grid reativa (o hash do Redis ja esta em maos).
                 "progress": float(redis_data.get("progress") or 0) if redis_data else 0.0,
                 "current_step": (redis_data.get("current_step") or None) if redis_data else None,
@@ -1131,9 +1367,59 @@ async def list_jobs(
                 # Redis = tempo real; script JSONB = durabilidade (sobrevive a reboot do Redis).
                 "degraded": (redis_data.get("degraded") == "1" if redis_data else False)
                 or (isinstance(j.script, dict) and j.script.get("llm_provider") == "openrouter-free"),
+                # Posicao honesta na fila do worker (solo): so para quem esta aguardando.
+                "queue_position": (await _queue_ahead_of(j.created_at)) if status == "queued" else None,
             }
         )
     return items
+
+
+@router.get(
+    "/admin/economy",
+    summary="Economia por job",
+    description="Custo estimado de API vs créditos cobrados, por job e por template.",
+    responses={200: {"description": "Telemetria de economia"}},
+)
+async def admin_economy(
+    _admin_user: User = Depends(get_current_admin_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Margem real da operação: telemetria consolidada no finalize de cada job.
+    Jobs antigos (sem telemetry) ficam de fora — a visão cresce com o uso."""
+    result = await db.execute(select(Job).where(Job.telemetry.isnot(None)).order_by(Job.created_at.desc()).limit(100))
+    jobs = result.scalars().all()
+
+    items = []
+    by_template: dict[str, dict] = {}
+    for j in jobs:
+        tel = j.telemetry or {}
+        cost = float(tel.get("api_cost_usd_est") or 0.0)
+        items.append(
+            {
+                "job_id": str(j.id),
+                "template_id": j.template_id,
+                "voice_provider": j.voice_provider,
+                "created_at": j.created_at.isoformat() if j.created_at else None,
+                "total_seconds": tel.get("total_seconds"),
+                "steps": tel.get("steps") or {},
+                "api_cost_usd_est": cost,
+                "credit_cost": j.credit_cost,
+            }
+        )
+        agg = by_template.setdefault(
+            j.template_id, {"count": 0, "api_cost_usd_est": 0.0, "credits": 0, "total_seconds": 0.0}
+        )
+        agg["count"] += 1
+        agg["api_cost_usd_est"] = round(agg["api_cost_usd_est"] + cost, 4)
+        agg["credits"] += j.credit_cost or 0
+        agg["total_seconds"] += float(tel.get("total_seconds") or 0.0)
+
+    for agg in by_template.values():
+        n = agg["count"] or 1
+        agg["avg_cost_usd"] = round(agg["api_cost_usd_est"] / n, 4)
+        agg["avg_seconds"] = round(agg["total_seconds"] / n, 1)
+
+    return {"jobs": items, "by_template": by_template}
 
 
 @router.get(
@@ -1352,6 +1638,290 @@ async def storage_stats(
     db: AsyncSession = Depends(get_db),
 ):
     return await _build_storage_stats(db)
+
+
+def _admin_pagination(page: int, page_size: int) -> tuple[int, int]:
+    """Clamp de paginacao dos endpoints admin (page >= 1, page_size 1..100)."""
+    return max(1, page), min(max(1, page_size), 100)
+
+
+@router.get(
+    "/admin/users",
+    summary="Admin: list users",
+    description="Paginated user list with search by email/name.",
+    responses={200: {"description": "Users"}},
+)
+async def admin_list_users(
+    search: str = "",
+    page: int = 1,
+    page_size: int = 50,
+    _admin_user: User = Depends(get_current_admin_user),
+    db: AsyncSession = Depends(get_db),
+):
+    page, page_size = _admin_pagination(page, page_size)
+    stmt = select(User)
+    count_stmt = select(func.count()).select_from(User)
+    if search.strip():
+        like = f"%{search.strip()}%"
+        cond = User.email.ilike(like) | User.name.ilike(like)
+        stmt = stmt.where(cond)
+        count_stmt = count_stmt.where(cond)
+
+    total = (await db.execute(count_stmt)).scalar() or 0
+    rows = await db.execute(stmt.order_by(User.created_at.desc()).offset((page - 1) * page_size).limit(page_size))
+    users = list(rows.scalars().all())
+
+    paying: set[str] = set()
+    if users:
+        paying_rows = await db.execute(
+            select(CreditPurchase.user_id)
+            .where(CreditPurchase.user_id.in_([u.id for u in users]), CreditPurchase.status == "approved")
+            .distinct()
+        )
+        paying = {str(uid) for uid in paying_rows.scalars().all()}
+
+    return {
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+        "users": [
+            {
+                "id": str(u.id),
+                "email": u.email,
+                "name": u.name,
+                "credits": u.credits,
+                "plan": u.plan,
+                "email_verified": u.email_verified,
+                "created_at": u.created_at.isoformat() if u.created_at else None,
+                "is_paying": str(u.id) in paying,
+            }
+            for u in users
+        ],
+    }
+
+
+@router.get(
+    "/admin/purchases",
+    summary="Admin: list purchases",
+    description="Paginated purchase list with status filter.",
+    responses={200: {"description": "Purchases"}},
+)
+async def admin_list_purchases(
+    status: str = "",
+    page: int = 1,
+    page_size: int = 50,
+    _admin_user: User = Depends(get_current_admin_user),
+    db: AsyncSession = Depends(get_db),
+):
+    page, page_size = _admin_pagination(page, page_size)
+    stmt = select(CreditPurchase, User.email).join(User, CreditPurchase.user_id == User.id)
+    count_stmt = select(func.count()).select_from(CreditPurchase)
+    if status.strip():
+        stmt = stmt.where(CreditPurchase.status == status.strip())
+        count_stmt = count_stmt.where(CreditPurchase.status == status.strip())
+
+    total = (await db.execute(count_stmt)).scalar() or 0
+    rows = await db.execute(
+        stmt.order_by(CreditPurchase.created_at.desc()).offset((page - 1) * page_size).limit(page_size)
+    )
+
+    return {
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+        "purchases": [
+            {
+                "id": str(p.id),
+                "user_email": email,
+                "package_name": p.package_name,
+                "credits_amount": p.credits_amount,
+                "bonus_credits": p.bonus_credits,
+                "price_brl": p.price_brl,
+                "provider": p.provider,
+                "status": p.status,
+                "created_at": p.created_at.isoformat() if p.created_at else None,
+                "paid_at": p.paid_at.isoformat() if p.paid_at else None,
+            }
+            for p, email in rows.all()
+        ],
+    }
+
+
+@router.get(
+    "/admin/jobs",
+    summary="Admin: list jobs",
+    description="Paginated job list with status filter.",
+    responses={200: {"description": "Jobs"}},
+)
+async def admin_list_jobs(
+    status: str = "",
+    page: int = 1,
+    page_size: int = 50,
+    _admin_user: User = Depends(get_current_admin_user),
+    db: AsyncSession = Depends(get_db),
+):
+    page, page_size = _admin_pagination(page, page_size)
+    stmt = select(Job, User.email).join(User, Job.user_id == User.id)
+    count_stmt = select(func.count()).select_from(Job)
+    if status.strip():
+        stmt = stmt.where(Job.status == status.strip())
+        count_stmt = count_stmt.where(Job.status == status.strip())
+
+    total = (await db.execute(count_stmt)).scalar() or 0
+    rows = await db.execute(stmt.order_by(Job.created_at.desc()).offset((page - 1) * page_size).limit(page_size))
+
+    return {
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+        "jobs": [
+            {
+                "id": str(j.id),
+                "user_email": email,
+                "topic": j.topic,
+                "template_id": j.template_id,
+                "status": j.status,
+                "credit_cost": j.credit_cost,
+                "created_at": j.created_at.isoformat() if j.created_at else None,
+                "error": j.error,
+            }
+            for j, email in rows.all()
+        ],
+    }
+
+
+@router.post(
+    "/feedback",
+    status_code=201,
+    summary="Submit feedback",
+    description="User feedback: in-app widget (rating 1-5 + comment) or post-video prompt (per job).",
+    responses={201: {"description": "Saved"}},
+)
+@limiter.limit("5/minute")
+async def submit_feedback(
+    request: Request,
+    req: FeedbackRequest,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    job_uuid = None
+    if req.job_id:
+        job_uuid = validate_uuid(req.job_id)
+        job = await db.get(Job, job_uuid)
+        if not job or job.user_id != user.id:
+            raise not_found_error()
+
+    db.add(
+        Feedback(
+            user_id=user.id,
+            kind=req.kind,
+            rating=req.rating,
+            comment=(req.comment or "").strip() or None,
+            job_id=job_uuid,
+            source_url=req.source_url,
+        )
+    )
+    await db.commit()
+    return {"status": "ok"}
+
+
+@router.get(
+    "/admin/feedbacks",
+    summary="Admin: list feedbacks",
+    description="Paginated feedback list with kind filter.",
+    responses={200: {"description": "Feedbacks"}},
+)
+async def admin_list_feedbacks(
+    kind: str = "",
+    page: int = 1,
+    page_size: int = 50,
+    _admin_user: User = Depends(get_current_admin_user),
+    db: AsyncSession = Depends(get_db),
+):
+    page, page_size = _admin_pagination(page, page_size)
+    stmt = (
+        select(Feedback, User.email, Job.topic)
+        .join(User, Feedback.user_id == User.id)
+        .outerjoin(Job, Feedback.job_id == Job.id)
+    )
+    count_stmt = select(func.count()).select_from(Feedback)
+    if kind.strip():
+        stmt = stmt.where(Feedback.kind == kind.strip())
+        count_stmt = count_stmt.where(Feedback.kind == kind.strip())
+
+    total = (await db.execute(count_stmt)).scalar() or 0
+    rows = await db.execute(stmt.order_by(Feedback.created_at.desc()).offset((page - 1) * page_size).limit(page_size))
+
+    return {
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+        "feedbacks": [
+            {
+                "id": str(f.id),
+                "user_email": email,
+                "kind": f.kind,
+                "rating": f.rating,
+                "comment": f.comment,
+                "job_id": str(f.job_id) if f.job_id else None,
+                "job_topic": topic,
+                "source_url": f.source_url,
+                "created_at": f.created_at.isoformat() if f.created_at else None,
+            }
+            for f, email, topic in rows.all()
+        ],
+    }
+
+
+@router.post(
+    "/admin/users/{user_id}/adjust-credits",
+    summary="Admin: adjust user credits",
+    description="Manually add/remove credits with mandatory reason (audited in credit_adjustments).",
+    responses={200: {"description": "Adjusted"}},
+)
+async def admin_adjust_credits(
+    user_id: str,
+    req: AdminCreditAdjustRequest,
+    admin_user: User = Depends(get_current_admin_user),
+    db: AsyncSession = Depends(get_db),
+):
+    target = await db.get(User, validate_uuid(user_id))
+    if not target:
+        raise not_found_error()
+
+    previous = target.credits
+    new_balance = max(0, previous + req.delta)  # clamp: saldo nunca fica negativo
+    target.credits = new_balance
+    db.add(
+        CreditAdjustment(
+            admin_user_id=admin_user.id,
+            target_user_id=target.id,
+            delta=req.delta,
+            reason=req.reason.strip(),
+            previous_balance=previous,
+            new_balance=new_balance,
+        )
+    )
+    await db.commit()
+
+    applied = new_balance - previous
+    if applied:
+        record_credit_metric("credit" if applied > 0 else "debit", abs(applied))
+    logger.warning(
+        "Admin %s ajustou creditos de %s: %+d (%d -> %d) motivo=%s",
+        admin_user.email,
+        target.email,
+        req.delta,
+        previous,
+        new_balance,
+        req.reason.strip(),
+    )
+    return {
+        "user_id": str(target.id),
+        "delta": req.delta,
+        "previous_balance": previous,
+        "new_balance": new_balance,
+    }
 
 
 @router.get(

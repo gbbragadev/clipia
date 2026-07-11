@@ -3,12 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { fetchHistory, type PurchaseHistoryItem } from '@/lib/payments'
 import { InlineError } from '@/components/ui/feedback'
-
-const STATUS_LABELS: Record<string, { label: string; color: string }> = {
-  approved: { label: 'Aprovado', color: '#22c55e' },
-  pending: { label: 'Pendente', color: '#eab308' },
-  rejected: { label: 'Rejeitado', color: '#ef4444' },
-}
+import { StatusBadge, purchaseStatusBadge } from '@/components/ui/StatusBadge'
 
 export default function PurchaseHistory() {
   const [purchases, setPurchases] = useState<PurchaseHistoryItem[]>([])
@@ -77,7 +72,7 @@ export default function PurchaseHistory() {
         </thead>
         <tbody>
           {purchases.map((p) => {
-            const st = STATUS_LABELS[p.status] || { label: p.status, color: 'var(--text-tertiary)' }
+            const st = purchaseStatusBadge(p.status)
             const date = new Date(p.created_at).toLocaleDateString('pt-BR')
             const price = `R$ ${(p.price_brl / 100).toFixed(2).replace('.', ',')}`
             return (
@@ -87,12 +82,14 @@ export default function PurchaseHistory() {
                 <td className="px-4 py-3 text-center" style={{ color: 'var(--accent-primary, #ff5638)' }}>{p.credits_amount}</td>
                 <td className="px-4 py-3 text-right" style={{ color: 'var(--text-primary)' }}>{price}</td>
                 <td className="px-4 py-3 text-center">
-                  <span
-                    className="inline-block px-2 py-0.5 rounded-full text-xs font-medium"
-                    style={{ backgroundColor: `${st.color}20`, color: st.color }}
+                  <StatusBadge
+                    variant={st.variant}
+                    className={p.status === 'pending' ? 'cursor-help' : undefined}
                   >
-                    {st.label}
-                  </span>
+                    <span title={p.status === 'pending' ? 'Pagamento aguardando confirmação do provedor (Pix leva alguns minutos). Os créditos entram sozinhos.' : undefined}>
+                      {st.label}
+                    </span>
+                  </StatusBadge>
                 </td>
               </tr>
             )

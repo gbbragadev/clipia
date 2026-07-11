@@ -40,3 +40,6 @@ pytestbasetemp-current/
 # Screenshots de smoke/evidencia das sessoes de agente (ficam so no disco)
 /*.png
 /frontend/smoke-*.png
+
+# Evidencias de sessao (screenshots de smoke/QA na raiz do frontend)
+frontend/*.png

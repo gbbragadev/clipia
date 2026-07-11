@@ -1,7 +1,6 @@
 'use client'
 
 import { useState, useEffect, useRef } from 'react'
-import ThemeToggle from '@/components/ThemeToggle'
 
 interface UserDropdownProps {
   name: string
@@ -84,10 +83,6 @@ export default function UserDropdown({ name, plan, onLogout }: UserDropdownProps
           >
             Configurações
           </a>
-          <div className="flex items-center justify-between px-4 py-2" style={{ borderTop: '1px solid var(--border-subtle)' }}>
-            <span className="text-xs" style={{ color: 'var(--text-tertiary)' }}>Tema</span>
-            <ThemeToggle />
-          </div>
           <div style={{ borderTop: '1px solid var(--border-subtle)' }}>
             <button
               onClick={() => { setOpen(false); onLogout() }}

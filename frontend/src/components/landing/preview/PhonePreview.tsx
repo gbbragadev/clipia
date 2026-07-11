@@ -1,4 +1,5 @@
 "use client";
+import type { ReactNode } from "react";
 import { cn } from "@/components/landing/utils/cn";
 import { Icon } from "@/components/landing/icons";
 
@@ -59,8 +60,9 @@ export function Caption({
 }
 
 interface PhonePreviewProps {
-  image: string;
-  alt: string;
+  image?: string;
+  alt?: string;
+  background?: ReactNode;
   words: string[];
   activeIndex: number;
   captionStyle?: CaptionStyle;
@@ -77,6 +79,7 @@ interface PhonePreviewProps {
 export function PhonePreview({
   image,
   alt,
+  background,
   words,
   activeIndex,
   captionStyle = "pop",
@@ -97,12 +100,16 @@ export function PhonePreview({
       )}
     >
       <div className="relative aspect-[9/16] w-full">
-        <img
-          src={image}
-          alt={alt}
-          loading="lazy"
-          className="absolute inset-0 h-full w-full object-cover"
-        />
+        {background ? (
+          <div className="absolute inset-0">{background}</div>
+        ) : (
+          <img
+            src={image}
+            alt={alt}
+            loading="lazy"
+            className="absolute inset-0 h-full w-full object-cover"
+          />
+        )}
         <div className="absolute inset-0 bg-gradient-to-b from-ink/55 via-transparent to-ink/90" />
 
         {typeof progress === "number" && (

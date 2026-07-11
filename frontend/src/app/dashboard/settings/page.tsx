@@ -142,7 +142,6 @@ export default function SettingsPage() {
               onChange={(e) => setNewPassword(e.target.value)}
               placeholder="Nova senha (mínimo 8 caracteres, com maiúscula e número)"
               minLength={8}
-              pattern="(?=.*[A-Z])(?=.*\d).{8,}"
               required
               className="w-full px-4 py-2.5 rounded-lg bg-white/5 border border-white/10 text-white focus:outline-none focus:border-coral/50"
             />

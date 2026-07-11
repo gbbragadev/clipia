@@ -8,6 +8,7 @@ import { fetchVoices, type VoiceInfo } from '@/lib/editor-api'
 import { useToast } from '@/components/ui/feedback'
 import { useAuth } from '@/contexts/AuthContext'
 import { VoiceClonePanel } from './VoiceClonePanel'
+import { CostChip } from './CostChip'
 
 type Tab = 'free' | 'premium' | 'custom'
 
@@ -24,7 +25,7 @@ const TAB_BADGES: Record<Tab, string> = {
 }
 
 export function VoiceSelector() {
-  const { composition, updateVoiceConfig, updateAudio, jobId } = useEditor()
+  const { composition, updateVoiceConfig, updateAudio, jobId, narrationStale } = useEditor()
   const { success: toastSuccess, error: toastError } = useToast()
   const { user } = useAuth()
   const [regenerating, setRegenerating] = useState(false)
@@ -301,7 +302,7 @@ export function VoiceSelector() {
             />
             <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10, color: 'rgba(255,255,255,0.4)' }}>
               <span>{designDesc.length}/1000</span>
-              <span>Custa 5 creditos{user ? ' . voce tem ' + user.credits : ''}</span>
+              <span>Custa 5 créditos{user ? ' · você tem ' + user.credits : ''}</span>
             </div>
             <textarea
               value={designText}
@@ -321,7 +322,7 @@ export function VoiceSelector() {
                 cursor: designing ? 'not-allowed' : 'pointer', opacity: (!designName.trim() || designDesc.length < 20) ? 0.5 : 1,
               }}
             >
-              {designing ? 'Criando voz...' : 'Criar voz (5 creditos)'}
+              {designing ? 'Criando voz...' : 'Criar voz (5 créditos)'}
             </button>
             {designError && (
               <div style={{ fontSize: 10, color: '#f87171' }}>{designError}</div>
@@ -338,6 +339,31 @@ export function VoiceSelector() {
         )}
       </div>
 
+      {/* Narração desatualizada: aviso proativo com o CTA logo abaixo (o Export também bloqueia) */}
+      {narrationStale && (
+        <div
+          role="status"
+          style={{
+            display: 'flex', gap: 8, alignItems: 'flex-start', padding: '8px 10px', borderRadius: 8,
+            background: 'rgba(251,191,36,0.08)', border: '1px solid rgba(251,191,36,0.25)',
+          }}
+        >
+          <span aria-hidden>⚠️</span>
+          <div style={{ fontSize: 11, lineHeight: 1.5, color: 'var(--text-secondary)' }}>
+            <strong style={{ color: '#fbbf24' }}>Narração desatualizada.</strong> Você mudou o texto
+            das cenas — regenere a narração abaixo para o áudio acompanhar.
+          </div>
+        </div>
+      )}
+
+      {/* Custo ANTES do clique, conforme a voz selecionada (Edge é grátis; premium debita) */}
+      <div style={{ display: 'flex', justifyContent: 'center' }}>
+        {voiceConfig?.voiceProvider === 'elevenlabs' ? (
+          <CostChip>2 créditos (voz premium){user ? ` · você tem ${user.credits}` : ''}</CostChip>
+        ) : (
+          <CostChip tone="free">Grátis na voz atual</CostChip>
+        )}
+      </div>
       <button
         onClick={handleRegenerate}
         disabled={regenerating}

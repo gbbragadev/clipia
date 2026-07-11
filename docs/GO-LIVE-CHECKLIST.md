@@ -113,5 +113,49 @@
 - [ ] Cobrir templates restantes no QA de geração: `character_narration`, `story_time`, `dialogue_duo`, e os 7 nichos.
 - [ ] Medir custo real $ por operação com o log já adicionado (telemetria de ai_video).
 
+## 🧪 Stress Test (antes de abrir para testadores)
+
+Valida como o worker single-concurrency (`--concurrency=1`) comporta a fila quando vários
+testadores disparam vídeos ao mesmo tempo. O script simula N usuários novos fazendo o funil
+completo (cadastro → OTP → verify → `/generate`) **em paralelo** e mede latência de fila,
+latência total, throughput e taxa de falha.
+
+### Pré-requisitos
+- [ ] `READINESS_BYPASS_SECRET` definido no `.env` (senão o Turnstile bloqueia o cadastro do script).
+- [ ] `WELCOME_CREDIT_BONUS` no `.env` >= número de usuários do teste (cada um precisa de ≥1 crédito para gerar).
+- [ ] Backend **e** worker reiniciados com a build que se quer testar (em particular `2be6192` para atomicidade de crédito).
+- [ ] Rodar a partir do host de produção (com rede) — não de dentro de um agente sandbox.
+
+### Comando (beta fechado, 5-8 testadores)
+```bash
+python scripts/stress_test.py --base https://clipia.com.br --users 5
+python scripts/stress_test.py --base https://clipia.com.br --users 8
+```
+O script cria contas `stress+*@clipia.com.br`, gera vídeos reais (template `stock_narration`,
+1 crédito cada, sem tocar APIs pagas), mede tudo e limpa as contas no fim.
+
+### O que observar durante o teste
+- Abra `https://clipia.com.br/metrics` numa aba — monitore `clipia_active_jobs` e a fila crescendo.
+- Latência de **fila** (enqueue → running): prova a serialização do worker. Para 5 usuários,
+  espere o último esperar ~4× o tempo de 1 vídeo.
+- Latência **total** (enqueue → MP4): se passar de 10min para qualquer usuário, considere
+  subir `worker_concurrency=2` (mas só se a CPU/GPU do host tiver folga — 2 encodes ffmpeg
+  em paralelo podem estourar RAM).
+
+### Quando preocupar
+- Taxa de sucesso < 75% → investigar falhas antes de abrir para testadores reais.
+- Latência máxima > 10min → fila longa demais para UX; subir concorrência ou avisar testadores.
+- Qualquer job `failed` com `error` de API externa (Groq/Pexels) → dependência instável.
+
+### Dar crédito aos testadores reais
+Para o beta fechado, eleve temporariamente o bônus de boas-vindas no `.env`:
+```
+WELCOME_CREDIT_BONUS=20   # cada novo cadastro ganha 20 créditos (20 vídeos Edge)
+```
+Reinicie o backend e **volte para `2` antes do lançamento público**. Alternativa: creditar
+manualmente testadores específicos via SQL (`UPDATE users SET credits = credits + N WHERE email = ...`).
+
+---
+
 ## Conta de QA (reuso)
 `qa.dogfood@clipia.com.br` / `QAdogfood12345!` (50 créditos, verificada).

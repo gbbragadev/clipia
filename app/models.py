@@ -27,6 +27,14 @@ class GenerateRequest(BaseModel):
     music_enabled: bool | None = Field(
         default=None, description="Liga/desliga musica de fundo por video. None = usar settings.AUTO_MUSIC_ENABLED"
     )
+    narration_mode: Literal["single", "dialogue"] = Field(
+        default="single",
+        description="dialogue = roteiro em conversa + 2 vozes ElevenLabs (so em templates dialogue_capable)",
+    )
+    custom_script: dict | None = Field(
+        default=None,
+        description="Roteiro pronto (do /script-preview, possivelmente editado) — pula a geracao de roteiro",
+    )
 
     @field_validator("template_id")
     @classmethod
@@ -34,6 +42,69 @@ class GenerateRequest(BaseModel):
         if value not in TEMPLATES:
             raise ValueError(ErrorMessages.INVALID_INPUT)
         return value
+
+    @model_validator(mode="after")
+    def validate_narration_mode(self):
+        if self.narration_mode == "dialogue":
+            template = TEMPLATES.get(self.template_id)
+            # dialogue_duo ja e dialogo nativo (is_dialogue) — pedir o modo la e redundante mas valido
+            if template and not (template.dialogue_capable or template.script.is_dialogue):
+                raise ValueError(ErrorMessages.INVALID_INPUT)
+        return self
+
+    @model_validator(mode="after")
+    def validate_custom_script(self):
+        if self.custom_script is not None:
+            if json_size_bytes(self.custom_script) > 100 * 1024:
+                raise ValueError(ErrorMessages.INVALID_INPUT)
+            scenes = self.custom_script.get("scenes")
+            narration = self.custom_script.get("narration")
+            if not isinstance(scenes, list) or not scenes or not isinstance(narration, str) or not narration.strip():
+                raise ValueError(ErrorMessages.INVALID_INPUT)
+
+            # O caminho custom PULA o generate_script, entao os guardrails de la
+            # precisam valer AQUI (achado da revisao): sem o teto de cenas, um roteiro
+            # editado com N cenas num template de imagem/video IA = N geracoes PAGAS.
+            from app.config import settings
+
+            max_scenes = min(settings.MAX_SCENES_PER_VIDEO, max(6, -(-self.duration_target // 4)))
+            if len(scenes) > max_scenes:
+                raise ValueError(ErrorMessages.INVALID_INPUT)
+
+            template = TEMPLATES.get(self.template_id)
+            needs_hint = bool(template and template.script.needs_visual_hint)
+            is_dialogue = self.narration_mode == "dialogue" or bool(template and template.script.is_dialogue)
+            for sc in scenes:
+                if not isinstance(sc, dict) or not str(sc.get("text", "")).strip():
+                    raise ValueError(ErrorMessages.INVALID_INPUT)
+                if needs_hint and not str(sc.get("visual_hint", "")).strip():
+                    raise ValueError(ErrorMessages.INVALID_INPUT)
+                if is_dialogue:
+                    # normaliza speaker A/B (a sintese de dialogo exige um dos dois)
+                    sc["speaker"] = "B" if str(sc.get("speaker", "A")).strip().upper() == "B" else "A"
+        return self
+
+
+class ScriptRefineRequest(BaseModel):
+    script: dict = Field(..., description="Roteiro atual (formato do /script-preview)")
+    instruction: str = Field(
+        ..., min_length=5, max_length=500, description="O que melhorar (ex: 'deixe a cena 2 mais dramática')"
+    )
+    duration_target: int = Field(default=45, ge=15, le=180)
+    template_id: str = Field(default="stock_narration")
+
+    @field_validator("template_id")
+    @classmethod
+    def validate_template_id(cls, value: str) -> str:
+        if value not in TEMPLATES:
+            raise ValueError(ErrorMessages.INVALID_INPUT)
+        return value
+
+    @model_validator(mode="after")
+    def validate_script_size(self):
+        if json_size_bytes(self.script) > 100 * 1024:
+            raise ValueError(ErrorMessages.INVALID_INPUT)
+        return self
 
 
 class VoiceCloneRequest(BaseModel):
@@ -117,3 +188,28 @@ class WaitlistRequest(BaseModel):
     @classmethod
     def normalize_email(cls, value) -> str:
         return _normalize_email(value)
+
+
+class FeedbackRequest(BaseModel):
+    kind: Literal["widget", "post_video"]
+    rating: int | None = Field(None, ge=1, le=5, description="Nota 1-5 (widget) ou 1/5 = 👎/👍 (pos-video)")
+    comment: str | None = Field(None, max_length=1000)
+    job_id: str | None = None
+    source_url: str | None = Field(None, max_length=500)
+
+    @model_validator(mode="after")
+    def validate_has_content(self):
+        if self.rating is None and not (self.comment or "").strip():
+            raise ValueError(ErrorMessages.INVALID_INPUT)
+        return self
+
+
+class AdminCreditAdjustRequest(BaseModel):
+    delta: int = Field(..., ge=-100_000, le=100_000, description="Creditos a somar (negativo subtrai)")
+    reason: str = Field(..., min_length=3, max_length=255, description="Motivo do ajuste (auditoria)")
+
+    @model_validator(mode="after")
+    def validate_delta_nonzero(self):
+        if self.delta == 0:
+            raise ValueError(ErrorMessages.INVALID_INPUT)
+        return self

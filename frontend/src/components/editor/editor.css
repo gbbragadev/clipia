@@ -4,8 +4,8 @@
   grid-template-rows: 48px 1fr 120px;
   height: 100vh;
   overflow: hidden;
-  background: #1A1A1A;
-  color: #E8E8E8;
+  background: var(--bg-base);
+  color: var(--text-primary);
   font-family: var(--font-inter), system-ui, sans-serif;
 }
 
@@ -21,14 +21,14 @@
   border-radius: 50%; animation: spin 0.7s linear infinite;
 }
 .editor-loading__title { font-size: 16px; font-weight: 600; }
-.editor-loading__sub { font-size: 12px; color: #666666; }
+.editor-loading__sub { font-size: 12px; color: var(--text-tertiary); }
 
 /* ── Header (row 1, 48px) ────────────────── */
 .editor-header {
   display: flex; align-items: center; justify-content: space-between;
   padding: 0 16px;
   border-bottom: 1px solid rgba(255,255,255,0.08);
-  background: #222222;
+  background: var(--bg-raised);
 }
 .editor-header__left { display: flex; align-items: center; gap: 8px; }
 .editor-header__logo {
@@ -38,18 +38,25 @@
   text-decoration: none;
 }
 .editor-header__sep { color: rgba(255,255,255,0.08); font-size: 14px; }
-.editor-header__title { font-size: 12px; color: #999999; max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.editor-header__title { font-size: 12px; color: var(--text-secondary); max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .editor-header__right { display: flex; align-items: center; gap: 10px; }
 .editor-header__status { font-size: 10px; padding: 2px 7px; border-radius: 4px; }
-.editor-header__status--saving { color: #666666; }
+.editor-header__status--saving { color: var(--text-tertiary); }
 .editor-header__status--dirty { color: #f59e0b; background: rgba(245,158,11,0.08); }
-.editor-header__status--saved { color: #10b981; background: rgba(16,185,129,0.08); }
+.editor-header__status--saved { color: var(--color-mint); background: rgba(16,185,129,0.08); }
 .editor-header__export {
   padding: 6px 16px; background: var(--color-coral);
   border: none; border-radius: 7px; color: white; font-weight: 600; font-size: 12px;
   cursor: pointer; transition: opacity 0.15s;
 }
 .editor-header__export:hover { opacity: 0.9; }
+.editor-header__icon-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 36px; height: 36px; border: 1px solid rgba(255,255,255,0.08); border-radius: 7px;
+  background: transparent; color: var(--text-secondary); cursor: pointer; transition: all 0.15s;
+}
+.editor-header__icon-btn:hover:not(:disabled) { color: var(--text-primary); background: rgba(255,255,255,0.06); }
+.editor-header__icon-btn:disabled { opacity: 0.35; cursor: default; }
 
 /* ── Workspace (row 2) ───────────────────── */
 .editor-workspace {
@@ -60,7 +67,7 @@
 .editor-player-zone {
   flex: 1; display: flex; align-items: center; justify-content: center;
   min-width: 0; padding: 12px;
-  background: #1A1A1A;
+  background: var(--bg-base);
 }
 
 /* Player container: height-driven, aspect ratio derives width */
@@ -72,7 +79,7 @@
   border-radius: 16px;
   overflow: hidden;
   border: 2px solid rgba(255,255,255,0.08);
-  background: #1A1A1A;
+  background: var(--bg-base);
   box-shadow: 0 8px 32px rgba(0,0,0,0.4), 0 0 0 1px rgba(255,255,255,0.04);
 }
 
@@ -87,7 +94,7 @@
 .editor-tools-panel {
   flex: 0 0 320px; display: flex; flex-direction: column;
   border-left: 1px solid rgba(255,255,255,0.08);
-  background: #222222; overflow: hidden;
+  background: var(--bg-raised); overflow: hidden;
   transition: flex-basis 0.25s cubic-bezier(0.4,0,0.2,1), opacity 0.2s ease;
 }
 .editor-tools-panel--collapsed { flex-basis: 0; opacity: 0; pointer-events: none; }
@@ -96,28 +103,28 @@
 .editor-panel-toggle {
   position: absolute; right: 320px; top: 50%; transform: translateY(-50%);
   z-index: 10; width: 20px; height: 44px;
-  background: #222222; border: 1px solid rgba(255,255,255,0.08); border-right: none;
+  background: var(--bg-raised); border: 1px solid rgba(255,255,255,0.08); border-right: none;
   border-radius: 6px 0 0 6px; display: flex; align-items: center; justify-content: center;
-  cursor: pointer; color: #666666; font-size: 11px;
+  cursor: pointer; color: var(--text-tertiary); font-size: 11px;
   transition: all 0.2s;
 }
-.editor-panel-toggle:hover { color: #E8E8E8; background: #2A2A2A; }
+.editor-panel-toggle:hover { color: var(--text-primary); background: var(--bg-surface); }
 .editor-panel-toggle--collapsed { right: 0; border-radius: 6px 0 0 6px; }
 
 /* ── Tabs ─────────────────────────────────── */
 .editor-tabs {
   display: flex; gap: 1px; flex-shrink: 0;
-  background: #1A1A1A; border-bottom: 1px solid rgba(255,255,255,0.08);
+  background: var(--bg-base); border-bottom: 1px solid rgba(255,255,255,0.08);
 }
 .editor-tab {
   flex: 1; display: flex; flex-direction: column; align-items: center; gap: 2px;
   padding: 8px 0; background: transparent; border: none;
   border-bottom: 2px solid transparent;
-  color: #666666; font-size: 9px; font-weight: 600;
+  color: var(--text-tertiary); font-size: 9px; font-weight: 600;
   cursor: pointer; transition: all 0.15s;
   text-transform: uppercase; letter-spacing: 0.05em;
 }
-.editor-tab:hover { color: #999999; background: rgba(255,255,255,0.02); }
+.editor-tab:hover { color: var(--text-secondary); background: rgba(255,255,255,0.02); }
 .editor-tab--active { color: var(--color-coral); border-bottom-color: var(--color-coral); background: rgba(255,86,56,0.15); }
 .editor-tab__icon { font-size: 15px; }
 .editor-tab__label { font-size: 9px; }
@@ -132,7 +139,7 @@
 .editor-timeline {
   display: flex; flex-direction: column;
   border-top: 1px solid rgba(255,255,255,0.08);
-  background: #1E1E1E;
+  background: var(--bg-raised);
   padding: 0;
 }
 
@@ -143,7 +150,7 @@
 }
 .editor-timeline__tick {
   position: absolute; bottom: 0;
-  font-size: 9px; color: #666666;
+  font-size: 9px; color: var(--text-tertiary);
   transform: translateX(-50%);
 }
 .editor-timeline__tick::before {
@@ -159,7 +166,7 @@
 .editor-timeline__scene {
   display: flex; align-items: center; justify-content: center;
   border-radius: 4px; font-size: 10px; font-weight: 600;
-  color: #E8E8E8; transition: all 0.12s;
+  color: var(--text-primary); transition: all 0.12s;
   border: none; cursor: pointer;
 }
 .editor-timeline__scene:hover { filter: brightness(1.2); }
@@ -185,31 +192,31 @@
   padding: 0 16px; border-top: 1px solid rgba(255,255,255,0.08);
 }
 .editor-timeline__transport-btn {
-  background: none; border: none; color: #999999;
+  background: none; border: none; color: var(--text-secondary);
   font-size: 16px; cursor: pointer; padding: 2px 6px; border-radius: 4px;
   transition: all 0.12s;
 }
-.editor-timeline__transport-btn:hover { color: #E8E8E8; background: rgba(255,255,255,0.06); }
+.editor-timeline__transport-btn:hover { color: var(--text-primary); background: rgba(255,255,255,0.06); }
 .editor-timeline__transport-btn--active { color: var(--color-coral); }
 .editor-timeline__time {
-  font-size: 11px; color: #999999; font-variant-numeric: tabular-nums;
+  font-size: 11px; color: var(--text-secondary); font-variant-numeric: tabular-nums;
 }
 .editor-timeline__spacer { flex: 1; }
 .editor-timeline__shortcut-hint {
-  font-size: 9px; color: #666666; padding: 2px 6px;
-  background: #2A2A2A; border-radius: 3px;
+  font-size: 9px; color: var(--text-tertiary); padding: 2px 6px;
+  background: var(--bg-surface); border-radius: 3px;
 }
 
 /* ── Shared components ────────────────────── */
 .editor-card {
-  background: #2A2A2A; border: 1px solid rgba(255,255,255,0.08);
+  background: var(--bg-surface); border: 1px solid rgba(255,255,255,0.08);
   border-radius: 8px; padding: 10px; transition: all 0.15s ease;
 }
-.editor-card:hover { background: #333333; }
+.editor-card:hover { background: var(--border-default); }
 .editor-card--selected { background: rgba(255,86,56,0.15); border-color: rgba(255,86,56,0.25); }
 
 .editor-section-header {
-  font-size: 10px; font-weight: 700; color: #666666;
+  font-size: 10px; font-weight: 700; color: var(--text-tertiary);
   text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 10px;
 }
 
@@ -219,7 +226,7 @@
 }
 .editor-slider::-webkit-slider-thumb {
   -webkit-appearance: none; width: 14px; height: 14px;
-  background: var(--color-coral); border-radius: 50%; cursor: pointer; border: 2px solid #222222;
+  background: var(--color-coral); border-radius: 50%; cursor: pointer; border: 2px solid var(--bg-raised);
 }
 
 .editor-color-swatch {
@@ -227,26 +234,26 @@
   border: 2px solid transparent; cursor: pointer; transition: all 0.12s;
 }
 .editor-color-swatch:hover { transform: scale(1.1); }
-.editor-color-swatch--active { border-color: #E8E8E8; box-shadow: 0 0 6px rgba(255,255,255,0.25); }
+.editor-color-swatch--active { border-color: var(--text-primary); box-shadow: 0 0 6px rgba(255,255,255,0.25); }
 
 .editor-select {
-  width: 100%; padding: 7px 10px; background: #1A1A1A;
+  width: 100%; padding: 7px 10px; background: var(--bg-base);
   border: 1px solid rgba(255,255,255,0.08); border-radius: 6px;
-  color: #E8E8E8; font-size: 12px; cursor: pointer;
+  color: var(--text-primary); font-size: 12px; cursor: pointer;
 }
 .editor-select:focus { border-color: rgba(255,86,56,0.4); outline: none; }
 
 .editor-btn-sm {
-  padding: 5px 10px; background: #2A2A2A;
+  padding: 5px 10px; background: var(--bg-surface);
   border: 1px solid rgba(255,255,255,0.08); border-radius: 5px;
-  color: #999999; font-size: 11px; font-weight: 600;
+  color: var(--text-secondary); font-size: 11px; font-weight: 600;
   cursor: pointer; transition: all 0.12s;
 }
-.editor-btn-sm:hover { background: #333333; color: #E8E8E8; }
+.editor-btn-sm:hover { background: var(--border-default); color: var(--text-primary); }
 
 .editor-placeholder {
   display: flex; flex-direction: column; align-items: center; justify-content: center;
-  gap: 6px; padding: 50px 0; color: #666666; font-size: 13px;
+  gap: 6px; padding: 50px 0; color: var(--text-tertiary); font-size: 13px;
 }
 .editor-placeholder__icon { font-size: 24px; opacity: 0.4; }
 
@@ -259,7 +266,7 @@
 .export-panel {
   position: relative; width: min(480px, 100%);
   max-height: 90vh; overflow-y: auto;
-  background: var(--bg-raised, #111118);
+  background: var(--bg-raised, var(--bg-base));
   border: 1px solid var(--border-subtle, rgba(255,255,255,0.06));
   border-radius: 16px; padding: 24px;
 }
@@ -267,12 +274,12 @@
   position: absolute; top: 12px; right: 12px;
   display: flex; align-items: center; justify-content: center;
   width: 28px; height: 28px; border: none; border-radius: 8px;
-  background: transparent; color: #888888; cursor: pointer;
+  background: transparent; color: var(--text-tertiary); cursor: pointer;
   transition: background 0.15s cubic-bezier(0.22, 1, 0.36, 1), color 0.15s;
 }
-.export-panel__close:hover { background: rgba(255,255,255,0.08); color: #E8E8E8; }
-.export-panel__title { margin: 0 0 20px; font-size: 18px; font-weight: 700; color: #E8E8E8; }
-.export-panel__subtitle { margin: 20px 0 12px; font-size: 14px; font-weight: 600; color: #E8E8E8; }
+.export-panel__close:hover { background: rgba(255,255,255,0.08); color: var(--text-primary); }
+.export-panel__title { margin: 0 0 20px; font-size: 18px; font-weight: 700; color: var(--text-primary); }
+.export-panel__subtitle { margin: 20px 0 12px; font-size: 14px; font-weight: 600; color: var(--text-primary); }
 
 .export-status {
   display: flex; align-items: flex-start; gap: 10px;
@@ -323,7 +330,7 @@
   border: none; border-radius: 6px; padding: 6px 12px; font-size: 12px;
   cursor: pointer; background: var(--color-coral); color: #fff;
 }
-.export-stale__btn--ghost { background: rgba(255,255,255,0.08); color: #cccccc; border: 1px solid rgba(255,255,255,0.15); }
+.export-stale__btn--ghost { background: rgba(255,255,255,0.08); color: var(--text-secondary); border: 1px solid rgba(255,255,255,0.15); }
 
 .export-caption {
   background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.06);
@@ -331,23 +338,23 @@
 }
 .export-caption + .export-caption { margin-top: 10px; }
 .export-caption__head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
-.export-caption__platform { display: flex; align-items: center; gap: 8px; color: #E8E8E8; font-size: 13px; font-weight: 500; }
+.export-caption__platform { display: flex; align-items: center; gap: 8px; color: var(--text-primary); font-size: 13px; font-weight: 500; }
 .export-caption__icon {
   background: var(--color-coral); color: #fff; font-size: 11px; font-weight: 700;
   padding: 3px 6px; border-radius: 4px;
 }
 .export-caption__copy {
   border: none; border-radius: 6px; padding: 4px 10px; font-size: 12px; font-weight: 500;
-  cursor: pointer; background: rgba(255,255,255,0.1); color: #E8E8E8; transition: background 0.15s;
+  cursor: pointer; background: rgba(255,255,255,0.1); color: var(--text-primary); transition: background 0.15s;
 }
 .export-caption__copy:hover { background: rgba(255,255,255,0.16); }
-.export-caption__copy--copied { background: #10b981; color: #fff; }
+.export-caption__copy--copied { background: var(--color-mint); color: #fff; }
 .export-caption__textarea {
-  width: 100%; background: rgba(0,0,0,0.35); border: 1px solid #333333; border-radius: 6px;
-  color: #E8E8E8; font-size: 13px; padding: 8px; resize: vertical; font-family: inherit;
+  width: 100%; background: rgba(0,0,0,0.35); border: 1px solid var(--border-default); border-radius: 6px;
+  color: var(--text-primary); font-size: 13px; padding: 8px; resize: vertical; font-family: inherit;
 }
-.export-caption__count { text-align: right; font-size: 11px; margin-top: 4px; color: #666666; }
-.export-caption__count--limit { color: #ef4444; }
+.export-caption__count { text-align: right; font-size: 11px; margin-top: 4px; color: var(--text-tertiary); }
+.export-caption__count--limit { color: var(--color-danger); }
 
 /* ── Animations ───────────────────────────── */
 @keyframes spin { to { transform: rotate(360deg); } }
@@ -369,18 +376,30 @@
 
   .editor-header { height: 44px; flex-shrink: 0; padding: 0 12px; }
   .editor-header__title { display: none; }
+  .editor-header__sep { display: none; }
   .editor-header__export { padding: 6px 12px; }
+  /* Resetar vira icon-only: com undo/redo no header, o texto estourava os 375px
+     e cortava o botão Exportar. A confirmação abre como popover sob o header. */
+  .editor-header__reset-label { display: none; }
+  .editor-header__reset-confirm {
+    position: fixed; top: 50px; right: 8px; z-index: 30;
+    background: var(--bg-raised); border: 1px solid rgba(255,255,255,0.12);
+    border-radius: 10px; padding: 8px 10px;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+  }
 
   /* Workspace empilha: player em cima, painel embaixo */
   .editor-workspace { flex: 1; flex-direction: column; min-height: 0; }
 
   .editor-player-zone {
     flex: 0 0 auto;
-    max-height: 40vh;
+    /* Altura EXPLÍCITA: com max-height+flex-auto o filho (height:100%) colapsava
+       para ~23px e o preview sumia — editava-se às cegas no celular. */
+    height: min(36vh, 340px);
     padding: 8px;
   }
-  /* Player vira width-driven dentro da zona limitada */
-  .editor-player-container { height: 100%; max-height: 40vh; }
+  /* Player vira height-driven dentro da zona limitada */
+  .editor-player-container { height: 100%; max-height: none; }
 
   /* Painel ocupa o resto da largura/altura; nunca colapsa no mobile */
   .editor-tools-panel,
@@ -394,42 +413,53 @@
     pointer-events: auto;
   }
 
-  /* Conteúdo da aba acima; abas viram barra inferior (order) */
+  /* Conteúdo da aba acima; abas viram barra inferior (order).
+     padding-bottom reserva a altura do FAB "Linha do tempo" (fixed) — sem isso o
+     último item da lista ficava escondido atrás do botão no fim do scroll (F0). */
   .editor-panel-content {
     order: 1;
     flex: 1;
     min-height: 0;
     padding: 12px;
-    padding-bottom: calc(12px + env(safe-area-inset-bottom));
+    padding-bottom: calc(64px + env(safe-area-inset-bottom));
   }
   .editor-tabs {
     order: 2;
     flex-shrink: 0;
     border-bottom: none;
     border-top: 1px solid rgba(255,255,255,0.08);
-    background: #1A1A1A;
+    background: var(--bg-base);
     padding-bottom: env(safe-area-inset-bottom);
   }
-  .editor-tab { min-height: 52px; padding: 8px 0; }
+  .editor-tab { min-height: 52px; padding: 6px 0 8px; }
   .editor-tab__icon { font-size: 17px; }
-  .editor-tab__label { font-size: 9px; }
+  .editor-tab__label { font-size: 10px; }
+
+  /* Touch targets: swatches/sliders/botões pequenos demais para dedo (medidos 20-26px) */
+  .editor-color-swatch { width: 38px; height: 38px; border-radius: 8px; }
+  .editor-slider { height: 6px; }
+  .editor-slider::-webkit-slider-thumb { width: 22px; height: 22px; }
+  .editor-btn-sm { min-height: 36px; padding: 8px 12px; }
+  .editor-header__right { gap: 8px; }
+  .editor-header__export { min-height: 36px; }
 
   /* O toggle de colapso lateral não faz sentido no stack vertical */
   .editor-panel-toggle { display: none; }
 
-  /* Botão flutuante p/ abrir a gaveta da timeline */
+  /* Botão flutuante p/ abrir a gaveta da timeline — ancorado acima da tab bar
+     (antes flutuava no MEIO da tela, cobrindo o conteúdo de todas as abas) */
   .editor-timeline-fab {
-    position: absolute;
-    left: 50%;
-    transform: translateX(-50%);
-    top: calc(40vh + 50px);
+    position: fixed;
+    right: 12px;
+    bottom: calc(64px + env(safe-area-inset-bottom));
     z-index: 15;
     display: inline-flex;
     align-items: center;
     gap: 6px;
-    padding: 6px 14px;
+    min-height: 40px;
+    padding: 8px 14px;
     border-radius: 999px;
-    background: rgba(255,86,56,0.9);
+    background: rgba(255,86,56,0.92);
     color: #fff;
     border: none;
     font-size: 12px;
@@ -443,7 +473,9 @@
     position: fixed;
     left: 0; right: 0; bottom: 0;
     z-index: 60;
-    background: #1E1E1E;
+    max-height: 60vh;
+    overflow-y: auto;
+    background: var(--bg-raised);
     border-top: 1px solid rgba(255,255,255,0.12);
     border-radius: 14px 14px 0 0;
     box-shadow: 0 -8px 32px rgba(0,0,0,0.5);
@@ -465,7 +497,5 @@
   .editor-timeline-drawer .editor-timeline { padding-bottom: 8px; }
 }
 
-/* Em telas muito estreitas, abas icon-only para caber as 5 */
-@media (max-width: 380px) {
-  .editor-tab__label { display: none; }
-}
+/* Labels das abas ficam SEMPRE visíveis: 375px é o viewport mais comum e
+   5 ícones sem rótulo eram ambíguos (75px por aba comportam o texto). */

@@ -29,7 +29,7 @@ DEFAULT_SUBTITLE_STYLE = {
     "marginBottom": 180,
     "maxWordsPerChunk": 3,
     "preset": "minimal",
-    "accentColor": "#FFFC00",
+    "accentColor": "#F05340",
     "strokeWidth": 0,
     "animationStyle": "pop",
 }

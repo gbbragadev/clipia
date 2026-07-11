@@ -6,8 +6,10 @@ import { strings } from '@/lib/strings';
 import { ACTIVE_JOB_STATUSES, STEP_LABELS, type JobSummary } from '@/lib/editor-api'
 import { downloadAuthenticatedFile, fetchAuthenticatedBlobUrl } from '@/lib/download'
 import { GlowCard } from '@/components/ui/GlowCard'
+import { StatusBadge, jobStatusBadge } from '@/components/ui/StatusBadge'
 import { useToast } from '@/components/ui/feedback'
 import VideoPlayerModal from './VideoPlayerModal'
+import JobStepper from './JobStepper'
 
 const STYLE_GRADIENTS: Record<string, string> = {
   educational: 'from-coral/40 to-azure/40',
@@ -21,29 +23,6 @@ const STYLE_ICONS: Record<string, string> = {
   storytelling: '📖',
   news: '📰',
   comedy: '😂',
-}
-
-function statusBadge(status: string) {
-  switch (status) {
-    case 'completed':
-    case 'editable':
-      return { label: 'Pronto', classes: 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' }
-    case 'failed':
-    case 'error':
-      return { label: 'Erro', classes: 'bg-red-500/20 text-red-400 border border-red-500/30' }
-    case 'processing':
-      return { label: strings.dashboard.generate.loading, classes: 'bg-coral/20 text-coral animate-pulse border border-coral/30' }
-    case 'rendering':
-      return { label: 'Atualizando', classes: 'bg-azure/20 text-azure animate-pulse border border-azure/30' }
-    case 'cancelling':
-      return { label: 'Cancelando', classes: 'bg-gray-500/20 text-gray-400 animate-pulse border border-gray-500/30' }
-    case 'cancelled':
-      return { label: 'Cancelado', classes: 'bg-gray-500/20 text-gray-400 border border-gray-500/30' }
-    case 'queued':
-      return { label: 'Na fila', classes: 'bg-gray-500/20 text-gray-400 border border-gray-500/30' }
-    default:
-      return { label: status, classes: 'bg-gray-500/20 text-gray-400 border border-gray-500/30' }
-  }
 }
 
 function timeAgo(dateStr: string | null) {
@@ -71,9 +50,26 @@ export default function VideoCard({ job, onEdit, onCancel }: VideoCardProps) {
   const [showPlayer, setShowPlayer] = useState(false)
   const [downloading, setDownloading] = useState(false)
   const [dlProgress, setDlProgress] = useState<number | null>(null)
-  const badge = statusBadge(job.status)
+  const badge = jobStatusBadge(job.status)
   const gradient = STYLE_GRADIENTS[job.style] || 'from-gray-900/40 to-gray-800/40'
   const icon = STYLE_ICONS[job.style] || '🎬'
+
+  // Poster real do vídeo (JPEG ~30KB via rota autenticada — barato o bastante p/ carregar
+  // no mount, ao contrário do preview MP4 que segue lazy no hover).
+  const [thumbSrc, setThumbSrc] = useState<string | null>(null)
+  useEffect(() => {
+    if (!job.thumbnail_url) return
+    let revoked: string | null = null
+    fetchAuthenticatedBlobUrl(job.thumbnail_url)
+      .then((url) => {
+        revoked = url
+        setThumbSrc(url)
+      })
+      .catch(() => {})
+    return () => {
+      if (revoked) URL.revokeObjectURL(revoked)
+    }
+  }, [job.thumbnail_url])
 
   // Preview do vídeo: /download é Bearer-only, então <video src> direto dava 401 (BUG-R002).
   // LAZY (perf): antes o blob autenticado era baixado no mount de TODOS os cards, o que
@@ -151,6 +147,16 @@ export default function VideoCard({ job, onEdit, onCancel }: VideoCardProps) {
         >
           <div className="absolute inset-0 bg-[url(/noise.svg)] opacity-20 mix-blend-overlay"></div>
 
+          {/* Poster do vídeo real (o preview MP4 no hover renderiza por cima) */}
+          {thumbSrc && (
+            <img
+              src={thumbSrc}
+              alt=""
+              aria-hidden
+              className="absolute inset-0 h-full w-full object-cover"
+            />
+          )}
+
           {job.download_url && previewSrc && (
             // autoPlay (muted = sempre permitido) resolve o PRIMEIRO hover: quando o blob
             // chega e o <video> monta, o ref ainda era null no .then — play() manual era no-op.
@@ -166,15 +172,15 @@ export default function VideoCard({ job, onEdit, onCancel }: VideoCardProps) {
             />
           )}
 
-          {!job.download_url && (
+          {!job.download_url && !thumbSrc && (
             <span className="text-6xl opacity-30 group-hover:opacity-50 group-hover:scale-110 transition-all duration-500 z-10">{icon}</span>
           )}
 
           {/* Top Info Overlay */}
           <div className="absolute top-0 left-0 w-full p-3 bg-gradient-to-b from-black/80 to-transparent flex flex-wrap justify-between items-start gap-1 z-10">
-            <span className={`inline-flex shrink-0 items-center text-[10px] px-2.5 py-1 rounded-full font-semibold uppercase tracking-wider backdrop-blur-sm ${badge.classes}`}>
+            <StatusBadge variant={badge.variant} className="shrink-0 backdrop-blur-sm">
               {badge.label}
-            </span>
+            </StatusBadge>
             {job.degraded && (
               <span
                 className="inline-flex shrink-0 items-center gap-1 text-[10px] px-2.5 py-1 rounded-full font-semibold backdrop-blur-sm bg-amber-500/20 text-amber-300 border border-amber-500/30"
@@ -212,15 +218,26 @@ export default function VideoCard({ job, onEdit, onCancel }: VideoCardProps) {
               {job.duration_target}s
             </span>
             <span>&bull;</span>
-            <span>{timeAgo(job.created_at)}</span>
+            <span title={job.created_at ? new Date(job.created_at).toLocaleString('pt-BR') : undefined}>
+              {timeAgo(job.created_at)}
+            </span>
           </div>
 
-          {/* Progresso em tempo real (a grid faz polling enquanto o job está ativo) */}
+          {/* Progresso em tempo real (a grid faz polling enquanto o job está ativo):
+              stepper de macro-etapas + etapa fina + % honesto + posição real na fila */}
           {ACTIVE_JOB_STATUSES.includes(job.status) && (
-            <div className="mb-3">
-              <div className="flex items-center justify-between mb-1">
+            <div className="mb-3 space-y-1.5">
+              {job.status === 'queued' && job.queue_position != null && (
+                <p className="text-[11px] font-medium text-azure">
+                  {job.queue_position === 0
+                    ? 'Você é o próximo — começa em instantes'
+                    : `Na fila — ${job.queue_position} à frente`}
+                </p>
+              )}
+              <JobStepper step={job.current_step} queued={job.status === 'queued'} />
+              <div className="flex items-center justify-between">
                 <span className="text-[11px] font-medium text-coral">
-                  {STEP_LABELS[job.current_step ?? ''] || 'Processando...'}
+                  {STEP_LABELS[job.current_step ?? ''] || (job.status === 'queued' ? 'Aguardando o estúdio...' : 'Processando...')}
                 </span>
                 <span className="text-[11px] text-slate-500 tabular-nums">
                   {Math.round((job.progress ?? 0) * 100)}%
@@ -270,8 +287,9 @@ export default function VideoCard({ job, onEdit, onCancel }: VideoCardProps) {
               {canCancel && (
                 <button
                   type="button"
+                  aria-label={`Cancelar a geração de "${job.topic}"`}
                   onClick={() => setConfirmCancel(true)}
-                  className="flex-1 flex items-center justify-center gap-1.5 py-3 sm:py-2.5 rounded-lg bg-red-500/10 border border-red-500/30 text-red-400 text-sm font-semibold hover:bg-red-500/20 active:scale-[0.97] transition"
+                  className="flex-1 flex items-center justify-center gap-1.5 py-3 sm:py-2.5 rounded-lg bg-danger/10 border border-danger/30 text-danger text-sm font-semibold hover:bg-danger/20 active:scale-[0.97] transition"
                 >
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><rect x="6" y="6" width="12" height="12" rx="2" /></svg>
                   Cancelar

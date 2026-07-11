@@ -23,9 +23,16 @@ type IconName =
   | "image"
   | "shield"
   | "volume"
+  | "volumeOff"
   | "plus"
   | "edit"
-  | "wand";
+  | "wand"
+  | "planet"
+  | "galaxy"
+  | "rocket"
+  | "blackhole"
+  | "star"
+  | "satellite";
 
 const P: Record<IconName, ReactNode> = {
   sparkles: (
@@ -126,6 +133,12 @@ const P: Record<IconName, ReactNode> = {
       <path d="M15.5 9.5a4 4 0 0 1 0 5M18 7a7.5 7.5 0 0 1 0 10" />
     </>
   ),
+  volumeOff: (
+    <>
+      <path d="M11 5L6.5 9H3.5v6H6.5L11 19z" />
+      <path d="M15.5 9.5l5 5M20.5 9.5l-5 5" />
+    </>
+  ),
   plus: <path d="M12 5v14M5 12h14" />,
   edit: (
     <>
@@ -137,6 +150,47 @@ const P: Record<IconName, ReactNode> = {
     <>
       <path d="M15 4V2M15 16v-2M9 10H7M23 10h-2" />
       <path d="M3 21l9-9M14 7l3 3" />
+    </>
+  ),
+  planet: (
+    <>
+      <circle cx="12" cy="12" r="5.5" />
+      <ellipse cx="12" cy="12" rx="10" ry="3.2" transform="rotate(-22 12 12)" />
+    </>
+  ),
+  galaxy: (
+    <>
+      <path d="M12 12c0-4 3-7 7-7-4 0-7-3-7-7 0 4-3 7-7 7 4 0 7 3 7 7z" transform="rotate(45 12 12)" />
+      <circle cx="12" cy="12" r="1.6" fill="currentColor" stroke="none" />
+    </>
+  ),
+  rocket: (
+    <>
+      <path d="M12 3c3.5 2 5 5.5 5 9.5V18H7v-5.5C7 8.5 8.5 5 12 3z" />
+      <circle cx="12" cy="10" r="1.6" />
+      <path d="M7 14l-2.5 2.5L7 18M17 14l2.5 2.5L17 18M9.5 18v2.5M14.5 18v2.5" />
+    </>
+  ),
+  blackhole: (
+    <>
+      <circle cx="12" cy="12" r="3.2" fill="currentColor" stroke="none" />
+      <ellipse cx="12" cy="12" rx="9" ry="4" />
+      <ellipse cx="12" cy="12" rx="9" ry="4" transform="rotate(60 12 12)" />
+      <ellipse cx="12" cy="12" rx="9" ry="4" transform="rotate(120 12 12)" />
+    </>
+  ),
+  star: (
+    <>
+      <path d="M12 3l2.2 6 6.3.4-4.9 4 1.6 6.1L12 16.5 6.8 19.5l1.6-6.1-4.9-4 6.3-.4z" />
+    </>
+  ),
+  satellite: (
+    <>
+      <path d="M7 7l4 4M17 17l-4-4" />
+      <rect x="3" y="3" width="6" height="6" rx="1" transform="rotate(45 6 6)" />
+      <rect x="15" y="15" width="6" height="6" rx="1" transform="rotate(45 18 18)" />
+      <rect x="9" y="9" width="6" height="6" rx="1" />
+      <path d="M9 21h6" />
     </>
   ),
 };

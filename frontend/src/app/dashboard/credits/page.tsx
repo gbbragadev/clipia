@@ -16,7 +16,8 @@ export default function CreditsPage() {
   const [packages, setPackages] = useState<CreditPackage[]>([])
   const [loadingPackages, setLoadingPackages] = useState(true)
   const [packagesError, setPackagesError] = useState<string | null>(null)
-  const [provider, setProvider] = useState<PaymentProvider>('stripe')
+  // Pix (Mercado Pago) como default — e o preferido no BR e o caminho mais rapido/barato.
+  const [provider, setProvider] = useState<PaymentProvider>('mercadopago')
   const mountedRef = useRef(true)
 
   const loadPackages = useCallback(async () => {
@@ -38,17 +39,28 @@ export default function CreditsPage() {
     return () => { mountedRef.current = false }
   }, [loadPackages])
 
-  // Handle return from MercadoPago
+  // Handle return from MercadoPago / Stripe
   useEffect(() => {
     const status = searchParams.get('status')
     if (status === 'success') {
-      success('Pagamento aprovado', 'Seus créditos foram adicionados.')
-      refreshUser()
-    } else if (status === 'failure') {
+      // O webhook que credita e ASSINCRONO (~5-30s). Afirmar "creditos adicionados" aqui
+      // contradizia a UI (saldo ainda antigo). Mensagem honesta + polling curto: o saldo
+      // sobe sozinho quando o webhook processa.
+      success('Pagamento aprovado', 'Seus créditos serão creditados em instantes.')
+      void refreshUser()
+      let tries = 0
+      const poll = setInterval(() => {
+        tries += 1
+        void refreshUser()
+        if (tries >= 10) clearInterval(poll)
+      }, 3000)
+      return () => clearInterval(poll)
+    }
+    if (status === 'failure') {
       error('Pagamento não aprovado', 'Tente novamente.')
     } else if (status === 'pending') {
       info('Pagamento pendente', 'Seus créditos serão adicionados assim que confirmado.')
-      refreshUser()
+      void refreshUser()
     }
   }, [error, info, refreshUser, searchParams, success])
 
@@ -73,12 +85,21 @@ export default function CreditsPage() {
               </span>
               <span style={{ color: 'var(--text-secondary)' }}>créditos disponíveis</span>
             </div>
+            {(() => {
+              const bonusPercent = packages.find((p) => p.bonus_percent > 0)?.bonus_percent
+              return bonusPercent ? (
+                <p className="mt-3 text-sm font-medium" style={{ color: '#4ade80' }}>
+                  🎉 Promoção beta: +{bonusPercent}% de créditos bônus em todos os pacotes
+                </p>
+              ) : null
+            })()}
           </div>
 
           {/* Provider selector */}
           <div className="flex justify-center gap-2 mb-6">
             {([
-              { id: 'stripe', label: 'Stripe', sub: 'Cartão e Pix' },
+              { id: 'mercadopago', label: 'Pix', sub: 'Pix e cartão' },
+              { id: 'stripe', label: 'Cartão', sub: 'Stripe internacional' },
             ] as const).map((opt) => (
               <button
                 key={opt.id}

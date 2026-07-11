@@ -1,7 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Check, Download, Loader2, X } from 'lucide-react'
+import { Check, Clapperboard, Download, Loader2, X } from 'lucide-react'
 import { useEditor } from '@/contexts/EditorContext'
 import { useAuth } from '@/contexts/AuthContext'
 import { downloadAuthenticatedFile } from '@/lib/download'
@@ -132,12 +132,17 @@ export function ExportPanel({ onClose }: { onClose: () => void }) {
     }
   }, [jobId, authHeaders, pollStatus])
 
-  // Auto-dispara o render ao abrir (a menos que a narração esteja stale — aí o
-  // usuário decide entre regenerar a voz ou exportar mesmo assim).
+  // O render NÃO dispara mais ao abrir o modal: um toque acidental em "Exportar"
+  // (alvo pequeno no mobile) enfileirava ~2 min de render e debitava pending_credits
+  // sem confirmação. Agora o usuário confirma no botão "Aplicar edições".
+  // Escape fecha o modal (o clique no backdrop já fechava).
   useEffect(() => {
-    if (!narrationStale) handleRender()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onClose])
 
   const handleDownload = useCallback(async () => {
     if (downloading || renderState === 'rendering') return
@@ -195,6 +200,15 @@ export function ExportPanel({ onClose }: { onClose: () => void }) {
               userCredits={user?.credits ?? 0}
             />
           </div>
+        )}
+
+        {/* Confirmação explícita do render (custo + ~2 min ficam claros ANTES de disparar) */}
+        {renderState === 'idle' && !(narrationStale && !staleAccepted) && (
+          <button type="button" className="export-download" onClick={handleRender}>
+            <Clapperboard size={16} />
+            Aplicar edições e renderizar (~2 min)
+            {(composition?.pendingCredits ?? 0) > 0 && ` · ${composition?.pendingCredits} créd.`}
+          </button>
         )}
 
         {/* Status do render */}

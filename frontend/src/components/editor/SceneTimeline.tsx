@@ -2,7 +2,8 @@
 
 import { useEditor } from '@/contexts/EditorContext'
 
-const SCENE_COLORS = ['#ff5638', '#3b82f6', '#06b6d4', '#10b981', '#f59e0b', '#ef4444']
+// Cor NÃO carrega significado por cena (auditoria F0): ativa = coral, demais neutras.
+const ACTIVE = '#ff5638'
 
 export function SceneTimeline() {
   const { composition, selectedSceneIndex, selectScene, playerFrame } = useEditor()
@@ -22,7 +23,6 @@ export function SceneTimeline() {
         {composition.scenes.map((scene, i) => {
           const widthPercent = (scene.duration_hint / totalHints) * 100
           const isSelected = i === selectedSceneIndex
-          const color = SCENE_COLORS[i % SCENE_COLORS.length]
 
           return (
             <button
@@ -32,10 +32,10 @@ export function SceneTimeline() {
               style={{
                 flex: `0 0 ${widthPercent}%`,
                 background: isSelected
-                  ? `linear-gradient(180deg, ${color}, ${color}99)`
-                  : `${color}33`,
+                  ? `linear-gradient(180deg, ${ACTIVE}, ${ACTIVE}99)`
+                  : 'rgba(255,255,255,0.07)',
                 border: 'none',
-                borderBottom: isSelected ? `2px solid ${color}` : '2px solid transparent',
+                borderBottom: isSelected ? `2px solid ${ACTIVE}` : '2px solid transparent',
                 cursor: 'pointer',
                 display: 'flex', alignItems: 'center', justifyContent: 'center',
                 color: isSelected ? 'white' : 'rgba(255,255,255,0.5)',

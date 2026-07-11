@@ -2,6 +2,10 @@ import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
   output: "standalone",
+  // Build de verificação isolado: NEXT_DIST_DIR permite buildar/prever mudanças
+  // sem tocar o .next servido em produção (bug raiz documentado em
+  // scripts/restart-frontend.ps1 — rebuild in-place derruba o next start vivo).
+  distDir: process.env.NEXT_DIST_DIR || ".next",
   allowedDevOrigins: ["autoshorts.gbbragadev.com", "clipia.com.br", "www.clipia.com.br"],
   async headers() {
     // Headers de seguranca espelham a politica do backend (app/main.py) + anti-clickjacking.

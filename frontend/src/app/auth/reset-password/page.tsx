@@ -86,11 +86,11 @@ function ResetPasswordForm() {
         <div className="flex justify-center mb-4">
           <Logo size="lg" />
         </div>
-        <h1 className="text-xl font-semibold text-center mb-2 text-gray-200">
+        <h1 className="font-display text-2xl font-extrabold text-center mb-2 text-white tracking-tight">
           Redefinir senha
         </h1>
         <p className="text-slate-400 text-center text-sm mb-8">
-          Informe o codigo enviado para <span className="text-white break-words">{email}</span> e a nova senha
+          Informe o código enviado para <span className="text-white break-words">{email}</span> e a nova senha
         </p>
 
         <form onSubmit={handleSubmit} className="space-y-6">

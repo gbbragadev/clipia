@@ -37,7 +37,9 @@ def append_outro(video_path: str) -> str:
 
 
 def _ffprobe(args: list[str]) -> str:
-    return subprocess.run(["ffprobe", "-v", "quiet", *args], capture_output=True, text=True, check=True).stdout.strip()
+    return subprocess.run(
+        ["ffprobe", "-v", "quiet", *args], capture_output=True, text=True, check=True, timeout=30
+    ).stdout.strip()
 
 
 def _probe_duration(path: str) -> float:
@@ -87,7 +89,7 @@ def _build_and_append(video_path: str, audio_path: str, logo_path: str) -> str:
         f"eq=brightness=-{darken}:saturation=0.92[bg];"
         f"[1:v]scale={logo_w}:-1[logo];"
         f"[bg][logo]overlay=(W-w)/2:(H-h)/2-70[ov];"
-        f"[ov]drawtext=text='clipia.com.br':fontfile={font}:fontcolor=white:"
+        f"[ov]drawtext=text='clipia.com.br':fontfile={font}:fontcolor=#f05340:borderw=2:bordercolor=black:"
         f"fontsize=52:x=(w-text_w)/2:y=h/2+90,fade=t=in:st=0:d=0.3,format=yuv420p[v];"
         f"[2:a]afade=t=in:st=0:d=0.08,afade=t=out:st={fade_out_st:.2f}:d=0.25[a]"
     )
