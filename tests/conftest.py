@@ -70,6 +70,16 @@ class FakeRedis:
 
 
 @pytest.fixture(autouse=True)
+def _isolate_worker_redis(monkeypatch):
+    # Testes de task que nao usam a fixture `app` falavam com o Redis REAL do .env,
+    # lendo/escrevendo estado de producao (ex.: job:job-1:cancelled vazado fazia os
+    # testes de retry receberem {"cancelled": True}). Default = FakeRedis novo por
+    # teste; a fixture `app` re-patcha depois com a instancia compartilhada dela.
+    monkeypatch.setattr(worker_tasks, "_redis", FakeRedis())
+    monkeypatch.setattr(api_routes, "_redis", FakeRedis())
+
+
+@pytest.fixture(autouse=True)
 def reset_rate_limiters():
     for limiter in (auth_routes.limiter, api_routes.limiter):
         storage = getattr(limiter, "_storage", None)
@@ -107,6 +117,9 @@ async def test_db(tmp_path, monkeypatch):
     # register levariam 400 anti-bot. Testes de Turnstile setam o secret explicitamente.
     monkeypatch.setattr(settings, "TURNSTILE_SECRET_KEY", "")
     monkeypatch.setattr(settings, "READINESS_BYPASS_SECRET", "")
+    # Promo de compra ativa no .env (ex.: PURCHASE_BONUS_PERCENT=20) mudaria os valores
+    # creditados e quebraria asserts exatos dos testes de webhook. Testes de bonus setam 20.
+    monkeypatch.setattr(settings, "PURCHASE_BONUS_PERCENT", 0)
 
     async def override_get_db():
         async with session_factory() as session:
