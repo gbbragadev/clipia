@@ -43,14 +43,16 @@ O ClipIA **já tem toda a maquinaria** (Remotion, FFmpeg, legenda word-level, SF
 
 ### P0 — Quick wins (esforço S, impacto alto) — dias 1-2
 
-| # | Gap | Mudança concreta | Arquivo | Imp |
-|---|---|---|---|---|
-| 1 | Legenda destaca em **amarelo** `#FFFC00` (não coral) | `accent_color` default → `#F05340` | `subtitles.py:55/67` | 🔴 |
-| 2 | Texto do outro branco, não coral | `fontcolor=white` → coral/outline | `outro.py:90` | 🟡 |
-| 3 | **Música quase inaudível** (0.12 ≈ 4,6× baixo) | `AUTO_MUSIC_VOLUME 0.12 → 0.45` | `config.py:79` | 🔴 |
-| 4 | Sample rate heterogêneo (24k/44k/48k) = artefato | `aresample=48000` antes de cada `[N:a]` | `compositor.py:319,385,606-607` | 🟡 |
-| 5 | **Vinheta some no export Remotion** | `append_outro(final_path)` antes do copy | `tasks.py:~969` | 🔴 |
-| 6 | Overlays CTA existem mas nunca invocados | passar `overlays=script.get('overlays',[])` a `compose_short()` | `tasks.py:776-790`, `routes.py` | 🟡 |
+> **Atualizado 2026-07-11 (verificação com evidência no código):** os 6 P0 já estão implementados. O trabalho aberto de áudio é o P1 (ducking, loudnorm).
+
+| # | Gap | Mudança concreta | Arquivo | Imp | Status |
+|---|---|---|---|---|---|
+| 1 | Legenda destaca em **amarelo** `#FFFC00` (não coral) | `accent_color` default → `#F05340` | `subtitles.py:55/67` | 🔴 | ✅ FEITO |
+| 2 | Texto do outro branco, não coral | `fontcolor=white` → coral/outline | `outro.py:90` | 🟡 | ✅ FEITO |
+| 3 | **Música quase inaudível** (0.12 ≈ 4,6× baixo) | `AUTO_MUSIC_VOLUME 0.12 → 0.30` (escolhido 0.30, não 0.45 — "audível" sem competir com a voz enquanto não há ducking) | `config.py:79` | 🔴 | ✅ FEITO |
+| 4 | Sample rate heterogêneo (24k/44k/48k) = artefato | `aresample=48000` antes de cada `[N:a]` — presente nos 3 caminhos de áudio | `compositor.py:328,392,613` | 🟡 | ✅ FEITO |
+| 5 | **Vinheta some no export Remotion** | `append_outro()` na geração (`tasks.py:1042`) E no rerender (`tasks.py:1225`) | `tasks.py` | 🔴 | ✅ FEITO |
+| 6 | Overlays CTA existem mas nunca invocados | rerender passa `overlays=comp_data.get("overlays")` (`tasks.py:1217` → `compositor.py:578`). Geração inicial não passa — overlays são artefato do editor, verificar se precisa | `tasks.py`, `compositor.py` | 🟡 | ✅ FEITO (export) |
 
 ### P1 — Esforço médio, impacto alto — dias 3-7
 
