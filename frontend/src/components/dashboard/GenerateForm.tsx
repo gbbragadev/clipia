@@ -6,8 +6,10 @@ import { useAuth } from '@/contexts/AuthContext'
 import {
   generateVideo,
   fetchTemplates,
+  fetchVoices,
   type GenerateParams,
   type VideoTemplateInfo,
+  type VoiceInfo,
 } from '@/lib/editor-api'
 import TemplateSelector from './TemplateSelector'
 import StyleSelector, { type StyleValue } from './StyleSelector'
@@ -46,6 +48,10 @@ export default function GenerateForm({ onJobCreated, prefillTopic, prefillTrendC
   const [wpm, setWpm] = useState(150)
   const [showAdvancedScript, setShowAdvancedScript] = useState(false)
   const [voiceProvider, setVoiceProvider] = useState<'edge' | 'elevenlabs'>('edge')
+  // Narração: single (1 voz, escolhível) ou dialogue (2 vozes — só em templates capable)
+  const [narrationMode, setNarrationMode] = useState<'single' | 'dialogue'>('single')
+  const [voiceId, setVoiceId] = useState<string | null>(null) // null = default do template
+  const [voices, setVoices] = useState<VoiceInfo[]>([])
   const [sfxEnabled, setSfxEnabled] = useState(true)
   const [musicEnabled, setMusicEnabled] = useState(true)
   const [templates, setTemplates] = useState<VideoTemplateInfo[]>([])
@@ -62,9 +68,15 @@ export default function GenerateForm({ onJobCreated, prefillTopic, prefillTrendC
     (selectedTemplate?.default_voice_provider === 'elevenlabs' && selectedTemplate.default_voice_id)
       || isFallbackAiTemplate,
   )
-  const creditCost = selectedTemplate?.credit_costs?.[voiceProvider]
-    ?? (isFallbackAiTemplate ? 5 : voiceProvider === 'elevenlabs' ? 2 : 1)
+  const dialogueCapable = Boolean(selectedTemplate?.dialogue_capable)
+  // Diálogo sintetiza com 2 vozes ElevenLabs → custa o pricing elevenlabs do template
+  const effectiveProvider = narrationMode === 'dialogue' ? 'elevenlabs' : voiceProvider
+  const creditCost = selectedTemplate?.credit_costs?.[effectiveProvider]
+    ?? (isFallbackAiTemplate ? 5 : effectiveProvider === 'elevenlabs' ? 2 : 1)
   const edgeCreditCost = selectedTemplate?.credit_costs?.edge ?? (isFallbackAiTemplate ? 5 : 1)
+  const elevenCreditCost = selectedTemplate?.credit_costs?.elevenlabs ?? (isFallbackAiTemplate ? 5 : 2)
+  // Vozes selecionáveis do provider ativo (modo single)
+  const providerVoices = voices.filter((v) => v.provider === voiceProvider)
 
   const MAX_BATCH = 5 // fila solo: 1 vídeo por vez — cap evita fila de horas
   const batchList = batchTopics
@@ -83,6 +95,9 @@ export default function GenerateForm({ onJobCreated, prefillTopic, prefillTrendC
     fetchTemplates()
       .then(setTemplates)
       .catch(() => setTemplates([]))
+    fetchVoices()
+      .then(setVoices)
+      .catch(() => setVoices([]))
   }, [])
 
   // Pre-preenche o tema (e o contexto da tendencia) quando o usuario clica num trend do painel "Em alta"
@@ -109,6 +124,8 @@ export default function GenerateForm({ onJobCreated, prefillTopic, prefillTrendC
   const handleTemplateSelect = (id: string) => {
     const nextTemplate = templates.find((template) => template.id === id)
     setTemplateId(id)
+    setVoiceId(null) // volta ao default do template novo
+    if (!nextTemplate?.dialogue_capable) setNarrationMode('single')
     if ((nextTemplate?.default_voice_provider === 'elevenlabs' && nextTemplate.default_voice_id) || id === 'novelinha_historica') {
       setVoiceProvider('elevenlabs')
     } else if (voiceProvider === 'elevenlabs') {
@@ -116,19 +133,25 @@ export default function GenerateForm({ onJobCreated, prefillTopic, prefillTrendC
     }
   }
 
-  const buildParams = (t: string, withTrend: boolean): GenerateParams => ({
-    topic: t,
-    style,
-    duration_target: duration,
-    template_id: templateId,
-    voice_provider: voiceProvider,
-    voice_config: voiceProvider === 'elevenlabs' && selectedTemplate?.default_voice_id
-      ? { voice_id: selectedTemplate.default_voice_id }
-      : undefined,
-    sfx_enabled: sfxEnabled,
-    music_enabled: musicEnabled,
-    trend_context: withTrend ? trendContext ?? undefined : undefined,
-  })
+  const buildParams = (t: string, withTrend: boolean): GenerateParams => {
+    // Voz escolhida no select > default do template (elevenlabs precisa de voice_id explícito)
+    const chosenVoiceId = narrationMode === 'dialogue'
+      ? undefined // as 2 vozes do diálogo são fixas no backend
+      : voiceId
+        ?? (voiceProvider === 'elevenlabs' ? selectedTemplate?.default_voice_id : undefined)
+    return {
+      topic: t,
+      style,
+      duration_target: duration,
+      template_id: templateId,
+      voice_provider: voiceProvider,
+      voice_config: chosenVoiceId ? { voice_id: chosenVoiceId } : undefined,
+      sfx_enabled: sfxEnabled,
+      music_enabled: musicEnabled,
+      trend_context: withTrend ? trendContext ?? undefined : undefined,
+      narration_mode: narrationMode,
+    }
+  }
 
   /** Enfileira 1..N gerações em sequência (débito atômico e estorno são POR job no backend). */
   const startGeneration = async (topics: string[]) => {
@@ -288,16 +311,16 @@ export default function GenerateForm({ onJobCreated, prefillTopic, prefillTrendC
         </div>
       </div>
 
-      {/* Voice Provider */}
+      {/* Narração: provider + voz escolhível + modo diálogo (quando o template aceita) */}
       <div className="mb-5">
-        <label className="block text-xs text-[var(--text-tertiary)] mb-1.5">Voz</label>
+        <label className="block text-xs text-[var(--text-tertiary)] mb-1.5">Narração</label>
         <div className="flex gap-2">
           <button
             type="button"
-            onClick={() => setVoiceProvider('edge')}
+            onClick={() => { setVoiceProvider('edge'); setNarrationMode('single'); setVoiceId(null) }}
             disabled={generating}
             className={`flex-1 py-2.5 px-3 rounded-xl border text-xs font-medium transition ${
-              voiceProvider === 'edge'
+              narrationMode === 'single' && voiceProvider === 'edge'
                 ? 'border-coral/50 bg-coral/10 text-coral'
                 : 'border-[var(--border-default)] bg-[var(--bg-surface)] text-[var(--text-tertiary)] hover:border-coral/30'
             } disabled:opacity-50 cursor-pointer`}
@@ -310,21 +333,61 @@ export default function GenerateForm({ onJobCreated, prefillTopic, prefillTrendC
           <button
             type="button"
             onClick={() => {
-              if (supportsDefaultPremiumVoice) setVoiceProvider('elevenlabs')
+              if (supportsDefaultPremiumVoice) { setVoiceProvider('elevenlabs'); setNarrationMode('single'); setVoiceId(null) }
             }}
             disabled={generating || !supportsDefaultPremiumVoice}
             className={`flex-1 py-2.5 px-3 rounded-xl border text-xs font-medium transition ${
-              voiceProvider === 'elevenlabs'
+              narrationMode === 'single' && voiceProvider === 'elevenlabs'
                 ? 'border-azure/50 bg-azure/10 text-azure'
                 : 'border-[var(--border-default)] bg-[var(--bg-surface)] text-[var(--text-tertiary)] hover:border-azure/30'
             } disabled:opacity-50 cursor-pointer`}
           >
             <div className="font-semibold">ElevenLabs</div>
             <div className="text-[10px] opacity-60 mt-0.5">
-              {supportsDefaultPremiumVoice ? `Premium · ${creditCost} créditos` : 'Premium no template IA'}
+              {supportsDefaultPremiumVoice ? `Premium · ${elevenCreditCost} créditos` : 'Premium no template IA'}
             </div>
           </button>
+          {dialogueCapable && (
+            <button
+              type="button"
+              onClick={() => setNarrationMode('dialogue')}
+              disabled={generating}
+              className={`flex-1 py-2.5 px-3 rounded-xl border text-xs font-medium transition ${
+                narrationMode === 'dialogue'
+                  ? 'border-mint/50 bg-mint/10 text-mint'
+                  : 'border-[var(--border-default)] bg-[var(--bg-surface)] text-[var(--text-tertiary)] hover:border-mint/30'
+              } disabled:opacity-50 cursor-pointer`}
+            >
+              <div className="font-semibold">Diálogo (2 vozes)</div>
+              <div className="text-[10px] opacity-60 mt-0.5">
+                Conversa · {elevenCreditCost} créditos
+              </div>
+            </button>
+          )}
         </div>
+
+        {/* Voz específica do provider (modo single) — o override já era suportado no backend */}
+        {narrationMode === 'single' && providerVoices.length > 1 && (
+          <select
+            value={voiceId ?? ''}
+            onChange={(e) => setVoiceId(e.target.value || null)}
+            disabled={generating}
+            aria-label="Escolher a voz da narração"
+            className="mt-2 w-full rounded-xl border border-[var(--border-default)] bg-[var(--bg-surface)] px-3 py-2.5 text-xs text-[var(--text-primary)] outline-none focus:border-coral/50 transition disabled:opacity-50 cursor-pointer"
+          >
+            <option value="">Voz padrão do template</option>
+            {providerVoices.map((v) => (
+              <option key={v.id} value={v.id}>
+                {v.name}{v.gender ? ` · ${v.gender === 'female' ? 'feminina' : 'masculina'}` : ''}
+              </option>
+            ))}
+          </select>
+        )}
+        {narrationMode === 'dialogue' && (
+          <p className="mt-2 text-[11px] text-[var(--text-tertiary)]">
+            O roteiro vira uma conversa entre duas vozes premium (Fernanda e um segundo narrador) — ótimo para dramas e debates.
+          </p>
+        )}
       </div>
 
       {/* Audio */}

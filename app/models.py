@@ -27,6 +27,10 @@ class GenerateRequest(BaseModel):
     music_enabled: bool | None = Field(
         default=None, description="Liga/desliga musica de fundo por video. None = usar settings.AUTO_MUSIC_ENABLED"
     )
+    narration_mode: Literal["single", "dialogue"] = Field(
+        default="single",
+        description="dialogue = roteiro em conversa + 2 vozes ElevenLabs (so em templates dialogue_capable)",
+    )
 
     @field_validator("template_id")
     @classmethod
@@ -34,6 +38,15 @@ class GenerateRequest(BaseModel):
         if value not in TEMPLATES:
             raise ValueError(ErrorMessages.INVALID_INPUT)
         return value
+
+    @model_validator(mode="after")
+    def validate_narration_mode(self):
+        if self.narration_mode == "dialogue":
+            template = TEMPLATES.get(self.template_id)
+            # dialogue_duo ja e dialogo nativo (is_dialogue) — pedir o modo la e redundante mas valido
+            if template and not (template.dialogue_capable or template.script.is_dialogue):
+                raise ValueError(ErrorMessages.INVALID_INPUT)
+        return self
 
 
 class VoiceCloneRequest(BaseModel):

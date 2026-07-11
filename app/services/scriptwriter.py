@@ -102,9 +102,13 @@ def generate_script(
     duration_target: int,
     template_id: str = "stock_narration",
     trend_context: str | None = None,
+    force_dialogue: bool = False,
 ) -> dict:
     template = get_template(template_id)
     word_count = int(duration_target * template.script.word_rate)
+    # narration_mode="dialogue" liga o roteiro em conversa em templates dialogue_capable
+    # sem tocar no preset do template (a sintese usa as 2 vozes de settings.DIALOGUE_VOICE_*)
+    is_dialogue = template.script.is_dialogue or force_dialogue
 
     prompt_text = SCRIPT_PROMPT.format(
         topic=topic,
@@ -135,7 +139,7 @@ def generate_script(
             '"visual_hint": "descricao concreta da cena",\n      "duration_hint": 7',
         )
 
-    if template.script.is_dialogue:
+    if is_dialogue:
         prompt_text += DIALOGUE_INSTRUCTION
         prompt_text = prompt_text.replace(
             '"duration_hint": 7',
@@ -189,7 +193,7 @@ def generate_script(
                 raise ScriptValidationError(f"cena {i+1} sem visual_hint (template {template_id} exige)")
 
     # Dialogue: normalize speaker to A/B (default A) so synthesis always has a valid voice
-    if template.script.is_dialogue:
+    if is_dialogue:
         for sc in script.get("scenes", []):
             sc["speaker"] = "B" if str(sc.get("speaker", "A")).strip().upper() == "B" else "A"
 

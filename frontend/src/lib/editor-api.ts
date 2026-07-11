@@ -133,6 +133,8 @@ export interface GenerateParams {
   trend_context?: string
   sfx_enabled?: boolean
   music_enabled?: boolean
+  /** 'dialogue' = roteiro em conversa + 2 vozes (só em templates dialogue_capable). */
+  narration_mode?: 'single' | 'dialogue'
 }
 
 export interface VoiceInfo {
@@ -220,6 +222,8 @@ export interface VideoTemplateInfo {
   default_voice_provider?: 'edge' | 'elevenlabs' | 'custom'
   default_voice_id?: string
   credit_costs?: Partial<Record<'edge' | 'elevenlabs' | 'custom', number>>
+  /** Aceita narração em diálogo (2 vozes)? dialogue_duo é diálogo nativo → false. */
+  dialogue_capable?: boolean
 }
 
 export async function fetchTemplates(): Promise<VideoTemplateInfo[]> {

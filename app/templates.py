@@ -52,6 +52,9 @@ class VideoTemplate:
     media: MediaStrategy
     script: ScriptConfig
     voice: VoicePreset
+    # Aceita narration_mode="dialogue" (roteiro em conversa + 2 vozes ElevenLabs)?
+    # Falso nos formatos de narrador unico bem definidos e no dialogue_duo (ja e nativo).
+    dialogue_capable: bool = False
 
 
 TEMPLATES: dict[str, VideoTemplate] = {
@@ -67,6 +70,7 @@ TEMPLATES: dict[str, VideoTemplate] = {
             needs_keywords=True,
         ),
         voice=VoicePreset(),
+        dialogue_capable=True,
     ),
     "curiosidades_lista": VideoTemplate(
         id="curiosidades_lista",
@@ -87,6 +91,7 @@ TEMPLATES: dict[str, VideoTemplate] = {
             needs_keywords=True,
         ),
         voice=VoicePreset(),
+        dialogue_capable=True,
     ),
     "voce_sabia": VideoTemplate(
         id="voce_sabia",
@@ -170,6 +175,7 @@ TEMPLATES: dict[str, VideoTemplate] = {
             word_rate=2.1,
         ),
         voice=VoicePreset(voice_id="pt-BR-FranciscaNeural", rate=-5, pitch=0),
+        dialogue_capable=True,
     ),
     "novelinha_historica": VideoTemplate(
         id="novelinha_historica",
@@ -208,6 +214,7 @@ TEMPLATES: dict[str, VideoTemplate] = {
             rate=-10,
             pitch=-2,
         ),
+        dialogue_capable=True,
     ),
     "ai_visual": VideoTemplate(
         id="ai_visual",
@@ -237,6 +244,7 @@ TEMPLATES: dict[str, VideoTemplate] = {
             word_rate=1.9,
         ),
         voice=VoicePreset(),  # Edge default (mais barato que ElevenLabs)
+        dialogue_capable=True,
     ),
     "ai_video": VideoTemplate(
         id="ai_video",

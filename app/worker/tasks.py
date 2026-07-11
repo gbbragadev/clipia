@@ -338,6 +338,7 @@ def dispatch_pipeline(
     voice_provider: str = "edge",
     voice_config: dict | None = None,
     trend_context: str | None = None,
+    narration_mode: str = "single",
 ):
     from celery import chain
 
@@ -352,6 +353,7 @@ def dispatch_pipeline(
             "created_at": datetime.now(timezone.utc).isoformat(),
             "template_id": template_id,
             "voice_provider": voice_provider,
+            "narration_mode": narration_mode,
         },
     )
     # Store voice config in Redis for the worker to pick up
@@ -629,7 +631,15 @@ def task_generate_script(
         if _check_cancelled(job_id):
             return {"cancelled": True}
         _update_job(job_id, "processing", "scripting", 0.1, detail="Gerando roteiro com IA...")
-        script = generate_script(topic, style, duration_target, template_id=template_id, trend_context=trend_context)
+        force_dialogue = _redis_hget(f"job:{job_id}", "narration_mode") == "dialogue"
+        script = generate_script(
+            topic,
+            style,
+            duration_target,
+            template_id=template_id,
+            trend_context=trend_context,
+            force_dialogue=force_dialogue,
+        )
         job_dir = get_job_dir(job_id)
         (job_dir / "script.json").write_text(json.dumps(script, ensure_ascii=False, indent=2), encoding="utf-8")
 
@@ -677,9 +687,10 @@ def task_synthesize_audio(self, script: dict, job_id: str, template_id: str = "s
         voice_provider_name = _redis_hget(f"job:{job_id}", "voice_provider") or "edge"
         voice_config_raw = _redis_hget(f"job:{job_id}", "voice_config")
         voice_config = json.loads(voice_config_raw) if voice_config_raw else None
+        narration_mode = _redis_hget(f"job:{job_id}", "narration_mode") or "single"
         template = get_template(template_id)
 
-        if template.script.is_dialogue:
+        if template.script.is_dialogue or narration_mode == "dialogue":
             from app.services.dialogue import synthesize_dialogue
 
             synthesize_dialogue(script["scenes"], output_path, duration_target=duration_target)

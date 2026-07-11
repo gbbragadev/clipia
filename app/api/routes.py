@@ -191,7 +191,10 @@ async def generate(
     db: AsyncSession = Depends(get_db),
 ):
     """Queue a video generation job."""
-    credit_cost = get_generation_credit_cost(req.template_id, req.voice_provider)
+    # Dialogo usa 2 vozes ElevenLabs na sintese: o custo e SEMPRE o pricing elevenlabs,
+    # decidido aqui (server-side) — nunca por campo de custo vindo do cliente.
+    cost_provider = "elevenlabs" if req.narration_mode == "dialogue" else req.voice_provider
+    credit_cost = get_generation_credit_cost(req.template_id, cost_provider)
 
     # Guardrail $: video IA (Seedance) e a operacao mais cara. Teto DIARIO por usuario, vale ate p/
     # conta admin/seed (foi o vetor do gasto de ~$6). O lock por usuario serializa get->incr (sem race).
@@ -260,6 +263,8 @@ async def generate(
         job_meta["sfx_enabled"] = "1" if req.sfx_enabled else "0"
     if req.music_enabled is not None:
         job_meta["music_enabled"] = "1" if req.music_enabled else "0"
+    if req.narration_mode != "single":
+        job_meta["narration_mode"] = req.narration_mode
     _redis.hset(f"job:{job_id}", mapping=job_meta)
 
     try:
@@ -272,6 +277,7 @@ async def generate(
             voice_provider=req.voice_provider,
             voice_config=req.voice_config,
             trend_context=req.trend_context,
+            narration_mode=req.narration_mode,
         )
     except Exception as e:  # noqa: BLE001 — enfileirar falhou (Celery/Redis down): estorna p/ nao cobrar sem gerar
         await _refund_credits(db, user.id, credit_cost)
@@ -483,6 +489,8 @@ async def list_templates():
             "media_source": t.media.source,
             "default_voice_provider": t.voice.provider,
             "default_voice_id": t.voice.voice_id,
+            # Aceita o modo dialogo (2 vozes)? dialogue_duo ja E dialogo nativo -> False (sem toggle).
+            "dialogue_capable": t.dialogue_capable,
             "credit_costs": {
                 "edge": get_generation_credit_cost(t.id, "edge"),
                 "elevenlabs": get_generation_credit_cost(t.id, "elevenlabs"),
