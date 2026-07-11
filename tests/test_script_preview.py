@@ -139,6 +139,59 @@ async def test_generate_rejects_malformed_custom_script(client, verified_user, a
 
 
 @pytest.mark.asyncio
+async def test_custom_script_enforces_scene_cap_anti_burn(client, verified_user, auth_headers):
+    """O caminho custom pula o generate_script, mas o teto anti-burn vale igual:
+    20 cenas num template de imagem IA seriam 20 geracoes PAGAS."""
+    bloated = {
+        "narration": "x " * 40,
+        "scenes": [{"text": f"cena {i} com texto valido", "duration_hint": 3} for i in range(20)],
+    }
+    resp = await client.post(
+        "/api/v1/generate",
+        json={**BASE_BODY, "duration_target": 30, "custom_script": bloated},
+        headers=auth_headers(verified_user),
+    )
+    assert resp.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_custom_script_requires_visual_hint_when_template_demands(client, verified_user, auth_headers):
+    no_hint = {
+        "narration": "Uma cena sem hint.",
+        "scenes": [{"text": "Uma cena sem hint.", "duration_hint": 30}],
+    }
+    resp = await client.post(
+        "/api/v1/generate",
+        json={
+            **BASE_BODY,
+            "template_id": "novelinha_historica",
+            "voice_provider": "elevenlabs",
+            "custom_script": no_hint,
+        },
+        headers=auth_headers(verified_user),
+    )
+    assert resp.status_code == 422
+
+
+def test_custom_script_normalizes_dialogue_speakers():
+    from app.models import GenerateRequest
+
+    req = GenerateRequest(
+        topic="tema de teste com dialogo",
+        template_id="stock_narration",
+        narration_mode="dialogue",
+        custom_script={
+            "narration": "Oi. Olá.",
+            "scenes": [
+                {"text": "Oi.", "speaker": "b"},
+                {"text": "Olá.", "speaker": "invalido"},
+            ],
+        },
+    )
+    assert [sc["speaker"] for sc in req.custom_script["scenes"]] == ["B", "A"]
+
+
+@pytest.mark.asyncio
 async def test_preview_rate_limited_per_hour(client, verified_user, auth_headers, monkeypatch, app):
     _mock_scriptwriter(monkeypatch)
     from app.api import routes as api_routes

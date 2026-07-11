@@ -403,6 +403,7 @@ export default function GenerateForm({ onJobCreated, prefillTopic, prefillTrendC
               if (supportsDefaultPremiumVoice) { setVoiceProvider('elevenlabs'); setNarrationMode('single'); setVoiceId(null) }
             }}
             disabled={generating || !supportsDefaultPremiumVoice}
+            title={!supportsDefaultPremiumVoice ? 'Voz premium disponível nos templates com IA (ex.: Drama Histórico)' : undefined}
             className={`flex-1 py-2.5 px-3 rounded-xl border text-xs font-medium transition ${
               narrationMode === 'single' && voiceProvider === 'elevenlabs'
                 ? 'border-azure/50 bg-azure/10 text-azure'

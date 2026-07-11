@@ -61,9 +61,27 @@ class GenerateRequest(BaseModel):
             narration = self.custom_script.get("narration")
             if not isinstance(scenes, list) or not scenes or not isinstance(narration, str) or not narration.strip():
                 raise ValueError(ErrorMessages.INVALID_INPUT)
+
+            # O caminho custom PULA o generate_script, entao os guardrails de la
+            # precisam valer AQUI (achado da revisao): sem o teto de cenas, um roteiro
+            # editado com N cenas num template de imagem/video IA = N geracoes PAGAS.
+            from app.config import settings
+
+            max_scenes = min(settings.MAX_SCENES_PER_VIDEO, max(6, -(-self.duration_target // 4)))
+            if len(scenes) > max_scenes:
+                raise ValueError(ErrorMessages.INVALID_INPUT)
+
+            template = TEMPLATES.get(self.template_id)
+            needs_hint = bool(template and template.script.needs_visual_hint)
+            is_dialogue = self.narration_mode == "dialogue" or bool(template and template.script.is_dialogue)
             for sc in scenes:
                 if not isinstance(sc, dict) or not str(sc.get("text", "")).strip():
                     raise ValueError(ErrorMessages.INVALID_INPUT)
+                if needs_hint and not str(sc.get("visual_hint", "")).strip():
+                    raise ValueError(ErrorMessages.INVALID_INPUT)
+                if is_dialogue:
+                    # normaliza speaker A/B (a sintese de dialogo exige um dos dois)
+                    sc["speaker"] = "B" if str(sc.get("speaker", "A")).strip().upper() == "B" else "A"
         return self
 
 
