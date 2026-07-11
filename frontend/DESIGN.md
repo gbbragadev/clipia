@@ -61,6 +61,9 @@ gradiente coral→índigo (`#6366f1`) está MORTO — não ressuscite.
    (`components/ui/StatusBadge.tsx`). Nada de status cru do banco na tela.
 4. **Ação destrutiva/paga = confirmação**: `Modal` acessível
    (`components/ui/Modal.tsx`) com consequência + custo explícitos.
+   Exceção deliberada (decisão de produto 11/07/2026): o refino de roteiro
+   (0,5cr, GenerateForm) executa SEM Modal — é ação iterativa de baixo valor
+   e o custo já aparece no botão e no painel; Modal ali só adiciona atrito.
 5. **Erro sempre com saída**: mensagem em pt-BR + ação de retry
    (`components/ui/feedback.tsx` InlineError/useToast).
 
