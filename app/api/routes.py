@@ -146,11 +146,13 @@ def _ensure_storage_ready() -> None:
         raise HTTPException(status_code=503, detail=ErrorMessages.DISK_FULL)
 
 
-async def _debit_credits(db: AsyncSession, user_id, cost: int) -> None:
+async def _debit_credits(db: AsyncSession, user_id, cost: int, commit: bool = True) -> None:
     """Debito atomico de creditos (mesmo padrao da rota /generate).
 
     Faz UPDATE ... WHERE credits >= cost (sem read-modify-write) para evitar race/saldo negativo.
     Levanta 402 se nao houver saldo, 403 se o email nao estiver verificado. No-op se cost <= 0.
+    commit=False deixa o caller commitar junto com as proprias mudancas (debito + estado do job
+    na MESMA transacao — um erro no meio nao deixa credito cobrado sem o efeito aplicado).
     """
     if cost <= 0:
         return
@@ -166,7 +168,8 @@ async def _debit_credits(db: AsyncSession, user_id, cost: int) -> None:
         if not fresh.email_verified:
             raise HTTPException(status_code=403, detail=ErrorMessages.EMAIL_NOT_VERIFIED)
         raise HTTPException(status_code=402, detail=ErrorMessages.INSUFFICIENT_CREDITS)
-    await db.commit()
+    if commit:
+        await db.commit()
     record_credit_metric("debit", cost)
 
 
@@ -1154,6 +1157,14 @@ Regras:
     # asyncio.to_thread: complete_text usa o cliente OpenRouter SINCRONO (15-40s). Rodar direto no
     # handler async travaria o event loop inteiro -> Cloudflare estoura ~100s -> 502 em TODA requisicao
     # em voo (inclusive o polling de geracao). Em thread separada o loop fica livre.
+    # SETNX+TTL: a chamada roda 15-40s FORA de lock — dois requests paralelos do mesmo job
+    # duplicariam o custo de API. TTL 90s destrava sozinho se o processo morrer no meio.
+    inflight_key = f"ai_suggest:{job.id}:inflight"
+    if not _redis.set(inflight_key, "1", nx=True, ex=90):
+        raise HTTPException(
+            status_code=429,
+            detail="Já existe uma sugestão de IA em andamento para este vídeo. Aguarde ela terminar.",
+        )
     try:
         raw = await asyncio.to_thread(complete_text, prompt)
     except Exception as e:  # noqa: BLE001
@@ -1162,6 +1173,8 @@ Regras:
             status_code=502,
             detail="A IA está indisponível no momento. Tente novamente em instantes.",
         )
+    finally:
+        _redis.delete(inflight_key)
     raw = strip_code_fences(raw)
 
     try:
@@ -1201,7 +1214,9 @@ async def render_video(
         await db.refresh(job)
         cost = math.ceil(job.pending_credits or 0.0)
         if cost > 0:
-            await _debit_credits(db, user.id, cost)  # atomico: 402 se sem saldo, sem read-modify-write
+            # commit=False: debito e pending_credits=0 na MESMA transacao (erro no meio nao
+            # deixa credito cobrado com pending ainda acumulado, nem o inverso).
+            await _debit_credits(db, user.id, cost, commit=False)
             job.pending_credits = 0.0
             await db.commit()
 
@@ -1222,6 +1237,9 @@ async def render_video(
             "progress": 0.0,
             "current_step": "queued",
             "detail": "Re-render enfileirado...",
+            # o worker le isto p/ devolver o valor EXATO se o re-render falhar
+            # (credit_cost do job e o custo da geracao, nao do export)
+            "rerender_cost": cost,
         },
     )
     try:
@@ -1233,7 +1251,11 @@ async def render_video(
             await db.commit()
         _redis.hset(
             f"job:{job_id}",
-            mapping={"status": "completed", "detail": "Re-render nao pode ser enfileirado; credito estornado."},
+            mapping={
+                "status": "completed",
+                "detail": "Re-render nao pode ser enfileirado; credito estornado.",
+                "rerender_cost": 0,
+            },
         )
         logger.error("task_rerender_video.delay falhou job=%s: %s — credito estornado", job_id, e)
         raise HTTPException(
@@ -1261,7 +1283,9 @@ async def reset_job(
     """Reset job to original state. Costs 1 credit, clears pending_credits."""
     job = await get_owned_job(db, user, job_id)
     async with get_lock(f"reset:{job_id}"):
-        await _debit_credits(db, user.id, 1)  # atomico: 402 se sem saldo, sem read-modify-write
+        # commit=False: debito + reset do job na MESMA transacao (erro entre eles nao
+        # deixa o credito cobrado com o editor_state intacto).
+        await _debit_credits(db, user.id, 1, commit=False)
         job.pending_credits = 0.0
         job.editor_state = None
         await db.commit()

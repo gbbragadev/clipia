@@ -39,8 +39,11 @@ class FakeRedis:
     def hget(self, key: str, field: str) -> str | None:
         return self.data.get(key, {}).get(field)
 
-    def set(self, key: str, value: str, ex: int | None = None):
+    def set(self, key: str, value: str, ex: int | None = None, nx: bool = False):
+        if nx and key in self.values:
+            return None  # redis-py: SET NX em chave existente retorna None
         self.values[key] = str(value)
+        return True
 
     def get(self, key: str) -> str | None:
         return self.values.get(key)

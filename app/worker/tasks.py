@@ -178,13 +178,66 @@ def _refund_job_credit(job_id: str, status_value: str, error: str, cleanup_files
         asyncio.run(_refund())
     except Exception as e:
         logger.error("Failed to refund credit for job %s: %s", job_id, e)
+        # Sem isto a falha era 100% silenciosa: o job ja esta "failed" no Redis, o
+        # watchdog pula jobs nao-ativos e o refund nunca seria re-tentado.
+        _send_admin_alert(
+            "ClipIA - refund FALHOU",
+            f"Job {job_id}: credito da geracao nao foi devolvido ({e}). Reembolsar manualmente.",
+        )
 
 
 def _fail_job(job_id: str, error: str):
     """Mark job as failed, refund, and enqueue for review."""
-    logger.exception("Job %s failed: %s", job_id, error)
+    # logger.error (nao .exception): _fail_job tambem e chamado fora de except block
+    # (watchdog) e .exception ali anexaria um traceback vazio/enganoso.
+    logger.error("Job %s failed: %s", job_id, error)
     _refund_job_credit(job_id, "failed", error)
     _enqueue_dead_letter(job_id, error)
+
+
+def _refund_rerender_cost(job_id: str) -> None:
+    """Devolve o custo exato do export (POST /render) e restaura pending_credits.
+
+    O rerender debita ceil(pending_credits) na rota e zera o pending. Em falha,
+    _refund_job_credit devolveria credit_cost (custo da GERACAO, valor errado) e
+    marcaria "failed" (bloqueando o editor). Aqui devolvemos o valor gravado em
+    rerender_cost no Redis e restauramos o pending p/ a re-tentativa cobrar de novo.
+    """
+    raw = _redis_hget(f"job:{job_id}", "rerender_cost")
+    try:
+        cost = int(float(raw)) if raw else 0
+    except (TypeError, ValueError):
+        cost = 0
+    if cost <= 0:
+        return
+    # zera ANTES de devolver: uma segunda passada pelo mesmo job nao refunda em dobro
+    _redis.hset(f"job:{job_id}", mapping={"rerender_cost": 0})
+    try:
+        from sqlalchemy import select, update
+
+        from app.db.engine import worker_session as async_session
+        from app.db.models import Job, User
+
+        async def _refund():
+            async with async_session() as session:
+                result = await session.execute(select(Job).where(Job.id == job_id))
+                job = result.scalar_one_or_none()
+                if not job:
+                    return
+                await session.execute(update(User).where(User.id == job.user_id).values(credits=User.credits + cost))
+                job.pending_credits = float(cost)
+                await session.commit()
+                logger.info("Refunded %d rerender credit(s) for job %s", cost, job_id)
+
+        asyncio.run(_refund())
+    except Exception as e:  # noqa: BLE001
+        logger.error("Failed to refund rerender cost for job %s: %s", job_id, e)
+        # devolve o marcador p/ revisao manual nao perder o valor devido
+        _redis.hset(f"job:{job_id}", mapping={"rerender_cost": cost})
+        _send_admin_alert(
+            "ClipIA - refund de re-render FALHOU",
+            f"Job {job_id}: {cost} credito(s) do export nao foram devolvidos ({e}). Reembolsar manualmente.",
+        )
 
 
 def _is_cancelled(job_id: str) -> bool:
@@ -395,7 +448,8 @@ async def _cleanup_old_jobs_async() -> dict[str, int]:
     async with async_session() as session:
         result = await session.execute(
             select(Job).where(
-                ((Job.status == "failed") & (Job.created_at <= failed_cutoff))
+                # "error" = rerender/export que falhou; sem ele aqui os arquivos ficavam orfaos p/ sempre
+                ((Job.status.in_(("failed", "error"))) & (Job.created_at <= failed_cutoff))
                 | ((Job.status.in_(("completed", "editable"))) & (Job.created_at <= completed_cutoff))
             )
         )
@@ -1260,13 +1314,31 @@ def task_rerender_video(self, job_id: str) -> str:
         except Exception as tel_err:  # noqa: BLE001 — telemetria nunca falha o export
             logger.warning("telemetria do rerender %s falhou: %s", job_id, tel_err)
 
+        # zera o marcador de custo: export entregue, nada a devolver
+        _redis.hset(f"job:{job_id}", mapping={"rerender_cost": 0})
         _update_job(job_id, "completed", None, 1.0, detail="Re-render concluido.")
         logger.info(f"Re-render completed for job {job_id}")
         return final_path
     except SoftTimeLimitExceeded:
-        _handle_soft_timeout(job_id, "rerender_video")
+        # NAO usar _handle_soft_timeout: ele devolve credit_cost (custo da GERACAO) e
+        # marca "failed", bloqueando um editor que continua utilizavel. O export devolve
+        # o proprio custo e deixa o job em "error" (re-tentavel).
+        _refund_rerender_cost(job_id)
+        _update_job(
+            job_id,
+            "error",
+            error="Re-render demorou demais.",
+            detail="O export demorou demais e foi interrompido. Seu credito foi devolvido — tente novamente.",
+        )
+        _enqueue_dead_letter(job_id, "rerender_video soft timeout")
         raise
     except Exception as e:
-        _update_job(job_id, "error", error=str(e), detail=str(e))
+        _refund_rerender_cost(job_id)
+        _update_job(
+            job_id,
+            "error",
+            error=str(e),
+            detail="Falha no re-render. Seu credito do export foi devolvido — tente novamente.",
+        )
         logger.error(f"Re-render failed for job {job_id}: {e}")
         raise

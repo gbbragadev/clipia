@@ -80,15 +80,21 @@ def _get_duration(path: str) -> float:
     return float(data["format"]["duration"])
 
 
+_NVENC_AVAILABLE: bool | None = None
+
+
 def _has_nvenc() -> bool:
-    """Check if NVENC encoder is available."""
-    result = subprocess.run(
-        ["ffmpeg", "-hide_banner", "-encoders"],
-        capture_output=True,
-        text=True,
-        timeout=5,
-    )
-    return "h264_nvenc" in result.stdout
+    """Check if NVENC encoder is available (cacheado: nao muda durante o processo)."""
+    global _NVENC_AVAILABLE
+    if _NVENC_AVAILABLE is None:
+        result = subprocess.run(
+            ["ffmpeg", "-hide_banner", "-encoders"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        _NVENC_AVAILABLE = "h264_nvenc" in result.stdout
+    return _NVENC_AVAILABLE
 
 
 def _prepare_video_scene(media_path: str, duration: float, output_path: str) -> str:
@@ -538,6 +544,15 @@ def compose_short(
     logger.info(f"Audio: {audio_duration:.1f}s, scenes: {scene_durations}")
 
     # 2. Prepare each scene clip (resize + duration)
+    if media_paths and len(media_paths) < len(scenes):
+        # fetch_media pula downloads que falham: sem isto o video saia TRUNCADO em
+        # silencio (concat curto + -shortest corta a narracao antes do fim).
+        logger.warning(
+            "compose_short: %d cenas mas %d midias — reutilizando a ultima midia nas cenas restantes",
+            len(scenes),
+            len(media_paths),
+        )
+        media_paths = list(media_paths) + [media_paths[-1]] * (len(scenes) - len(media_paths))
     prepared = []
     for i, (scene, dur) in enumerate(zip(scenes, scene_durations)):
         if i >= len(media_paths):
