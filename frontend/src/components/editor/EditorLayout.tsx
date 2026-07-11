@@ -39,7 +39,7 @@ const PANELS = [
 ]
 
 export function EditorLayout() {
-  const { loading, error, saving, dirty, activePanel, setActivePanel, panelCollapsed, togglePanel, composition, jobId, undo, redo, canUndo, canRedo } = useEditor()
+  const { loading, error, saving, dirty, saveError, retrySave, activePanel, setActivePanel, panelCollapsed, togglePanel, composition, jobId, undo, redo, canUndo, canRedo } = useEditor()
   const [showExport, setShowExport] = useState(false)
   const isMobile = useIsMobile()
   const [timelineOpen, setTimelineOpen] = useState(false)
@@ -81,8 +81,22 @@ export function EditorLayout() {
         </div>
         <div className="editor-header__right">
           {saving && <span className="editor-header__status editor-header__status--saving">{strings.editor.saving}</span>}
-          {dirty && !saving && <span className="editor-header__status editor-header__status--dirty">Não salvo</span>}
-          {!dirty && !saving && <span className="editor-header__status editor-header__status--saved">{strings.editor.saved}</span>}
+          {saveError && !saving && (
+            <button
+              type="button"
+              onClick={retrySave}
+              className="editor-header__status"
+              title="As últimas edições não foram salvas no servidor. Clique para tentar de novo."
+              style={{
+                color: 'var(--color-danger)', background: 'rgba(248,113,113,0.1)',
+                border: '1px solid rgba(248,113,113,0.3)', borderRadius: 6, cursor: 'pointer',
+              }}
+            >
+              Falha ao salvar · tentar de novo
+            </button>
+          )}
+          {dirty && !saving && !saveError && <span className="editor-header__status editor-header__status--dirty">Não salvo</span>}
+          {!dirty && !saving && !saveError && <span className="editor-header__status editor-header__status--saved">{strings.editor.saved}</span>}
           {isMobile && (
             <>
               {/* Sem teclado não há Ctrl+Z: undo/redo precisam de botão no mobile */}

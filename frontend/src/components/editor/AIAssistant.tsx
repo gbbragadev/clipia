@@ -5,6 +5,8 @@ import { useEditor } from '@/contexts/EditorContext'
 import { getToken } from '@/lib/auth'
 import { readApiError } from '@/lib/http'
 import { useToast } from '@/components/ui/feedback'
+import { Modal } from '@/components/ui/Modal'
+import { useAuth } from '@/contexts/AuthContext'
 import { CostChip } from './CostChip'
 
 const QUICK_PROMPTS = [
@@ -30,11 +32,14 @@ interface ChatMessage {
 export function AIAssistant() {
   const { jobId, composition, updateScene, updateAudio, selectScene, setActivePanel } = useEditor()
   const { error: toastError, info } = useToast()
+  const { user, refreshUser } = useAuth()
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
   const [appliedSuggestions, setAppliedSuggestions] = useState<Set<string>>(new Set())
   const [applyingKey, setApplyingKey] = useState<string | null>(null)
+  // Voz premium: regravar a narração no apply custa 2 créditos → confirmação antes (DESIGN.md)
+  const [pendingApply, setPendingApply] = useState<{ msgIndex: number; sugIndex: number; suggestion: Suggestion } | null>(null)
   // Custo diferido do ai-suggest: cada consulta soma 0,5 crédito ao pending_credits
   // do job (cobrado no próximo export). A API devolve o acumulado — exibimos ao vivo.
   const [pendingCredits, setPendingCredits] = useState<number | null>(null)
@@ -86,13 +91,35 @@ export function AIAssistant() {
     }
   }
 
-  const handleApply = async (msgIndex: number, sugIndex: number, suggestion: Suggestion) => {
+  const isPremiumVoice = composition?.voiceConfig?.voiceProvider === 'elevenlabs'
+
+  // Gate de custo: voz premium regrava a narração inteira (2 créditos) → Modal decide.
+  const requestApply = (msgIndex: number, sugIndex: number, suggestion: Suggestion) => {
+    if (isPremiumVoice) {
+      setPendingApply({ msgIndex, sugIndex, suggestion })
+    } else {
+      void handleApply(msgIndex, sugIndex, suggestion, true)
+    }
+  }
+
+  const handleApply = async (msgIndex: number, sugIndex: number, suggestion: Suggestion, regenerate: boolean) => {
     if (!composition) return
+    setPendingApply(null)
     const key = `${msgIndex}-${sugIndex}`
-    setApplyingKey(key)
 
     // 1. Update scene text in composition state
     updateScene(suggestion.scene_index, { text: suggestion.new_text })
+
+    if (!regenerate) {
+      // Só o texto: o aviso de narração desatualizada (narrationStale) guia o regen depois.
+      setAppliedSuggestions(prev => new Set(prev).add(key))
+      info('Texto aplicado', 'A narração não foi regravada — regenere na aba Voz quando terminar de editar.')
+      selectScene(suggestion.scene_index)
+      setActivePanel('scenes')
+      return
+    }
+
+    setApplyingKey(key)
 
     // 2. Build the full text with the new scene applied
     const updatedScenes = composition.scenes.map((s, i) =>
@@ -112,6 +139,9 @@ export function AIAssistant() {
         body: JSON.stringify({
           text: fullText,
           voice_id: composition.voiceConfig?.voiceId || 'pt-BR-AntonioNeural',
+          // Sem isso o backend caía no caminho Edge com voice_id premium → 422 e o
+          // apply "funcionava" só no texto. Provider explícito = custo e voz corretos.
+          voice_provider: composition.voiceConfig?.voiceProvider || 'edge',
           rate: composition.voiceConfig?.rate ?? -10,
           pitch: composition.voiceConfig?.pitch ?? 5,
         }),
@@ -121,6 +151,13 @@ export function AIAssistant() {
       const audioUrl = `${data.audio_url}?t=${Date.now()}`
       updateAudio(data.words, audioUrl)
       setAppliedSuggestions(prev => new Set(prev).add(key))
+      if (data.words_stale) {
+        info(
+          'Narração gerada, mas as legendas podem ter ficado dessincronizadas',
+          'A transcrição do áudio novo falhou; mantivemos os tempos antigos. Regenere na aba Voz para tentar sincronizar.',
+        )
+      }
+      if (isPremiumVoice) await refreshUser()
     } catch (err) {
       console.error('AI apply regeneration failed:', err)
       // Text is already updated, just mark as applied with warning
@@ -294,7 +331,7 @@ export function AIAssistant() {
                         {sug.reason}
                       </div>
                       <button
-                        onClick={() => handleApply(msgIdx, sugIdx, sug)}
+                        onClick={() => requestApply(msgIdx, sugIdx, sug)}
                         disabled={applied || applying || applyingKey !== null}
                         style={{
                           padding: '4px 14px',
@@ -309,7 +346,7 @@ export function AIAssistant() {
                           transition: 'all 0.15s',
                         }}
                       >
-                        {applied ? 'Aplicado' : applying ? 'Regerando narração...' : 'Aplicar (regenera a narração)'}
+                        {applied ? 'Aplicado' : applying ? 'Regerando narração...' : isPremiumVoice ? 'Aplicar (regrava · 2 créditos)' : 'Aplicar (regenera a narração)'}
                       </button>
                     </div>
                   )
@@ -401,6 +438,47 @@ export function AIAssistant() {
           Enviar
         </button>
       </div>
+
+      {/* Voz premium: aplicar sugestão regrava a narração inteira — custo antes (DESIGN.md) */}
+      <Modal open={pendingApply !== null} onClose={() => setPendingApply(null)} labelledBy="apply-modal-titulo">
+        <h3 id="apply-modal-titulo" className="text-base font-bold mb-2" style={{ color: 'var(--text-primary)' }}>
+          Aplicar sugestão e regravar a narração?
+        </h3>
+        <p className="text-sm leading-relaxed mb-1" style={{ color: 'var(--text-secondary)' }}>
+          Você está com uma voz premium selecionada: regravar a narração inteira com o texto
+          novo custa 2 créditos. Se preferir, aplique só o texto agora e regrave uma única vez
+          no final das edições.
+        </p>
+        <p className="text-xs mb-5" style={{ color: 'var(--text-tertiary)' }}>
+          2 créditos{user ? ` · você tem ${user.credits}` : ''}.
+        </p>
+        <div className="flex flex-col gap-2">
+          <button
+            type="button"
+            onClick={() => pendingApply && handleApply(pendingApply.msgIndex, pendingApply.sugIndex, pendingApply.suggestion, true)}
+            className="w-full py-2.5 rounded-lg text-sm font-semibold transition"
+            style={{ background: 'var(--color-coral)', color: 'white', border: 'none', cursor: 'pointer' }}
+          >
+            Aplicar e regravar (2 créditos)
+          </button>
+          <button
+            type="button"
+            onClick={() => pendingApply && handleApply(pendingApply.msgIndex, pendingApply.sugIndex, pendingApply.suggestion, false)}
+            className="w-full py-2.5 rounded-lg text-sm font-medium transition"
+            style={{ background: 'var(--bg-surface)', color: 'var(--text-primary)', border: '1px solid var(--border-subtle)', cursor: 'pointer' }}
+          >
+            Aplicar só o texto (grátis)
+          </button>
+          <button
+            type="button"
+            onClick={() => setPendingApply(null)}
+            className="w-full py-2 rounded-lg text-sm font-medium transition"
+            style={{ background: 'transparent', color: 'var(--text-secondary)', border: 'none', cursor: 'pointer' }}
+          >
+            Cancelar
+          </button>
+        </div>
+      </Modal>
     </div>
   )
 }

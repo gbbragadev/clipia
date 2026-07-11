@@ -6,6 +6,7 @@ import { getToken } from '@/lib/auth'
 import { readApiError } from '@/lib/http'
 import { fetchVoices, type VoiceInfo } from '@/lib/editor-api'
 import { useToast } from '@/components/ui/feedback'
+import { Modal } from '@/components/ui/Modal'
 import { useAuth } from '@/contexts/AuthContext'
 import { VoiceClonePanel } from './VoiceClonePanel'
 import { CostChip } from './CostChip'
@@ -18,18 +19,21 @@ const TAB_LABELS: Record<Tab, string> = {
   custom: 'Minha Voz',
 }
 
+// Clones regeneram pelo mesmo caminho ElevenLabs do backend (CREDIT_COST_ELEVENLABS = 2).
 const TAB_BADGES: Record<Tab, string> = {
   free: '',
   premium: '2 créditos',
-  custom: '1 crédito',
+  custom: '2 créditos',
 }
 
 export function VoiceSelector() {
   const { composition, updateVoiceConfig, updateAudio, jobId, narrationStale } = useEditor()
-  const { success: toastSuccess, error: toastError } = useToast()
-  const { user } = useAuth()
+  const { success: toastSuccess, error: toastError, info: toastInfo } = useToast()
+  const { user, refreshUser } = useAuth()
   const [regenerating, setRegenerating] = useState(false)
   const [regenError, setRegenError] = useState<string | null>(null)
+  const [confirmingRegen, setConfirmingRegen] = useState(false)
+  const [wordsStale, setWordsStale] = useState(false)
   const [activeTab, setActiveTab] = useState<Tab>('free')
   const [voices, setVoices] = useState<VoiceInfo[]>([])
   const [loadingVoices, setLoadingVoices] = useState(false)
@@ -58,6 +62,8 @@ export function VoiceSelector() {
   if (!composition) return null
 
   const { voiceConfig } = composition
+  // Edge é grátis; ElevenLabs (inclui clones) debita 2 créditos no backend.
+  const isPaidRegen = voiceConfig.voiceProvider === 'elevenlabs'
 
   const edgeVoices = voices.filter(v => v.provider === 'edge')
   const elevenVoices = voices.filter(v => v.provider === 'elevenlabs')
@@ -115,6 +121,7 @@ export function VoiceSelector() {
 
   const handleRegenerate = async () => {
     if (!composition || regenerating) return
+    setConfirmingRegen(false)
     setRegenerating(true)
     setRegenError(null)
     try {
@@ -138,6 +145,16 @@ export function VoiceSelector() {
       const data = await res.json()
       const audioUrl = `${data.audio_url}?t=${Date.now()}`
       updateAudio(data.words, audioUrl)
+      setWordsStale(Boolean(data.words_stale))
+      if (data.words_stale) {
+        toastInfo(
+          'Narração gerada, mas as legendas podem ter ficado dessincronizadas',
+          'A transcrição do áudio novo falhou; mantivemos os tempos antigos. Regenere de novo para tentar sincronizar.',
+        )
+      } else {
+        toastSuccess('Narração regenerada', 'Áudio e legendas atualizados.')
+      }
+      if (isPaidRegen) await refreshUser()
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Erro desconhecido'
       setRegenError(message)
@@ -365,7 +382,7 @@ export function VoiceSelector() {
         )}
       </div>
       <button
-        onClick={handleRegenerate}
+        onClick={() => (isPaidRegen ? setConfirmingRegen(true) : handleRegenerate())}
         disabled={regenerating}
         style={{
           padding: '9px 0',
@@ -377,6 +394,66 @@ export function VoiceSelector() {
       >
         {regenerating ? 'Regerando...' : 'Regerar narração'}
       </button>
+
+      {/* Transcrição falhou no último regen: legendas seguem com os tempos antigos */}
+      {wordsStale && (
+        <div
+          role="status"
+          style={{
+            display: 'flex', gap: 8, alignItems: 'flex-start', padding: '8px 10px', borderRadius: 8,
+            background: 'rgba(251,191,36,0.08)', border: '1px solid rgba(251,191,36,0.25)',
+            marginTop: -8,
+          }}
+        >
+          <span aria-hidden>⚠️</span>
+          <div style={{ fontSize: 11, lineHeight: 1.5, color: 'var(--text-secondary)' }}>
+            <strong style={{ color: '#fbbf24' }}>Legendas podem estar dessincronizadas.</strong> A
+            transcrição do áudio novo falhou e mantivemos os tempos antigos. Regenere de novo para
+            tentar sincronizar.
+          </div>
+        </div>
+      )}
+
+      {/* Ação paga: consequência + custo explícitos antes de confirmar (DESIGN.md) */}
+      <Modal open={confirmingRegen} onClose={() => { if (!regenerating) setConfirmingRegen(false) }} labelledBy="regen-modal-titulo">
+        <h3 id="regen-modal-titulo" className="text-base font-bold mb-2" style={{ color: 'var(--text-primary)' }}>
+          Regerar narração com voz premium?
+        </h3>
+        <p className="text-sm leading-relaxed mb-1" style={{ color: 'var(--text-secondary)' }}>
+          A narração inteira será regravada com a voz selecionada e as legendas serão
+          re-sincronizadas com o áudio novo.
+        </p>
+        <p className="text-xs mb-5" style={{ color: 'var(--text-tertiary)' }}>
+          Custa 2 créditos{user ? ` · você tem ${user.credits}` : ''}.
+        </p>
+        <div className="flex gap-2">
+          <button
+            type="button"
+            onClick={handleRegenerate}
+            disabled={regenerating}
+            className="flex-1 py-2.5 rounded-lg text-sm font-semibold transition"
+            style={{
+              background: 'var(--color-coral)', color: 'white', border: 'none',
+              cursor: regenerating ? 'not-allowed' : 'pointer', opacity: regenerating ? 0.6 : 1,
+            }}
+          >
+            {regenerating ? 'Regerando...' : 'Regerar (2 créditos)'}
+          </button>
+          <button
+            type="button"
+            onClick={() => setConfirmingRegen(false)}
+            disabled={regenerating}
+            className="flex-1 py-2.5 rounded-lg text-sm font-medium transition"
+            style={{
+              background: 'var(--bg-surface)', color: 'var(--text-secondary)',
+              border: '1px solid var(--border-subtle)',
+              cursor: regenerating ? 'not-allowed' : 'pointer',
+            }}
+          >
+            Cancelar
+          </button>
+        </div>
+      </Modal>
       {regenError && (
         <div style={{ fontSize: 10, color: '#f87171', marginTop: -8, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
           <span>{regenError}</span>

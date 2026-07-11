@@ -1066,6 +1066,7 @@ async def regenerate_tts(
     words_path = job_dir / "words.json"
     old_words = json.loads(words_path.read_text(encoding="utf-8")) if words_path.exists() else []
     words = []
+    words_stale = False  # True = legendas podem estar dessincronizadas com o audio novo
     try:
         from app.services.transcriber import transcribe_with_timestamps
 
@@ -1074,6 +1075,12 @@ async def regenerate_tts(
     except Exception as e:
         logger.warning(f"Whisper transcription failed, keeping old timestamps: {e}")
         words = old_words
+        words_stale = True
+
+    if not words and old_words:
+        # Transcricao "bem-sucedida" mas vazia: manter as antigas e ser honesto sobre o stale.
+        words = old_words
+        words_stale = True
 
     # Save updated words
     if words:
@@ -1082,6 +1089,7 @@ async def regenerate_tts(
     return {
         "audio_url": sign_media_url(f"/storage/jobs/{job_id}/narration.wav"),
         "words": words,
+        "words_stale": words_stale,
     }
 
 
