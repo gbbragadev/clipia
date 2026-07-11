@@ -180,6 +180,41 @@ export async function fetchAdminJobs(params: { status?: string; page?: number })
   )
 }
 
+// ── Economia por job (telemetria consolidada no finalize) ──────────────────
+
+export interface AdminEconomyJob {
+  job_id: string
+  template_id: string
+  voice_provider: string
+  created_at: string | null
+  total_seconds: number | null
+  steps: Record<string, number>
+  api_cost_usd_est: number
+  credit_cost: number
+}
+
+export interface AdminEconomyTemplateAgg {
+  count: number
+  api_cost_usd_est: number
+  credits: number
+  total_seconds: number
+  avg_cost_usd: number
+  avg_seconds: number
+}
+
+export interface AdminEconomyResponse {
+  jobs: AdminEconomyJob[]
+  by_template: Record<string, AdminEconomyTemplateAgg>
+}
+
+export async function fetchAdminEconomy() {
+  return fetchJson<AdminEconomyResponse>(
+    `${API_BASE}/api/v1/admin/economy`,
+    { headers: authHeaders() },
+    'Nao foi possivel carregar a economia',
+  )
+}
+
 export interface AdminFeedbackItem {
   id: string
   user_email: string

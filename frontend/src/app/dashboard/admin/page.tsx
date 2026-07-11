@@ -6,6 +6,7 @@ import { useEffect, useState, type ReactNode } from 'react'
 import { useAuth } from '@/contexts/AuthContext'
 import { fetchAdminDashboard, type AdminDashboardResponse, type AdminRange, type AdminSeriesPoint } from '@/lib/admin'
 import { InlineError } from '@/components/ui/feedback'
+import AdminEconomyTab from '@/components/admin/AdminEconomyTab'
 import AdminFeedbackTab from '@/components/admin/AdminFeedbackTab'
 import AdminJobsTab from '@/components/admin/AdminJobsTab'
 import AdminPurchasesTab from '@/components/admin/AdminPurchasesTab'
@@ -17,7 +18,7 @@ const RANGE_OPTIONS: Array<{ value: AdminRange; label: string }> = [
   { value: '90d', label: '90 dias' },
 ]
 
-type AdminTabKey = 'overview' | 'users' | 'purchases' | 'jobs' | 'feedback'
+type AdminTabKey = 'overview' | 'users' | 'purchases' | 'jobs' | 'feedback' | 'economy'
 
 const TAB_OPTIONS: Array<{ value: AdminTabKey; label: string }> = [
   { value: 'overview', label: 'Visão geral' },
@@ -25,6 +26,7 @@ const TAB_OPTIONS: Array<{ value: AdminTabKey; label: string }> = [
   { value: 'purchases', label: 'Compras' },
   { value: 'jobs', label: 'Vídeos' },
   { value: 'feedback', label: 'Feedback' },
+  { value: 'economy', label: 'Economia' },
 ]
 
 export default function AdminDashboardPage() {
@@ -325,6 +327,7 @@ export default function AdminDashboardPage() {
       {tab === 'purchases' && <AdminPurchasesTab />}
       {tab === 'jobs' && <AdminJobsTab />}
       {tab === 'feedback' && <AdminFeedbackTab />}
+      {tab === 'economy' && <AdminEconomyTab />}
     </div>
   )
 }

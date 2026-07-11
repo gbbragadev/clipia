@@ -104,6 +104,9 @@ class Job(Base):
     credit_cost: Mapped[int] = mapped_column(Integer, default=1)
     voice_provider: Mapped[str] = mapped_column(String(50), default="edge")
     voice_config: Mapped[dict | None] = mapped_column(JsonType, nullable=True)
+    # Economia por job (consolidado no finalize): {steps: {etapa: segundos},
+    # total_seconds, api_cost_usd_est, credit_cost} — alimenta o admin/economy.
+    telemetry: Mapped[dict | None] = mapped_column(JsonType, nullable=True)
 
     user: Mapped["User"] = relationship(back_populates="jobs")
 

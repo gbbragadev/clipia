@@ -1375,6 +1375,54 @@ async def list_jobs(
 
 
 @router.get(
+    "/admin/economy",
+    summary="Economia por job",
+    description="Custo estimado de API vs créditos cobrados, por job e por template.",
+    responses={200: {"description": "Telemetria de economia"}},
+)
+async def admin_economy(
+    _admin_user: User = Depends(get_current_admin_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Margem real da operação: telemetria consolidada no finalize de cada job.
+    Jobs antigos (sem telemetry) ficam de fora — a visão cresce com o uso."""
+    result = await db.execute(select(Job).where(Job.telemetry.isnot(None)).order_by(Job.created_at.desc()).limit(100))
+    jobs = result.scalars().all()
+
+    items = []
+    by_template: dict[str, dict] = {}
+    for j in jobs:
+        tel = j.telemetry or {}
+        cost = float(tel.get("api_cost_usd_est") or 0.0)
+        items.append(
+            {
+                "job_id": str(j.id),
+                "template_id": j.template_id,
+                "voice_provider": j.voice_provider,
+                "created_at": j.created_at.isoformat() if j.created_at else None,
+                "total_seconds": tel.get("total_seconds"),
+                "steps": tel.get("steps") or {},
+                "api_cost_usd_est": cost,
+                "credit_cost": j.credit_cost,
+            }
+        )
+        agg = by_template.setdefault(
+            j.template_id, {"count": 0, "api_cost_usd_est": 0.0, "credits": 0, "total_seconds": 0.0}
+        )
+        agg["count"] += 1
+        agg["api_cost_usd_est"] = round(agg["api_cost_usd_est"] + cost, 4)
+        agg["credits"] += j.credit_cost or 0
+        agg["total_seconds"] += float(tel.get("total_seconds") or 0.0)
+
+    for agg in by_template.values():
+        n = agg["count"] or 1
+        agg["avg_cost_usd"] = round(agg["api_cost_usd_est"] / n, 4)
+        agg["avg_seconds"] = round(agg["total_seconds"] / n, 1)
+
+    return {"jobs": items, "by_template": by_template}
+
+
+@router.get(
     "/admin/dashboard",
     summary="Admin dashboard",
     description="Aggregated admin metrics for the SaaS control panel.",

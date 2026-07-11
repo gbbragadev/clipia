@@ -82,6 +82,15 @@ class Settings(BaseSettings):
     DIALOGUE_VOICE_A: str = "KHmfNHtEjHhLK9eER20w"  # Fernanda (pt-BR, feminina)
     DIALOGUE_VOICE_B: str = "aRsdx5i9kl9PWUbkzxIp"  # Bruno - ClipIA (pt-BR, masculina, Voice Design)
 
+    # ── Telemetria de economia: custo ESTIMADO de API em USD por unidade ──────
+    # Estimativas ajustaveis por env; a aba Economia do admin compara com o credito
+    # cobrado ("senao estou gerando video e perdendo dinheiro"). Refine com a fatura real.
+    API_COST_LLM_PER_CALL_USD: float = 0.005  # roteiro/refino via cascata OpenRouter
+    API_COST_ELEVENLABS_PER_1K_CHARS_USD: float = 0.11
+    API_COST_GROQ_ASR_PER_JOB_USD: float = 0.001  # whisper-large no free tier ~0
+    API_COST_GPT_IMAGE_PER_IMAGE_USD: float = 0.06  # gpt-image medium 1024x1536
+    API_COST_SEEDANCE_PER_SECOND_USD: float = 0.12  # ai_video 720p
+
     # GPU
     DEVICE: str = "cuda"
     WHISPER_MODEL_SIZE: str = "large-v3"

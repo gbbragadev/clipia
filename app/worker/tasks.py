@@ -80,6 +80,7 @@ def _update_job(
     error: str | None = None,
     detail: str | None = None,
 ):
+    now_iso = datetime.now(timezone.utc).isoformat()
     data = {
         "status": status,
         "current_step": step or "",
@@ -88,9 +89,13 @@ def _update_job(
         "detail": detail or "",
         # Heartbeat do watchdog: time limits do Celery sao no-op no pool solo
         # (Windows); um job sem update ha mais que o limiar do step esta travado.
-        "updated_at": datetime.now(timezone.utc).isoformat(),
+        "updated_at": now_iso,
     }
-    _redis.hset(f"job:{job_id}", mapping=data)
+    key = f"job:{job_id}"
+    # Telemetria: primeiro timestamp de cada etapa (consolidado em duracao no finalize)
+    if step and not _redis_hget(key, f"t:{step}"):
+        data[f"t:{step}"] = now_iso
+    _redis.hset(key, mapping=data)
 
 
 def _redis_get(key: str) -> str | None:
@@ -962,6 +967,70 @@ def task_compose_video(self, data: dict, job_id: str, template_id: str = "stock_
         raise
 
 
+def _estimate_api_cost_usd(job_id: str, script_data: dict | None) -> float:
+    """Custo ESTIMADO de API do job em USD (constantes ajustaveis em settings).
+
+    Nao instrumenta cada provider (zero risco na pipeline): deriva do que o job
+    consumiu — template (fonte de midia), provedor de voz, tamanho da narracao,
+    numero de cenas. Estimativa honesta p/ a aba Economia; refine com a fatura.
+    """
+    key = f"job:{job_id}"
+    template = get_template(_redis_hget(key, "template_id") or "stock_narration")
+    voice_provider = _redis_hget(key, "voice_provider") or "edge"
+    narration_mode = _redis_hget(key, "narration_mode") or "single"
+    custom_script = _redis_hget(key, "custom_script") == "1"
+
+    script = script_data or {}
+    narration = script.get("narration") or ""
+    scenes = script.get("scenes") or []
+
+    cost = 0.0
+    if not custom_script:
+        cost += settings.API_COST_LLM_PER_CALL_USD  # roteiro
+    if voice_provider == "elevenlabs" or narration_mode == "dialogue" or template.voice.provider == "elevenlabs":
+        cost += (len(narration) / 1000) * settings.API_COST_ELEVENLABS_PER_1K_CHARS_USD
+    cost += settings.API_COST_GROQ_ASR_PER_JOB_USD
+    if template.media.source == "ai_image":
+        cost += len(scenes) * settings.API_COST_GPT_IMAGE_PER_IMAGE_USD
+    elif template.media.source == "ai_video":
+        total_secs = sum(float(s.get("duration_hint", 5) or 5) for s in scenes)
+        cost += total_secs * settings.API_COST_SEEDANCE_PER_SECOND_USD
+    return round(cost, 4)
+
+
+def _build_telemetry(job_id: str, script_data: dict | None) -> dict:
+    """Duracao por etapa (dos timestamps t:{step} do hash) + custo estimado de API."""
+    key = f"job:{job_id}"
+    data = _redis.hgetall(key)
+    starts: list[tuple[str, datetime]] = []
+    for field, raw in data.items():
+        if not str(field).startswith("t:"):
+            continue
+        try:
+            starts.append((str(field)[2:], datetime.fromisoformat(str(raw))))
+        except ValueError:
+            continue
+    starts.sort(key=lambda item: item[1])
+
+    now = datetime.now(timezone.utc)
+    steps: dict[str, float] = {}
+    for i, (step, started) in enumerate(starts):
+        ended = starts[i + 1][1] if i + 1 < len(starts) else now
+        steps[step] = round((ended - started).total_seconds(), 1)
+
+    created_raw = data.get("created_at")
+    try:
+        total = round((now - datetime.fromisoformat(str(created_raw))).total_seconds(), 1) if created_raw else None
+    except ValueError:
+        total = None
+
+    return {
+        "steps": steps,
+        "total_seconds": total,
+        "api_cost_usd_est": _estimate_api_cost_usd(job_id, script_data),
+    }
+
+
 @celery_app.task(name="finalize", bind=True, soft_time_limit=120, time_limit=150)
 def task_finalize(self, video_path: str, job_id: str) -> str:
     try:
@@ -986,6 +1055,11 @@ def task_finalize(self, video_path: str, job_id: str) -> str:
             job_dir = get_job_dir(job_id)
             script_path = job_dir / "script.json"
             script_data = _read_json_file(script_path) if script_path.exists() else None
+            try:
+                telemetry = _build_telemetry(job_id, script_data)
+            except Exception as tel_err:  # noqa: BLE001 — telemetria nunca falha o finalize
+                logger.warning("telemetria do job %s falhou: %s", job_id, tel_err)
+                telemetry = None
 
             async def _save_script():
                 async with async_session() as session:
@@ -996,6 +1070,7 @@ def task_finalize(self, video_path: str, job_id: str) -> str:
                             script=script_data,
                             status="editable",
                             video_url=final_path,
+                            telemetry=telemetry,
                         )
                     )
                     await session.commit()
