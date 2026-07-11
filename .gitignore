@@ -43,3 +43,13 @@ pytestbasetemp-current/
 
 # Evidencias de sessao (screenshots de smoke/QA na raiz do frontend)
 frontend/*.png
+
+# Artefatos pesados de marketing/mockups das sessoes (ficam so no disco, nao versionar)
+marketing/concept3-anatomia/
+marketing/promo-10s/
+marketing/veo-prompts/
+samples veo/
+dashboard-mockup.html
+frontend/public/dashboard-mockup.html
+*.ass
+.ground-first/
