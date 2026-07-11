@@ -398,6 +398,7 @@ def test_generate_passes_voice_config_to_redis(tmp_path, monkeypatch):
         voice_provider="edge",
         voice_config=None,
         trend_context=None,
+        narration_mode="single",
     ):
         redis_calls.append((job_id, template_id, voice_provider, voice_config))
 
