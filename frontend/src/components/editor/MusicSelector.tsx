@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { useEditor } from '@/contexts/EditorContext'
+import { ThrottledRange } from './ThrottledRange'
 
 interface MusicTrack {
   id: string
@@ -77,10 +78,13 @@ export function MusicSelector() {
     updateMusic(track?.url ?? null)
   }
 
-  const handleVolumeChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const vol = parseInt(e.target.value) / 100
-    updateMusic(selectedUrl, vol)
-    if (audioRef.current) audioRef.current.volume = vol
+  // Volume ao vivo no preview de áudio; commit no contexto vem throttled do
+  // ThrottledRange (updateMusic por pixel remontava o Player via key=version).
+  const applyLiveVolume = (v: number) => {
+    if (audioRef.current) audioRef.current.volume = v / 100
+  }
+  const commitVolume = (v: number) => {
+    updateMusic(selectedUrl, v / 100)
   }
 
   return (
@@ -163,14 +167,12 @@ export function MusicSelector() {
         <label style={{ color: '#aaa', fontSize: 12, display: 'block', marginBottom: 6 }}>
           Volume: {Math.round(volume * 100)}%
         </label>
-        <input
-          type="range"
+        <ThrottledRange
           min={0}
           max={100}
           value={Math.round(volume * 100)}
-          onChange={handleVolumeChange}
-          className="editor-slider"
-          style={{ width: '100%' }}
+          onCommit={commitVolume}
+          onLive={applyLiveVolume}
         />
       </div>
     </div>

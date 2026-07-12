@@ -80,12 +80,15 @@ export interface ShowcaseVideo {
   emoji: string;
   beforeScript: string;
   accent: Accent;
+  /** Frame real 540×960 (gerado dos MP4s): pintura imediata + zero download. */
+  poster: string;
 }
 
 export const SHOWCASE_HERO: ShowcaseVideo[] = [
   {
     id: "cerebro",
     src: "/showcase/cerebro-fatos.mp4",
+    poster: "/showcase/posters/cerebro.jpg",
     title: "Fatos surpreendentes sobre o cérebro",
     chip: "Cérebro",
     emoji: "🧠",
@@ -95,6 +98,7 @@ export const SHOWCASE_HERO: ShowcaseVideo[] = [
   {
     id: "ocean",
     src: "/showcase/ocean-curiosidades.mp4",
+    poster: "/showcase/posters/ocean.jpg",
     title: "5 curiosidades sobre o oceano profundo",
     chip: "Oceano",
     emoji: "🌊",
@@ -104,6 +108,7 @@ export const SHOWCASE_HERO: ShowcaseVideo[] = [
   {
     id: "ia",
     src: "/showcase/ia-revolucao.mp4",
+    poster: "/showcase/posters/ia.jpg",
     title: "Como a IA está mudando o mundo",
     chip: "IA",
     emoji: "🤖",

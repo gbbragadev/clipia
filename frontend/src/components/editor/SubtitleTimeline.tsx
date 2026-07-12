@@ -65,12 +65,12 @@ export function SubtitleTimeline() {
     }
   }, [composition, playerFrame, totalFrames])
 
+  // Redesenha só quando o estado que o draw lê muda (frame/composição/total) —
+  // playerFrame vem do polling (~10Hz), então o loop RAF de 60fps redesenhava o
+  // MESMO estado 6x por frame, inclusive com o vídeo pausado. ResizeObserver
+  // abaixo cobre mudanças de tamanho.
   useEffect(() => {
-    const tick = () => {
-      draw()
-      rafRef.current = requestAnimationFrame(tick)
-    }
-    tick()
+    rafRef.current = requestAnimationFrame(draw)
     return () => cancelAnimationFrame(rafRef.current)
   }, [draw])
 

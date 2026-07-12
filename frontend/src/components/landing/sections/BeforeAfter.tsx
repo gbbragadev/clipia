@@ -59,6 +59,7 @@ function Pair({ video, index }: { video: ShowcaseVideo; index: number }) {
           <div className="mx-auto mt-3 w-full max-w-[220px]">
             <VideoPhone
               src={video.src}
+              poster={video.poster}
               title={`Vídeo gerado: ${video.title}`}
               accent={video.accent}
               active={inView}

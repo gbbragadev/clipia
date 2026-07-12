@@ -91,10 +91,10 @@ export function Hero() {
             <div className="mx-auto w-full max-w-[280px] sm:max-w-[320px]">
               <VideoPhone
                 src={video.src}
+                poster={video.poster}
                 title={`Vídeo de exemplo: ${video.title}`}
                 accent={video.accent}
                 allowSound
-                priority
               />
             </div>
 

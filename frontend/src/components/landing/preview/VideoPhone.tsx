@@ -16,8 +16,8 @@ interface VideoPhoneProps {
   allowSound?: boolean;
   /** Selo "Gerado no ClipIA" sobre o vídeo. */
   badge?: boolean;
-  /** Primeiro vídeo da página: baixa mais cedo. */
-  priority?: boolean;
+  /** Frame real do vídeo: pintura imediata sem baixar o MP4 (7MB+ no hero). */
+  poster?: string;
 }
 
 /**
@@ -32,7 +32,7 @@ export function VideoPhone({
   active = true,
   allowSound = false,
   badge = true,
-  priority = false,
+  poster,
 }: VideoPhoneProps) {
   const reduced = usePrefersReducedMotion();
   const { ref, inView } = useInView<HTMLDivElement>({ threshold: 0.3, once: false });
@@ -72,15 +72,19 @@ export function VideoPhone({
       <div className="rounded-[2.4rem] border border-white/12 bg-panel/90 p-2 shadow-[0_30px_80px_-30px_rgba(0,0,0,0.9)]">
         <div className="relative aspect-[9/16] overflow-hidden rounded-[1.9rem] bg-ink">
           {/* key força remount ao trocar de vídeo (troca de src sem .load() trava o player) */}
+          {/* preload=metadata SEMPRE: o download completo só começa no play() (inView),
+              fora do caminho crítico do LCP — o antigo preload="auto" do hero puxava
+              7MB de MP4 competindo com HTML/fonte/JS no 4G. O poster pinta na hora. */}
           <video
             key={src}
             ref={videoRef}
             src={src}
+            poster={poster}
             muted={muted}
             loop
             playsInline
             autoPlay={shouldPlay}
-            preload={priority ? "auto" : "metadata"}
+            preload="metadata"
             aria-label={title}
             onTimeUpdate={(e) => {
               const v = e.currentTarget;
