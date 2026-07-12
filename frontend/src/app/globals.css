@@ -49,7 +49,6 @@ body {
   color: var(--text-primary);
   font-family: var(--font-sans), system-ui, -apple-system, sans-serif;
   overflow-x: hidden;
-  transition: background 0.3s, color 0.3s;
 }
 
 /* Page ambient gradient */
@@ -64,7 +63,6 @@ body::before {
     radial-gradient(ellipse 50% 30% at 0% 100%, var(--gradient-ambient-3), transparent 70%),
     var(--bg-base);
   pointer-events: none;
-  transition: background 0.3s;
 }
 
 /* Glass cards */
@@ -73,7 +71,7 @@ body::before {
   border: 1px solid var(--card-border);
   border-radius: 16px;
   backdrop-filter: blur(8px);
-  transition: all 0.2s;
+  transition: background-color 0.2s var(--ease-out), border-color 0.2s var(--ease-out);
 }
 .card:hover {
   background: var(--card-bg-hover);
@@ -87,7 +85,7 @@ body::before {
   font-weight: 600;
   padding: 14px 28px;
   border-radius: 12px;
-  transition: all 0.2s;
+  transition: opacity 0.2s var(--ease-out), transform 0.16s var(--ease-out);
   text-decoration: none;
   display: inline-flex;
   align-items: center;
@@ -101,7 +99,7 @@ body::before {
   color: var(--text-secondary);
   padding: 14px 28px;
   border-radius: 12px;
-  transition: all 0.2s;
+  transition: border-color 0.2s var(--ease-out), color 0.2s var(--ease-out), transform 0.16s var(--ease-out);
   text-decoration: none;
   font-size: 15px;
 }
@@ -160,6 +158,8 @@ body::before {
   --color-success: #43e0ad;
   --color-warn: #fbbf24;
   --color-danger: #f87171;
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-gentle: cubic-bezier(0.2, 0.7, 0.2, 1);
 }
 
 @layer utilities {
@@ -171,12 +171,12 @@ body::before {
     opacity: 0;
     transform: translateY(20px);
     transition:
-      opacity 0.7s cubic-bezier(0.2, 0.7, 0.2, 1),
-      transform 0.7s cubic-bezier(0.2, 0.7, 0.2, 1);
+      opacity 0.7s var(--ease-gentle),
+      transform 0.7s var(--ease-gentle);
     transition-delay: var(--reveal-delay, 0ms);
     will-change: opacity, transform;
   }
-  .reveal.in { opacity: 1; transform: none; }
+  .reveal.in { opacity: 1; transform: none; will-change: auto; }
   .bg-grid {
     background-image:
       linear-gradient(to right, rgba(255, 255, 255, 0.035) 1px, transparent 1px),
@@ -218,7 +218,7 @@ body::before {
   from { opacity: 0; transform: scale(1.03); }
   to { opacity: 1; transform: scale(1); }
 }
-.anim-scene-fade { animation: scene-fade 480ms cubic-bezier(0.2, 0.7, 0.2, 1) both; }
+.anim-scene-fade { animation: scene-fade 480ms var(--ease-gentle) both; }
 /* Slow Ken Burns zoom for the active scene in the phone preview. */
 .scene-active > div:first-child { transform: scale(1.045); }
 .scene-grain {

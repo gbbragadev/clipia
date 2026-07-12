@@ -173,7 +173,7 @@ export default function VideoCard({ job, onEdit, onCancel }: VideoCardProps) {
           )}
 
           {!job.download_url && !thumbSrc && (
-            <span className="text-6xl opacity-30 group-hover:opacity-50 group-hover:scale-110 transition-all duration-500 z-10">{icon}</span>
+            <span className="text-6xl opacity-30 group-hover:opacity-50 group-hover:scale-110 transition-[transform,opacity] duration-200 z-10">{icon}</span>
           )}
 
           {/* Top Info Overlay */}

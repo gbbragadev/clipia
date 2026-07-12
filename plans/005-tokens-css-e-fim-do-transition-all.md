@@ -1,6 +1,6 @@
 # 005 — Tokens CSS de motion + fim do `transition: all`
 
-- **Status**: TODO
+- **Status**: DONE (executado por GPT-5.6 Sol via cgpt em 2026-07-12; gate Opus: aprovado — único finding era a linha VideoCard:248, escopo do plano 004)
 - **Commit**: 6428262
 - **Severity**: MEDIUM (alto retorno — mecânico e amplo)
 - **Category**: Cohesion & tokens (AUDIT seção 7) + Performance (seção 5) + Accessibility (seção 6)

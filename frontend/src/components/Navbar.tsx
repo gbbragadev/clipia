@@ -86,9 +86,9 @@ export default function Navbar() {
               className="flex h-11 w-11 items-center justify-center rounded-lg text-2"
             >
               <span className="relative block h-4 w-5">
-                <span className="absolute left-0 block h-0.5 w-5 bg-current transition-all" style={{ top: open ? 7 : 0, transform: open ? 'rotate(45deg)' : 'none' }} />
-                <span className="absolute left-0 top-[7px] block h-0.5 w-5 bg-current transition-all" style={{ opacity: open ? 0 : 1 }} />
-                <span className="absolute left-0 block h-0.5 w-5 bg-current transition-all" style={{ top: open ? 7 : 14, transform: open ? 'rotate(-45deg)' : 'none' }} />
+                <span className="absolute left-0 top-0 block h-0.5 w-5 bg-current transition-transform duration-200" style={{ transform: open ? 'translateY(7px) rotate(45deg)' : 'none' }} />
+                <span className="absolute left-0 top-[7px] block h-0.5 w-5 bg-current transition-opacity duration-200" style={{ opacity: open ? 0 : 1 }} />
+                <span className="absolute left-0 top-[14px] block h-0.5 w-5 bg-current transition-transform duration-200" style={{ transform: open ? 'translateY(-7px) rotate(-45deg)' : 'none' }} />
               </span>
             </button>
           </div>

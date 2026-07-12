@@ -53,7 +53,7 @@
 .editor-header__icon-btn {
   display: inline-flex; align-items: center; justify-content: center;
   width: 36px; height: 36px; border: 1px solid rgba(255,255,255,0.08); border-radius: 7px;
-  background: transparent; color: var(--text-secondary); cursor: pointer; transition: all 0.15s;
+  background: transparent; color: var(--text-secondary); cursor: pointer; transition: color 0.15s var(--ease-out), background-color 0.15s var(--ease-out), opacity 0.15s var(--ease-out);
 }
 .editor-header__icon-btn:hover:not(:disabled) { color: var(--text-primary); background: rgba(255,255,255,0.06); }
 .editor-header__icon-btn:disabled { opacity: 0.35; cursor: default; }
@@ -91,11 +91,12 @@
 }
 
 /* ── Tools panel (320px, collapsible) ──────── */
+/* flex-basis é layout, mas o efeito exige redimensionar o player junto — deliberado, uso raro */
 .editor-tools-panel {
   flex: 0 0 320px; display: flex; flex-direction: column;
   border-left: 1px solid rgba(255,255,255,0.08);
   background: var(--bg-raised); overflow: hidden;
-  transition: flex-basis 0.25s cubic-bezier(0.4,0,0.2,1), opacity 0.2s ease;
+  transition: flex-basis 0.25s cubic-bezier(0.4,0,0.2,1), opacity 0.2s var(--ease-out);
 }
 .editor-tools-panel--collapsed { flex-basis: 0; opacity: 0; pointer-events: none; }
 
@@ -106,7 +107,7 @@
   background: var(--bg-raised); border: 1px solid rgba(255,255,255,0.08); border-right: none;
   border-radius: 6px 0 0 6px; display: flex; align-items: center; justify-content: center;
   cursor: pointer; color: var(--text-tertiary); font-size: 11px;
-  transition: all 0.2s;
+  transition: color 0.2s var(--ease-out), background-color 0.2s var(--ease-out);
 }
 .editor-panel-toggle:hover { color: var(--text-primary); background: var(--bg-surface); }
 .editor-panel-toggle--collapsed { right: 0; border-radius: 6px 0 0 6px; }
@@ -121,7 +122,7 @@
   padding: 8px 0; background: transparent; border: none;
   border-bottom: 2px solid transparent;
   color: var(--text-tertiary); font-size: 9px; font-weight: 600;
-  cursor: pointer; transition: all 0.15s;
+  cursor: pointer; transition: color 0.15s var(--ease-out), background-color 0.15s var(--ease-out), border-color 0.15s var(--ease-out);
   text-transform: uppercase; letter-spacing: 0.05em;
 }
 .editor-tab:hover { color: var(--text-secondary); background: rgba(255,255,255,0.02); }
@@ -166,7 +167,7 @@
 .editor-timeline__scene {
   display: flex; align-items: center; justify-content: center;
   border-radius: 4px; font-size: 10px; font-weight: 600;
-  color: var(--text-primary); transition: all 0.12s;
+  color: var(--text-primary); transition: filter 0.12s var(--ease-out), box-shadow 0.12s var(--ease-out);
   border: none; cursor: pointer;
 }
 .editor-timeline__scene:hover { filter: brightness(1.2); }
@@ -194,7 +195,7 @@
 .editor-timeline__transport-btn {
   background: none; border: none; color: var(--text-secondary);
   font-size: 16px; cursor: pointer; padding: 2px 6px; border-radius: 4px;
-  transition: all 0.12s;
+  transition: color 0.12s var(--ease-out), background-color 0.12s var(--ease-out);
 }
 .editor-timeline__transport-btn:hover { color: var(--text-primary); background: rgba(255,255,255,0.06); }
 .editor-timeline__transport-btn--active { color: var(--color-coral); }
@@ -214,7 +215,7 @@
 /* ── Shared components ────────────────────── */
 .editor-card {
   background: var(--bg-surface); border: 1px solid rgba(255,255,255,0.08);
-  border-radius: 8px; padding: 10px; transition: all 0.15s ease;
+  border-radius: 8px; padding: 10px; transition: background-color 0.15s var(--ease-out), border-color 0.15s var(--ease-out);
 }
 .editor-card:hover { background: var(--border-default); }
 .editor-card--selected { background: rgba(255,86,56,0.15); border-color: rgba(255,86,56,0.25); }
@@ -235,9 +236,11 @@
 
 .editor-color-swatch {
   width: 26px; height: 26px; border-radius: 6px;
-  border: 2px solid transparent; cursor: pointer; transition: all 0.12s;
+  border: 2px solid transparent; cursor: pointer; transition: transform 0.12s var(--ease-out), border-color 0.12s var(--ease-out), box-shadow 0.12s var(--ease-out);
 }
-.editor-color-swatch:hover { transform: scale(1.1); }
+@media (hover: hover) and (pointer: fine) {
+  .editor-color-swatch:hover { transform: scale(1.1); }
+}
 .editor-color-swatch--active { border-color: var(--text-primary); box-shadow: 0 0 6px rgba(255,255,255,0.25); }
 
 .editor-select {
@@ -251,7 +254,7 @@
   padding: 5px 10px; background: var(--bg-surface);
   border: 1px solid rgba(255,255,255,0.08); border-radius: 5px;
   color: var(--text-secondary); font-size: 11px; font-weight: 600;
-  cursor: pointer; transition: all 0.12s;
+  cursor: pointer; transition: background-color 0.12s var(--ease-out), color 0.12s var(--ease-out), border-color 0.12s var(--ease-out);
 }
 .editor-btn-sm:hover { background: var(--border-default); color: var(--text-primary); }
 
@@ -279,7 +282,7 @@
   display: flex; align-items: center; justify-content: center;
   width: 28px; height: 28px; border: none; border-radius: 8px;
   background: transparent; color: var(--text-tertiary); cursor: pointer;
-  transition: background 0.15s cubic-bezier(0.22, 1, 0.36, 1), color 0.15s;
+  transition: background 0.15s var(--ease-out), color 0.15s;
 }
 .export-panel__close:hover { background: rgba(255,255,255,0.08); color: var(--text-primary); }
 .export-panel__title { margin: 0 0 20px; font-size: 18px; font-weight: 700; color: var(--text-primary); }
@@ -317,7 +320,7 @@
   padding: 14px 0; margin-bottom: 12px; border: none; border-radius: 10px;
   background: var(--color-coral); color: #fff; font-size: 15px; font-weight: 600;
   cursor: pointer;
-  transition: opacity 0.15s, transform 0.15s cubic-bezier(0.22, 1, 0.36, 1);
+  transition: opacity 0.15s var(--ease-out), transform 0.15s var(--ease-out);
 }
 .export-download:hover:not(:disabled) { opacity: 0.92; transform: translateY(-1px); }
 .export-download:disabled { background: rgba(255,255,255,0.08); color: rgba(255,255,255,0.35); cursor: not-allowed; }

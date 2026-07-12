@@ -30,7 +30,7 @@ export function GlowCard({
       onMouseMove={handleMouseMove}
       onMouseEnter={() => setOpacity(intensity)}
       onMouseLeave={() => setOpacity(0)}
-      className={`relative overflow-hidden rounded-2xl bg-[#16161d]/80 backdrop-blur-sm border border-white/5 transition-all duration-300 hover:border-white/10 ${className}`}
+      className={`relative overflow-hidden rounded-2xl bg-[#16161d]/80 backdrop-blur-sm border border-white/5 transition-colors duration-300 hover:border-white/10 ${className}`}
     >
       <div
         className="pointer-events-none absolute -inset-px transition-opacity duration-300"
