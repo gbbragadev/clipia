@@ -46,6 +46,22 @@ interface VideoCardProps {
 export default function VideoCard({ job, onEdit, onCancel }: VideoCardProps) {
   const { success: toastSuccess, error: toastError } = useToast()
   const canEdit = ['completed', 'editable'].includes(job.status)
+  // Delight one-shot: acende um anel coral quando ESTE card transiciona de "gerando"
+  // para "pronto" durante a sessão (nunca em cards que já montaram prontos).
+  const prevStatusRef = useRef(job.status)
+  const [justCompleted, setJustCompleted] = useState(false)
+  useEffect(() => {
+    const prev = prevStatusRef.current
+    prevStatusRef.current = job.status
+    if (
+      ACTIVE_JOB_STATUSES.includes(prev) &&
+      ['completed', 'editable'].includes(job.status)
+    ) {
+      setJustCompleted(true)
+      const t = setTimeout(() => setJustCompleted(false), 1000)
+      return () => clearTimeout(t)
+    }
+  }, [job.status])
   const canCancel = onCancel ? ['processing', 'queued'].includes(job.status) : false
   const [confirmCancel, setConfirmCancel] = useState(false)
   const [showPlayer, setShowPlayer] = useState(false)
@@ -138,7 +154,7 @@ export default function VideoCard({ job, onEdit, onCancel }: VideoCardProps) {
 
   return (
     <GlowCard intensity={0.2} className="h-full">
-      <div className="flex flex-col h-full bg-[var(--bg-raised)] hover:bg-[var(--bg-surface)] transition-colors rounded-xl overflow-hidden relative">
+      <div className={`flex flex-col h-full bg-[var(--bg-raised)] hover:bg-[var(--bg-surface)] transition-colors rounded-xl overflow-hidden relative ${justCompleted ? 'anim-ready-ring' : ''}`}>
         {/* Thumbnail - shorter on mobile, taller on desktop */}
         <div
           className={`w-full aspect-[3/4] sm:aspect-[9/16] bg-gradient-to-br ${gradient} flex flex-col items-center justify-center relative overflow-hidden group ${job.download_url ? 'cursor-pointer' : ''}`}

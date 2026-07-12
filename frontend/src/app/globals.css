@@ -231,6 +231,13 @@ body::before {
   to { opacity: 1; transform: scale(1); }
 }
 .anim-scene-fade { animation: scene-fade 480ms var(--ease-gentle) both; }
+/* One-shot: anel coral no card cujo job acabou de ficar pronto (delight raro). */
+@keyframes ready-ring {
+  0% { box-shadow: 0 0 0 0 rgba(255, 86, 56, 0); }
+  25% { box-shadow: 0 0 0 3px rgba(255, 86, 56, 0.55), 0 0 24px rgba(255, 86, 56, 0.25); }
+  100% { box-shadow: 0 0 0 0 rgba(255, 86, 56, 0); }
+}
+.anim-ready-ring { animation: ready-ring 900ms var(--ease-out, ease-out) 1 both; border-radius: 16px; }
 /* Slow Ken Burns zoom for the active scene in the phone preview. */
 .scene-active > div:first-child { transform: scale(1.045); }
 .scene-grain {

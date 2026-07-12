@@ -1,6 +1,6 @@
 # 009 — Delight: celebração "vídeo pronto" + tick de créditos
 
-- **Status**: TODO
+- **Status**: DONE (executado por GPT-5.6 Sol via cgpt em 2026-07-12; gate Opus: APROVADO 100% verbatim; tsc verde)
 - **Commit**: 6428262
 - **Severity**: LOW (aditivo — momento raro, delight permitido)
 - **Category**: Missed opportunities (AUDIT seção 8)

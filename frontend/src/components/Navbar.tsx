@@ -1,14 +1,40 @@
 'use client'
 
 import Link from 'next/link'
-import { useEffect, useState } from 'react'
-import { AnimatePresence, motion } from 'motion/react'
+import { useEffect, useRef, useState } from 'react'
+import { AnimatePresence, motion, animate } from 'motion/react'
 import { LayoutDashboard, LogIn } from 'lucide-react'
 import { strings } from '@/lib/strings'
 import { EASE, DURATIONS, useReducedMotionState } from '@/lib/motion'
 import ScrollProgress from './ScrollProgress'
 import Logo from './brand/Logo'
 import { useAuth } from '@/contexts/AuthContext'
+
+/** Número de créditos com tick animado: conta do valor antigo pro novo e dá um
+ *  pop sutil quando muda. Reduced-motion: troca direta. */
+function CreditsValue({ value, className }: { value: number; className: string }) {
+  const reduceMotion = useReducedMotionState()
+  const ref = useRef<HTMLSpanElement>(null)
+  const prevRef = useRef(value)
+  useEffect(() => {
+    const prev = prevRef.current
+    prevRef.current = value
+    const el = ref.current
+    if (!el || prev === value) return
+    if (reduceMotion) {
+      el.textContent = String(value)
+      return
+    }
+    const controls = animate(prev, value, {
+      duration: 0.6,
+      ease: EASE,
+      onUpdate: (v) => { el.textContent = String(Math.round(v)) },
+    })
+    const pop = animate(el, { scale: [1, 1.06, 1] }, { duration: 0.35, ease: EASE })
+    return () => { controls.stop(); pop.stop() }
+  }, [value, reduceMotion])
+  return <span ref={ref} className={`inline-block ${className}`}>{value}</span>
+}
 
 export default function Navbar() {
   const { user } = useAuth()
@@ -56,7 +82,7 @@ export default function Navbar() {
                   <span className="w-6 h-6 rounded-full bg-gradient-to-br from-coral to-azure flex items-center justify-center text-white text-[10px] font-semibold">
                     {user.name?.charAt(0).toUpperCase() || '?'}
                   </span>
-                  <span className="text-coral font-semibold text-xs">{user.credits}</span>
+                  <CreditsValue value={user.credits} className="text-coral font-semibold text-xs" />
                   <span className="text-xs text-3">créditos</span>
                 </div>
                 {/* Dashboard button */}
@@ -113,7 +139,7 @@ export default function Navbar() {
                     <span className="w-7 h-7 rounded-full bg-gradient-to-br from-coral to-azure flex items-center justify-center text-white text-xs font-semibold">
                       {user.name?.charAt(0).toUpperCase() || '?'}
                     </span>
-                    <span className="text-coral font-semibold text-sm">{user.credits}</span>
+                    <CreditsValue value={user.credits} className="text-coral font-semibold text-sm" />
                     <span className="text-sm text-3">créditos</span>
                   </div>
                   <a href="/dashboard" onClick={() => setOpen(false)} className="w-full text-center px-4 py-3 rounded-lg bg-gradient-to-r from-coral to-azure text-white font-medium active:scale-[0.97] transition">
