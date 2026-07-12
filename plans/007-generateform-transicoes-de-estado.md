@@ -1,6 +1,6 @@
 # 007 — GenerateForm: transições nas mudanças de estado (roteiro avançado + modo lote)
 
-- **Status**: TODO
+- **Status**: DONE (2026-07-12; passo 1 pelo executor GPT-5.6 Sol/cgpt — processo morto 2×, passos 2-3 pelo orquestrador Fable conforme fallback; gate Opus: APROVADO; tsc verde)
 - **Commit**: 6428262
 - **Severity**: MEDIUM
 - **Category**: Missed opportunities (AUDIT seção 8)
