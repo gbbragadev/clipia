@@ -3,6 +3,10 @@
 > Sprint Fable: auditoria multi-agente (7 dimensões, 24 agentes, verificação adversarial)
 > + fix sprint. Este doc registra o que foi CORRIGIDO e o que ficou aberto, com prioridade.
 > Segurança ficou fora de escopo por decisão do Gui.
+>
+> **UPDATE 12/07**: rodada /loops R1 com a agência de agentes (`C:\agency-agent`) — 22 agentes,
+> 4 CONFIRMED, 3 fixes aplicados + 1 quick win deste backlog fechado (pendingCredits stale).
+> Delta completo em `docs/superpowers/reviews/2026-07-12-agency-loops/round1.md`.
 
 ## ✅ Corrigido neste sprint (commits na feat/editor-reforma)
 
@@ -19,7 +23,8 @@
 
 ## 🟡 Aberto — P1/P2 verificados ou plausíveis
 
-- **ExportPanel: pendingCredits pode ficar stale no banner** (P2, S) — refetch da composition ao abrir o modal. `frontend/src/components/editor/ExportPanel.tsx:219`.
+- ~~**ExportPanel: pendingCredits pode ficar stale no banner**~~ → **FECHADO 12/07** (R1 da
+  agência): `/status` expõe `pending_credits` e o modal consome no mount + polls.
 - **AIAssistant handleApply "race"** (P2, nota): o finding original superestimou — o trecho updateScene→fetch é síncrono. O caso real (usuário edita DURANTE o regen de 15-40s) já é coberto por `narrationStale`. Só mexer se aparecer report real.
 - **Paralelizar _prepare_scene por cena** (P2, M) — encode CPU sequencial antes do NVENC; ganho real de wall-clock na geração. Risco médio (pipeline quente): fazer com encode real de validação.
 - **Refino carry 0.25-0.5 crédito pode expirar silencioso no Redis TTL 24h** (P2, produto decide): liquidar no refine ou estender TTL.

@@ -141,3 +141,38 @@ async def test_reset_debits_one_credit_and_clears_editor_state(
     assert before - refreshed_user.credits == 1, "Reset should debit exactly one credit."
     assert refreshed_job.pending_credits == 0.0, "Reset should clear pending credits."
     assert refreshed_job.editor_state is None, "Reset should clear editor state."
+
+
+@pytest.mark.asyncio
+async def test_refund_failure_does_not_mask_original_error(
+    client, db_session, verified_user, auth_headers, monkeypatch
+):
+    """Achado R1 12/07: excecao no refund substituia o erro ORIGINAL da acao paga e o
+    cliente via 500 generico. O _refund_credits_safe engole a falha do estorno, alerta
+    o admin (estorno manual) e preserva o 502 da causa real."""
+    alerts = []
+    monkeypatch.setattr("app.api.routes._send_admin_alert", lambda subject, body: alerts.append(subject))
+
+    async def boom_design(self, *a, **k):
+        raise RuntimeError("elevenlabs caiu")
+
+    monkeypatch.setattr("app.services.elevenlabs_provider.ElevenLabsProvider.design_voice", boom_design)
+
+    async def refund_boom(db, user_id, cost):
+        raise RuntimeError("banco caiu no estorno")
+
+    monkeypatch.setattr("app.api.routes._refund_credits", refund_boom)
+
+    response = await client.post(
+        "/api/v1/voices/design",
+        headers=auth_headers(verified_user),
+        json={
+            "name": "Voz Teste",
+            "description": "voz grave e calma para narracao",
+            "text": "Ola, este e um teste de voz.",
+        },
+    )
+
+    assert response.status_code == 502, "Falha da acao paga deve continuar 502 mesmo com refund quebrado."
+    assert "voz" in response.json()["detail"].lower(), "Detail deve apontar a causa original (TTS), nao o refund."
+    assert alerts, "Refund que falhou de vez precisa disparar alerta admin para estorno manual."

@@ -28,13 +28,17 @@ interface PlatformCaption {
 }
 
 export function ExportPanel({ onClose }: { onClose: () => void }) {
-  const { composition, jobId, narrationStale, setActivePanel } = useEditor()
+  const { composition, jobId, narrationStale, setActivePanel, flushSave } = useEditor()
   const { user } = useAuth()
   const { success: toastSuccess, error: toastError } = useToast()
 
   const [renderState, setRenderState] = useState<RenderState>('idle')
   const [renderProgress, setRenderProgress] = useState(0)
   const [renderDetail, setRenderDetail] = useState<string | null>(null)
+  // Custo fresco vindo do /status (mount + polls). O valor da composition é o snapshot
+  // do load do editor — ai-suggest (0,5/consulta) e render/reset mudam no servidor e o
+  // banner mentia (backlog 11/07). Fallback: snapshot da composition.
+  const [pendingCredits, setPendingCredits] = useState<number>(composition?.pendingCredits ?? 0)
   const [error, setError] = useState<string | null>(null)
   const [staleAccepted, setStaleAccepted] = useState(false)
   const [downloading, setDownloading] = useState(false)
@@ -96,6 +100,7 @@ export function ExportPanel({ onClose }: { onClose: () => void }) {
       if (!res.ok) throw new Error(await readApiError(res, 'Erro ao verificar status'))
       const data = await res.json()
       if (unmounted.current) return
+      if (typeof data.pending_credits === 'number') setPendingCredits(data.pending_credits)
 
       if (data.status === 'completed') {
         setRenderState('ready')
@@ -121,6 +126,15 @@ export function ExportPanel({ onClose }: { onClose: () => void }) {
     setRenderState('rendering')
     setRenderProgress(0)
     setRenderDetail(null)
+    // O render lê o que está no DISCO: sem flush, editar e exportar em <1,5s (debounce do
+    // auto-save) renderizava estado velho — e DEBITAVA créditos por ele (achado R1 12/07).
+    const saved = await flushSave()
+    if (!saved) {
+      if (unmounted.current) return
+      setRenderState('error')
+      setError('Suas edições não foram salvas (falha de conexão). Tente novamente antes de renderizar.')
+      return
+    }
     try {
       const res = await fetch(`/api/v1/jobs/${jobId}/render`, { method: 'POST', headers: authHeaders() })
       if (!res.ok) throw new Error(await readApiError(res, `Erro ${res.status}`))
@@ -130,7 +144,7 @@ export function ExportPanel({ onClose }: { onClose: () => void }) {
       setRenderState('error')
       setError(err instanceof Error ? err.message : 'Erro ao renderizar')
     }
-  }, [jobId, authHeaders, pollStatus])
+  }, [jobId, authHeaders, pollStatus, flushSave])
 
   // O render NÃO dispara mais ao abrir o modal: um toque acidental em "Exportar"
   // (alvo pequeno no mobile) enfileirava ~2 min de render e debitava pending_credits
@@ -154,6 +168,7 @@ export function ExportPanel({ onClose }: { onClose: () => void }) {
         const res = await fetch(`/api/v1/jobs/${jobId}/status`, { headers: authHeaders() })
         if (!res.ok || cancelled || unmounted.current) return
         const data = await res.json()
+        if (typeof data.pending_credits === 'number') setPendingCredits(data.pending_credits)
         if (data.status === 'rendering') {
           setRenderState('rendering')
           setRenderProgress(Number(data.progress) || 0)
@@ -216,10 +231,10 @@ export function ExportPanel({ onClose }: { onClose: () => void }) {
           </div>
         )}
 
-        {(composition?.pendingCredits ?? 0) > 0 && (
+        {pendingCredits > 0 && (
           <div style={{ marginBottom: 12 }}>
             <ExportCostBanner
-              pendingCredits={composition?.pendingCredits ?? 0}
+              pendingCredits={pendingCredits}
               userCredits={user?.credits ?? 0}
             />
           </div>
@@ -230,7 +245,7 @@ export function ExportPanel({ onClose }: { onClose: () => void }) {
           <button type="button" className="export-download" onClick={handleRender}>
             <Clapperboard size={16} />
             Aplicar edições e renderizar (~2 min)
-            {(composition?.pendingCredits ?? 0) > 0 && ` · ${composition?.pendingCredits} créd.`}
+            {pendingCredits > 0 && ` · ${pendingCredits} créd.`}
           </button>
         )}
 
