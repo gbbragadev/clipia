@@ -75,6 +75,8 @@ async def checkout(
     db: AsyncSession = Depends(get_db),
 ):
     """Initiate a credit purchase via Mercado Pago (default) ou Stripe."""
+    if not user.email_verified:
+        raise HTTPException(status_code=403, detail="email_verification_required")
     if req.package not in CREDIT_PACKAGES:
         raise HTTPException(status_code=400, detail="Pacote invalido")
     if req.provider not in ("mercadopago", "stripe"):

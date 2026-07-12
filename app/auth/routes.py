@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, status
 from slowapi import Limiter
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.dependencies import get_current_user
@@ -184,12 +184,25 @@ async def verify_email(
                 raise HTTPException(status_code=429, detail="Muitas tentativas. Solicite um novo codigo.")
             raise HTTPException(status_code=400, detail=f"Codigo incorreto. {remaining} tentativa(s) restante(s).")
 
-        user.email_verified = True
-        user.otp_attempts = 0
-        user.verification_code = None
-        user.verification_expires = None
-        user.credits = settings.WELCOME_CREDIT_BONUS
+        transition = (
+            update(User)
+            .where(User.id == user.id, User.email_verified.is_(False))
+            .values(
+                email_verified=True,
+                otp_attempts=0,
+                verification_code=None,
+                verification_expires=None,
+                credits=User.credits + settings.WELCOME_CREDIT_BONUS,
+            )
+            .execution_options(synchronize_session=False)
+        )
+        transition_result = await db.execute(transition)
+        if transition_result.rowcount != 1:
+            await db.rollback()
+            return {"status": "already_verified"}
+
         await db.commit()
+        await db.refresh(user)
         record_credit_metric("credit", settings.WELCOME_CREDIT_BONUS)
 
         # Boas-vindas fire-and-forget: roda APOS a resposta (threadpool); falha de SMTP

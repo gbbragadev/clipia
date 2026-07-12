@@ -38,6 +38,25 @@ async def test_register_creates_pending_user_and_verify_grants_two_credits(clien
 
 
 @pytest.mark.asyncio
+async def test_verify_email_adds_welcome_bonus_to_existing_balance(client, db_session, unverified_user, monkeypatch):
+    monkeypatch.setattr("app.auth.routes.settings.WELCOME_CREDIT_BONUS", 3)
+    db_user = await db_session.get(User, unverified_user.id)
+    db_user.credits = 7
+    await db_session.commit()
+
+    response = await client.post(
+        "/api/v1/auth/verify-email",
+        json={"email": unverified_user.email, "code": unverified_user.verification_code},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"status": "verified", "credits": 3}
+    db_session.expire_all()
+    refreshed_user = await db_session.get(User, unverified_user.id)
+    assert refreshed_user.credits == 10
+
+
+@pytest.mark.asyncio
 async def test_register_rejects_disposable_email(client, db_session):
     response = await client.post(
         "/api/v1/auth/register",

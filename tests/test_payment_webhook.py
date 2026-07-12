@@ -3,6 +3,7 @@ import hmac
 from datetime import datetime
 
 import pytest
+from sqlalchemy import select
 
 from app.db.models import CreditPurchase, User
 
@@ -31,6 +32,32 @@ async def test_checkout_creates_pending_purchase(client, db_session, verified_us
     assert purchase is not None, "Checkout should persist a credit purchase."
     assert purchase.status == "pending", "New purchases should start in pending status."
     assert purchase.credits_amount == 10, "Starter package should persist the expected credit amount."
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("provider", ["mercadopago", "stripe"])
+async def test_checkout_rejects_unverified_user_before_provider_or_purchase(
+    client, db_session, unverified_user, auth_headers, monkeypatch, provider
+):
+    provider_calls = []
+
+    async def unexpected_checkout(*_args, **_kwargs):
+        provider_calls.append(provider)
+        raise AssertionError("checkout provider must not be called for an unverified user")
+
+    monkeypatch.setattr("app.payments.routes.create_checkout", unexpected_checkout)
+    monkeypatch.setattr("app.payments.routes.create_checkout_stripe", unexpected_checkout)
+
+    response = await client.post(
+        "/api/v1/credits/checkout",
+        headers=auth_headers(unverified_user),
+        json={"package": "starter", "provider": provider},
+    )
+
+    assert response.status_code == 403
+    assert response.json()["detail"] == "email_verification_required"
+    assert provider_calls == []
+    assert await db_session.scalar(select(CreditPurchase)) is None
 
 
 @pytest.mark.asyncio
