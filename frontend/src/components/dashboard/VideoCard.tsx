@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useRef, useEffect, useCallback } from 'react'
+import { AnimatePresence } from 'motion/react'
 import { Loader2, Play } from 'lucide-react'
 import { strings } from '@/lib/strings';
 import { ACTIVE_JOB_STATUSES, STEP_LABELS, type JobSummary } from '@/lib/editor-api'
@@ -326,9 +327,11 @@ export default function VideoCard({ job, onEdit, onCancel }: VideoCardProps) {
       </div>
 
       {/* Player dedicado (portal — escapa do overflow/transform do card) */}
-      {showPlayer && (
-        <VideoPlayerModal job={job} onClose={() => setShowPlayer(false)} onEdit={onEdit} />
-      )}
+      <AnimatePresence>
+        {showPlayer && (
+          <VideoPlayerModal job={job} onClose={() => setShowPlayer(false)} onEdit={onEdit} />
+        )}
+      </AnimatePresence>
     </GlowCard>
   )
 }

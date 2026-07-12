@@ -1,6 +1,6 @@
 # 001 — Dar física de entrada/saída aos modais (Modal base, ExportPanel, VideoPlayerModal)
 
-- **Status**: TODO
+- **Status**: DONE (2026-07-12; passos 1-2 pelo executor GPT-5.6 Sol/cgpt — processo morto 2×, passos 3-5 completados pelo orquestrador Fable conforme fallback do plano de execução; gate Opus: APROVADO em tudo; tsc verde)
 - **Commit**: 6428262
 - **Severity**: HIGH
 - **Category**: Physicality & origin + Interruptibility (AUDIT seções 3–4)
