@@ -50,7 +50,7 @@ async def test_topic_length_boundaries_are_enforced(client, verified_user, auth_
     )
 
     assert below_min.status_code == 422, "Topics shorter than 10 characters should be rejected."
-    assert at_limit.status_code == 200, "500-character topics should be accepted."
+    assert at_limit.status_code == 202, "500-character topics should be accepted."
     assert over_limit.status_code == 422, "Topics longer than 500 characters should be rejected."
 
 

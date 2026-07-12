@@ -183,7 +183,12 @@ def generate_script(
     # ~4s) limitado pelo teto duro absoluto — nao corta videos longos legitimos.
     scenes = script.get("scenes")
     if isinstance(scenes, list):
-        max_scenes = min(settings.MAX_SCENES_PER_VIDEO, max(6, -(-duration_target // 4)))
+        # ai_video tem teto PROPRIO, mais apertado: cada cena e um clipe Seedance pago
+        # de VIDEO_GEN_CLIP_SECONDS (a margem dos 30 creditos assume ~6-8 clipes).
+        if template.media.source == "ai_video":
+            max_scenes = min(settings.MAX_SCENES_AI_VIDEO, max(6, -(-duration_target // 4)))
+        else:
+            max_scenes = min(settings.MAX_SCENES_PER_VIDEO, max(6, -(-duration_target // 4)))
         if len(scenes) > max_scenes:
             logger.warning(
                 "roteiro com %d cenas clampado para %d (duracao=%ds, template=%s) — anti-burn",
@@ -206,7 +211,7 @@ def generate_script(
     if template.script.needs_visual_hint:
         for i, sc in enumerate(script.get("scenes", [])):
             if not sc.get("visual_hint", "").strip():
-                raise ScriptValidationError(f"cena {i+1} sem visual_hint (template {template_id} exige)")
+                raise ScriptValidationError(f"cena {i + 1} sem visual_hint (template {template_id} exige)")
 
     # Dialogue: normalize speaker to A/B (default A) so synthesis always has a valid voice
     if is_dialogue:
@@ -241,7 +246,7 @@ def refine_script(script: dict, instruction: str, duration_target: int, template
                 if i < len(original) and original[i].get("visual_hint"):
                     sc["visual_hint"] = original[i]["visual_hint"]
                 else:
-                    raise ScriptValidationError(f"cena {i+1} sem visual_hint apos o refino")
+                    raise ScriptValidationError(f"cena {i + 1} sem visual_hint apos o refino")
     return refined
 
 
@@ -272,7 +277,7 @@ def _parse_script_json(raw: str) -> dict:
 
     preview = raw[:200].replace("\n", "\\n")
     raise ScriptValidationError(
-        f"LLM retornou JSON invalido (nao foi possivel extrair um objeto JSON). " f"Primeiros 200 chars: {preview}"
+        f"LLM retornou JSON invalido (nao foi possivel extrair um objeto JSON). Primeiros 200 chars: {preview}"
     )
 
 

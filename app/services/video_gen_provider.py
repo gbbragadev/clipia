@@ -19,6 +19,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+from collections.abc import Callable
 from pathlib import Path
 
 import httpx
@@ -32,6 +33,10 @@ _BASE = "https://openrouter.ai/api/v1/videos"
 
 class VideoGenError(Exception):
     """Falha terminal na geracao de video."""
+
+
+class VideoGenCancelled(VideoGenError):
+    """Usuario cancelou o job: parar de submeter/pollar clipes (cada um custa $)."""
 
 
 # ---------- lógica pura (testável offline) ----------
@@ -68,7 +73,19 @@ def _headers() -> dict:
 # ---------- rede ----------
 
 
-async def _generate_clip(client: httpx.AsyncClient, prompt: str, output_path: str, duration: int) -> str:
+async def _generate_clip(
+    client: httpx.AsyncClient,
+    prompt: str,
+    output_path: str,
+    duration: int,
+    cancelled: Callable[[], bool] | None = None,
+) -> str:
+    # Cancel e checado ANTES de submeter e entre polls: um job de video IA leva
+    # 6-10 min e cada request submetido e cobrado — sem esses checks, cancelar na
+    # UI deixava o job completar e COBRAR (requests ja enviados nao tem volta,
+    # mas novos submits e o restante da pipeline param aqui).
+    if cancelled and cancelled():
+        raise VideoGenCancelled("job cancelado antes de submeter a cena")
     body = build_submit_body(
         prompt,
         duration,
@@ -86,6 +103,8 @@ async def _generate_clip(client: httpx.AsyncClient, prompt: str, output_path: st
     start = time.monotonic()
     while time.monotonic() - start < settings.VIDEO_GEN_TIMEOUT:
         await asyncio.sleep(settings.VIDEO_GEN_POLL_INTERVAL)
+        if cancelled and cancelled():
+            raise VideoGenCancelled(f"job cancelado durante o poll do clipe {job_id}")
         pr = await client.get(f"{_BASE}/{job_id}", headers=_headers())
         pr.raise_for_status()
         data = pr.json()
@@ -104,12 +123,24 @@ async def _generate_clip(client: httpx.AsyncClient, prompt: str, output_path: st
     return output_path
 
 
-async def generate_scenes(prompts: list[str], out_dir: str, duration: int | None = None) -> list[str]:
-    """Gera 1 clipe por prompt em paralelo. Retorna os paths na ordem das cenas."""
+async def generate_scenes(
+    prompts: list[str],
+    out_dir: str,
+    duration: int | None = None,
+    cancelled: Callable[[], bool] | None = None,
+) -> list[str]:
+    """Gera 1 clipe por prompt em paralelo. Retorna os paths na ordem das cenas.
+
+    `cancelled` (ex.: flag Redis do job) interrompe novas submissoes e polls; a
+    excecao propaga pelo gather e o caller trata como cancelamento, nao erro.
+    """
     dur = duration or settings.VIDEO_GEN_CLIP_SECONDS
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
     # timeout do client cobre 1 request; o poll tem seu proprio teto via VIDEO_GEN_TIMEOUT
     async with httpx.AsyncClient(timeout=120.0) as client:
-        tasks = [_generate_clip(client, p, str(out / f"scene_{i}.mp4"), dur) for i, p in enumerate(prompts)]
+        tasks = [
+            _generate_clip(client, p, str(out / f"scene_{i}.mp4"), dur, cancelled=cancelled)
+            for i, p in enumerate(prompts)
+        ]
         return await asyncio.gather(*tasks)

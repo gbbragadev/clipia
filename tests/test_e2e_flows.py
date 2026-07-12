@@ -38,7 +38,7 @@ async def test_register_verify_generate_status_and_download_flow(client, db_sess
             "template_id": "stock_narration",
         },
     )
-    assert generate.status_code == 200
+    assert generate.status_code == 202
     job_id = generate.json()["job_id"]
 
     app.state.fake_redis.hset(

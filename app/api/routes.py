@@ -218,7 +218,8 @@ async def _refund_credits_safe(db: AsyncSession, user_id, cost: int, action: str
     "/generate",
     summary="Generate a video",
     description="Starts a new video generation job.",
-    responses={200: {"description": "Job queued"}},
+    status_code=202,
+    responses={202: {"description": "Job accepted and queued (async pipeline)"}},
 )
 @limiter.limit(settings.RATE_LIMIT_GENERATE)
 async def generate(
@@ -227,10 +228,15 @@ async def generate(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Queue a video generation job."""
+    """Queue a video generation job (202: o processamento acontece no worker)."""
     # Dialogo usa 2 vozes ElevenLabs na sintese: o custo e SEMPRE o pricing elevenlabs,
-    # decidido aqui (server-side) — nunca por campo de custo vindo do cliente.
-    cost_provider = "elevenlabs" if req.narration_mode == "dialogue" else req.voice_provider
+    # decidido aqui (server-side) — nunca por campo de custo vindo do cliente. Vale para
+    # o MODO dialogo E para templates de dialogo NATIVO (dialogue_duo): o worker decide
+    # a sintese por template.script.is_dialogue, entao o preco segue a mesma regra.
+    template = get_template(req.template_id)
+    cost_provider = (
+        "elevenlabs" if (req.narration_mode == "dialogue" or template.script.is_dialogue) else req.voice_provider
+    )
     credit_cost = get_generation_credit_cost(req.template_id, cost_provider)
 
     # Refinos de roteiro (0,5 cada) acumulados em Redis pelo /script-preview/refine:
@@ -246,7 +252,7 @@ async def generate(
 
     # Guardrail $: video IA (Seedance) e a operacao mais cara. Teto DIARIO por usuario, vale ate p/
     # conta admin/seed (foi o vetor do gasto de ~$6). O lock por usuario serializa get->incr (sem race).
-    is_ai_video = get_template(req.template_id).media.source == "ai_video"
+    is_ai_video = template.media.source == "ai_video"
     cap_key = (
         f"aivideo_count:{user.id}:{datetime.now(timezone.utc).strftime('%Y-%m-%d')}"
         if is_ai_video and settings.MAX_AI_VIDEO_PER_DAY > 0

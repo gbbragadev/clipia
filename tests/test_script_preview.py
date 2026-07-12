@@ -92,7 +92,7 @@ async def test_generate_settles_whole_refines_and_carries_remainder(
 
     resp = await client.post("/api/v1/generate", json=BASE_BODY, headers=auth_headers(verified_user))
 
-    assert resp.status_code == 200
+    assert resp.status_code == 202
     assert resp.json()["credit_cost"] == 2  # 1 do template + 1 inteiro dos refinos
     fresh = await db_session.get(User, verified_user.id)
     assert fresh.credits == credits_before - 2
@@ -106,7 +106,7 @@ async def test_generate_with_half_refine_charges_base_only(client, app, verified
 
     resp = await client.post("/api/v1/generate", json=BASE_BODY, headers=auth_headers(verified_user))
 
-    assert resp.status_code == 200
+    assert resp.status_code == 202
     assert resp.json()["credit_cost"] == 1  # floor(0.5) = 0: nada a liquidar ainda
     assert fake.get(f"script_refine_pending:{verified_user.id}") == "0.5"
 
@@ -119,7 +119,7 @@ async def test_generate_with_custom_script_writes_script_json(client, app, verif
         headers=auth_headers(verified_user),
     )
 
-    assert resp.status_code == 200
+    assert resp.status_code == 202
     job_id = resp.json()["job_id"]
     script_path = test_db["storage_dir"] / "jobs" / job_id / "script.json"
     assert script_path.exists()

@@ -19,7 +19,7 @@ async def test_concurrent_generate_with_one_credit_allows_only_one_success(
         client.post("/api/v1/generate", headers=auth_headers(verified_user), json=payload),
     )
 
-    success_count = sum(response.status_code == 200 for response in responses)
+    success_count = sum(response.status_code == 202 for response in responses)
     failure_count = sum(response.status_code == 402 for response in responses)
     fresh_user = await db_session.get(User, verified_user.id)
     await db_session.refresh(fresh_user)

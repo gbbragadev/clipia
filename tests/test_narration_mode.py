@@ -25,10 +25,31 @@ async def test_dialogue_on_capable_template_charges_elevenlabs(client, app, veri
         json={**DIALOGUE_JSON, "template_id": "stock_narration"},
         headers=auth_headers(verified_user),
     )
-    assert resp.status_code == 200
+    assert resp.status_code == 202
     body = resp.json()
     assert body["credit_cost"] == 2  # elevenlabs pricing (edge seria 1)
     assert app.state.fake_redis.hget(f"job:{body['job_id']}", "narration_mode") == "dialogue"
+
+
+@pytest.mark.asyncio
+async def test_dialogue_duo_native_charges_elevenlabs_even_with_edge_single(client, verified_user, auth_headers):
+    """dialogue_duo é diálogo NATIVO (o worker sintetiza 2 vozes ElevenLabs por
+    template.script.is_dialogue, independente do narration_mode): payload
+    single+edge não pode pagar 1 crédito — o pricing é do template, server-side."""
+    resp = await client.post(
+        "/api/v1/generate",
+        json={
+            "topic": "conversa de teste sobre o oceano",
+            "style": "educational",
+            "duration_target": 30,
+            "template_id": "dialogue_duo",
+            "narration_mode": "single",
+            "voice_provider": "edge",
+        },
+        headers=auth_headers(verified_user),
+    )
+    assert resp.status_code == 202
+    assert resp.json()["credit_cost"] == 2  # pricing elevenlabs (edge seria 1 = subcobrança)
 
 
 @pytest.mark.asyncio
@@ -54,7 +75,7 @@ async def test_single_mode_still_charges_selected_provider(client, verified_user
         },
         headers=auth_headers(verified_user),
     )
-    assert resp.status_code == 200
+    assert resp.status_code == 202
     assert resp.json()["credit_cost"] == 1
 
 
