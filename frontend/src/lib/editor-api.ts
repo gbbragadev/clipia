@@ -42,7 +42,7 @@ export async function fetchComposition(jobId: string): Promise<CompositionData> 
   return {
     title: data.script.title || '',
     // Normaliza cenas: templates de IA (ai_video/novelinha) vem com visual_hint e
-    // SEM keywords_en — o editor (SceneGrid/ScriptEditor) faz .map/.join em keywords_en
+    // SEM keywords_en — o editor (SceneGrid) faz .map/.join em keywords_en
     // e crashava ("Cannot read properties of undefined (reading 'map')"). Garante array.
     scenes: (data.script.scenes ?? []).map((s) => ({
       ...s,

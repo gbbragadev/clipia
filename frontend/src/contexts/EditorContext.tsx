@@ -20,6 +20,8 @@ interface EditorContextValue {
   saving: boolean
   saveError: boolean
   retrySave: () => void
+  /** Cancela o debounce e salva AGORA; false = save falhou (não renderize estado velho). */
+  flushSave: () => Promise<boolean>
   playerFrame: number
   isPlaying: boolean
   playerRef: React.RefObject<PlayerRef | null>
@@ -114,27 +116,43 @@ export function EditorProvider({ jobId, children }: { jobId: string; children: R
   }, [])
 
   // Save com 1 retry (~2s): backend piscando não pode significar edição perdida em silêncio.
-  const doSave = useCallback(async () => {
-    if (!composition) return
+  const doSave = useCallback(async (): Promise<boolean> => {
+    if (!composition) return true
     setSaving(true)
     try {
       await saveEditorState(jobId, { composition })
       setDirty(false)
       setSaveError(false)
+      return true
     } catch {
       await new Promise((resolve) => setTimeout(resolve, 2000))
       try {
         await saveEditorState(jobId, { composition })
         setDirty(false)
         setSaveError(false)
+        return true
       } catch {
         // Persistiu a falha: o header mostra "Falha ao salvar" com retry manual.
         setSaveError(true)
+        return false
       }
     } finally {
       setSaving(false)
     }
   }, [composition, jobId])
+
+  // O render exporta o que está NO DISCO (script.json/editor_state.json), não o estado do
+  // React: com o debounce de 1,5s, editar e exportar em seguida renderizava estado velho —
+  // e debitava créditos por ele. Chamar antes de POST /render.
+  // ponytail: save em voo + flush podem duplicar o mesmo payload (idempotente, inofensivo).
+  const flushSave = useCallback(async (): Promise<boolean> => {
+    if (saveTimerRef.current) {
+      clearTimeout(saveTimerRef.current)
+      saveTimerRef.current = null
+    }
+    if (!dirty) return !saveError
+    return doSave()
+  }, [dirty, saveError, doSave])
 
   // Auto-save debounce
   useEffect(() => {
@@ -293,7 +311,7 @@ export function EditorProvider({ jobId, children }: { jobId: string; children: R
 
   const value: EditorContextValue = {
     jobId, composition, loading, error, selectedSceneIndex, activePanel, panelCollapsed,
-    dirty, saving, saveError, retrySave: doSave, playerFrame, isPlaying, playerRef, totalFrames, narrationStale,
+    dirty, saving, saveError, retrySave: doSave, flushSave, playerFrame, isPlaying, playerRef, totalFrames, narrationStale,
     selectScene, setActivePanel, updateScene, updateSubtitleStyle, updateVoiceConfig,
     updateAudio, updateMusic, addOverlay, removeOverlay, updateOverlay, getSceneStartFrame,
     setPlayerFrame, seekToFrame, togglePlayback, togglePanel,

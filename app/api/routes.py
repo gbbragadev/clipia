@@ -44,7 +44,7 @@ from app.utils.files import bytes_to_gb, get_job_dir, path_size_bytes
 from app.utils.locks import get_lock
 from app.utils.media_url import sign_media_url
 from app.utils.ratelimit import client_ip
-from app.worker.tasks import dispatch_pipeline
+from app.worker.tasks import _send_admin_alert, dispatch_pipeline
 
 logger = logging.getLogger(__name__)
 limiter = Limiter(key_func=client_ip)
@@ -182,6 +182,38 @@ async def _refund_credits(db: AsyncSession, user_id, cost: int) -> None:
     record_credit_metric("credit", cost)
 
 
+async def _refund_credits_safe(db: AsyncSession, user_id, cost: int, action: str) -> bool:
+    """Refund que NUNCA levanta: uma excecao aqui substituiria o erro ORIGINAL da acao
+    paga (o cliente veria 500 generico em vez da causa real) e deixaria o estorno perdido
+    em silencio. Sessao suja ganha um rollback+retry; falhou de vez -> CRITICAL + alerta
+    admin com os dados do estorno manual (mesmo contrato do worker, d23c0ec)."""
+    try:
+        await _refund_credits(db, user_id, cost)
+        return True
+    except Exception:  # noqa: BLE001
+        try:
+            await db.rollback()
+            await _refund_credits(db, user_id, cost)
+            return True
+        except Exception:  # noqa: BLE001
+            logger.critical(
+                "Refund FALHOU: user=%s cost=%s action=%s — estorno manual necessario",
+                user_id,
+                cost,
+                action,
+                exc_info=True,
+            )
+            try:
+                await asyncio.to_thread(
+                    _send_admin_alert,
+                    "ClipIA - refund FALHOU (estorno manual)",
+                    f"user_id={user_id} cost={cost} action={action}. Estornar manualmente e investigar.",
+                )
+            except Exception:  # noqa: BLE001
+                logger.exception("Falha ao enviar alerta admin de refund")
+            return False
+
+
 @router.post(
     "/generate",
     summary="Generate a video",
@@ -311,7 +343,7 @@ async def generate(
             narration_mode=req.narration_mode,
         )
     except Exception as e:  # noqa: BLE001 — enfileirar falhou (Celery/Redis down): estorna p/ nao cobrar sem gerar
-        await _refund_credits(db, user.id, credit_cost)
+        await _refund_credits_safe(db, user.id, credit_cost, "generate/enqueue")
         if cap_key:
             _redis.decr(cap_key)  # devolve a cota diaria de ai_video consumida na linha ~243
         _redis.hset(
@@ -443,7 +475,7 @@ async def design_voice(
     try:
         voice_id = await ElevenLabsProvider().design_voice(req.name, req.description, req.text)
     except Exception as e:  # noqa: BLE001
-        await _refund_credits(db, user.id, cost)
+        await _refund_credits_safe(db, user.id, cost, "design_voice")
         logger.warning("Voice Design falhou: %s", e)
         raise HTTPException(status_code=502, detail=f"Não foi possível criar a voz: {e}")
     return {"voice_id": voice_id, "name": req.name}
@@ -744,7 +776,7 @@ async def clone_voice(
     try:
         voice_id = await provider.clone_voice(name, audio_bytes, description)
     except Exception as e:  # noqa: BLE001
-        await _refund_credits(db, user.id, cost)
+        await _refund_credits_safe(db, user.id, cost, "clone_voice")
         logger.warning("Voice clone falhou: %s", e)
         raise HTTPException(status_code=502, detail=f"Não foi possível clonar a voz: {e}")
 
@@ -1060,7 +1092,7 @@ async def regenerate_tts(
                 voice_id=req.voice_id or "",
             )
         except Exception as e:  # noqa: BLE001
-            await _refund_credits(db, user.id, cost)
+            await _refund_credits_safe(db, user.id, cost, "regenerate_tts")
             logger.warning("Regenerate TTS (ElevenLabs) falhou: %s", e)
             raise HTTPException(status_code=502, detail=f"Não foi possível regenerar a narração: {e}")
     else:
@@ -1245,8 +1277,7 @@ async def render_video(
     try:
         task_rerender_video.delay(job_id)
     except Exception as e:  # noqa: BLE001 — enfileirar falhou (Celery/Redis down): estorna e reverte
-        if cost > 0:
-            await _refund_credits(db, user.id, cost)
+        if cost > 0 and await _refund_credits_safe(db, user.id, cost, "render/enqueue"):
             job.pending_credits = float(cost)  # restaura p/ a re-tentativa cobrar de novo
             await db.commit()
         _redis.hset(
@@ -1316,6 +1347,10 @@ async def job_status(
         "current_step": data.get("current_step", ""),
         "error": data.get("error", ""),
         "detail": data.get("detail", ""),
+        # O ExportPanel abre com o pending_credits da composition (carregada no mount do
+        # editor) — ai-suggest/render mudam o valor no servidor e o banner mentia. O job
+        # ja esta carregado aqui (get_owned_job), entao expor o valor fresco e gratis.
+        "pending_credits": float(job.pending_credits or 0.0),
     }
 
 
