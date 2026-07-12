@@ -123,6 +123,10 @@ class Settings(BaseSettings):
     VIDEO_GEN_CLIP_SECONDS: int = 5  # duracao de cada clipe por cena (Seedance aceita 4-15)
     VIDEO_GEN_POLL_INTERVAL: int = 15  # segundos entre polls do job assincrono
     VIDEO_GEN_TIMEOUT: int = 600  # teto por clipe (10 min)
+    # Teto de CENAS do template ai_video: cada cena vira um clipe PAGO de
+    # VIDEO_GEN_CLIP_SECONDS. O teto global (MAX_SCENES_PER_VIDEO) chega a 40 por
+    # duracao e estouraria a margem dos 30 creditos (~R$130 de API a 40 cenas).
+    MAX_SCENES_AI_VIDEO: int = 8
     # Custo em creditos do template de video IA. Preco e por TOKEN = w*h*dur*24/1024.
     # Ex.: 2.0-fast 720p 9:16 ~= R$0,67/s; um Short ~30s ~= R$20 de API -> ~30 creditos com margem.
     # Ajuste junto com OPENROUTER_VIDEO_MODEL/VIDEO_GEN_RESOLUTION.

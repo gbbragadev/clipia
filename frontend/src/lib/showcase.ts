@@ -10,6 +10,8 @@ export interface ShowcaseVideo {
   template: string
   niche: string
   video: string
+  /** Frame real do vídeo (jpg): pintura imediata nos cards (preload="none"). */
+  poster?: string
   phrase: string
   captionStyle: 'tiktok' | 'impact' | 'karaoke' | 'minimal' | 'boxed'
   captionAccent: string

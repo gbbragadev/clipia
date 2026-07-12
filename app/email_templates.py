@@ -37,6 +37,7 @@ def _base_template(subject: str, preheader: str, content: str) -> str:
 </body>
 </html>"""
 
+
 def email_verification(user_name: str, code: str) -> str:
     content = f"""
     <h1>Verifique seu e-mail</h1>
@@ -49,6 +50,7 @@ def email_verification(user_name: str, code: str) -> str:
     """
     return _base_template("ClipIA — Verifique seu email", "Seu código de verificação do ClipIA chegou.", content)
 
+
 def email_password_reset(user_name: str, code: str) -> str:
     content = f"""
     <h1>Redefinir sua senha</h1>
@@ -59,7 +61,10 @@ def email_password_reset(user_name: str, code: str) -> str:
     </div>
     <p style="font-size: 14px; color: #94a3b8;">Este código expira em 10 minutos. Se você não solicitou a redefinição, por favor, ignore este e-mail.</p>
     """
-    return _base_template("ClipIA — Redefinir sua senha", "Código para redefinição de senha da sua conta ClipIA.", content)
+    return _base_template(
+        "ClipIA — Redefinir sua senha", "Código para redefinição de senha da sua conta ClipIA.", content
+    )
+
 
 def email_welcome(user_name: str) -> str:
     content = f"""
@@ -78,6 +83,7 @@ def email_welcome(user_name: str) -> str:
     """
     return _base_template("Bem-vindo ao ClipIA! 🎬", "Você ganhou 2 créditos para criar seu primeiro vídeo.", content)
 
+
 def email_purchase_confirmed(user_name: str, package_name: str, credits: int, price_display: str) -> str:
     content = f"""
     <h1>Compra Confirmada!</h1>
@@ -92,18 +98,24 @@ def email_purchase_confirmed(user_name: str, package_name: str, credits: int, pr
         <a href="https://clipia.com.br/dashboard" class="btn">Ir para o Dashboard</a>
     </div>
     """
-    return _base_template(f"ClipIA — Compra confirmada: {credits} créditos", f"Seu pagamento de {price_display} foi aprovado.", content)
+    return _base_template(
+        f"ClipIA — Compra confirmada: {credits} créditos", f"Seu pagamento de {price_display} foi aprovado.", content
+    )
 
-def email_video_ready(user_name: str, job_topic: str) -> str:
+
+def email_video_ready(user_name: str, job_topic: str, job_id: str) -> str:
     content = f"""
     <h1>Seu vídeo está pronto! 🎬</h1>
     <p>Olá, {user_name}!</p>
-    <p>A IA terminou de criar o seu vídeo sobre <strong>"{job_topic}"</strong>. Ele já está disponível no seu dashboard para você revisar, editar ou baixar.</p>
+    <p>A IA terminou de criar o seu vídeo sobre <strong>"{job_topic}"</strong>. Ele já está disponível para você revisar, editar ou baixar — o que você vê no editor é o que exporta.</p>
     <div style="text-align: center;">
-        <a href="https://clipia.com.br/dashboard" class="btn">Ver meu vídeo</a>
+        <a href="https://clipia.com.br/editor/{job_id}" class="btn">Ver meu vídeo</a>
     </div>
     """
-    return _base_template("ClipIA — Seu vídeo está pronto! 🎬", f"O vídeo sobre '{job_topic}' acabou de ficar pronto.", content)
+    return _base_template(
+        "ClipIA — Seu vídeo está pronto! 🎬", f"O vídeo sobre '{job_topic}' acabou de ficar pronto.", content
+    )
+
 
 def email_account_deleted(user_name: str) -> str:
     content = f"""

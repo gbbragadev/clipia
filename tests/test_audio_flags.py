@@ -43,7 +43,7 @@ async def test_generate_persists_audio_flags_in_redis(client, app, verified_user
         },
         headers=auth_headers(verified_user),
     )
-    assert resp.status_code == 200
+    assert resp.status_code == 202
     job_id = resp.json()["job_id"]
     assert app.state.fake_redis.hget(f"job:{job_id}", "sfx_enabled") == "0"
     assert app.state.fake_redis.hget(f"job:{job_id}", "music_enabled") == "1"
@@ -62,7 +62,7 @@ async def test_generate_without_flags_leaves_them_absent(client, app, verified_u
         },
         headers=auth_headers(verified_user),
     )
-    assert resp.status_code == 200
+    assert resp.status_code == 202
     job_id = resp.json()["job_id"]
     assert app.state.fake_redis.hget(f"job:{job_id}", "sfx_enabled") is None
 

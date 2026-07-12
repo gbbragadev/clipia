@@ -2,6 +2,7 @@
 
 import { useEditor } from '@/contexts/EditorContext'
 import { CaptionStylePicker } from './CaptionStylePicker'
+import { ThrottledRange } from './ThrottledRange'
 
 const FONT_OPTIONS = [
   'Montserrat, sans-serif',
@@ -69,13 +70,11 @@ export function SubtitleEditor() {
         <div className="editor-section-header">
           Tamanho &middot; {style.fontSize}px
         </div>
-        <input
-          type="range"
-          className="editor-slider"
+        <ThrottledRange
           min={28}
           max={80}
           value={style.fontSize}
-          onChange={(e) => updateSubtitleStyle({ fontSize: Number(e.target.value) })}
+          onCommit={(v) => updateSubtitleStyle({ fontSize: v })}
         />
       </div>
 
@@ -162,13 +161,11 @@ export function SubtitleEditor() {
         <div className="editor-section-header">
           Contorno &middot; {style.strokeWidth}px
         </div>
-        <input
-          type="range"
-          className="editor-slider"
+        <ThrottledRange
           min={0}
           max={6}
           value={style.strokeWidth}
-          onChange={(e) => updateSubtitleStyle({ strokeWidth: Number(e.target.value) })}
+          onCommit={(v) => updateSubtitleStyle({ strokeWidth: v })}
         />
       </div>
 
@@ -177,13 +174,11 @@ export function SubtitleEditor() {
         <div className="editor-section-header">
           Margem inferior &middot; {style.marginBottom}px
         </div>
-        <input
-          type="range"
-          className="editor-slider"
+        <ThrottledRange
           min={40}
           max={400}
           value={style.marginBottom}
-          onChange={(e) => updateSubtitleStyle({ marginBottom: Number(e.target.value) })}
+          onCommit={(v) => updateSubtitleStyle({ marginBottom: v })}
         />
       </div>
 
@@ -214,13 +209,11 @@ export function SubtitleEditor() {
         <div className="editor-section-header">
           Palavras por bloco &middot; {style.maxWordsPerChunk}
         </div>
-        <input
-          type="range"
-          className="editor-slider"
+        <ThrottledRange
           min={1}
           max={5}
           value={style.maxWordsPerChunk}
-          onChange={(e) => updateSubtitleStyle({ maxWordsPerChunk: Number(e.target.value) })}
+          onCommit={(v) => updateSubtitleStyle({ maxWordsPerChunk: v })}
         />
       </div>
 

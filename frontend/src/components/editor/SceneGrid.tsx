@@ -56,6 +56,30 @@ function SceneThumbnail({ videoUrl }: { videoUrl: string | undefined }) {
 
 export function SceneGrid() {
   const { composition, selectedSceneIndex, selectScene, updateScene, seekToFrame, totalFrames } = useEditor()
+  // Texto da cena: rascunho LOCAL + commit em debounce/blur. updateScene por tecla
+  // empilhava 1 entrada de undo por caractere (frase de 30 chars consumia o histórico
+  // de 50) e recriava a composition/contexto a cada keystroke, disputando com o preview.
+  const [draftText, setDraftText] = useState<string | null>(null)
+  const draftTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const commitDraft = (i: number, value: string) => {
+    if (draftTimer.current) {
+      clearTimeout(draftTimer.current)
+      draftTimer.current = null
+    }
+    updateScene(i, { text: value })
+    setDraftText(null)
+  }
+  const onDraftChange = (i: number, value: string) => {
+    setDraftText(value)
+    if (draftTimer.current) clearTimeout(draftTimer.current)
+    draftTimer.current = setTimeout(() => commitDraft(i, value), 400)
+  }
+  // Rascunho pertence à cena selecionada — não pode vazar quando a seleção muda
+  // (o blur do textarea antigo já commitou o texto).
+  useEffect(() => {
+    setDraftText(null)
+  }, [selectedSceneIndex])
+  useEffect(() => () => { if (draftTimer.current) clearTimeout(draftTimer.current) }, [])
   if (!composition) return null
 
   return (
@@ -100,8 +124,9 @@ export function SceneGrid() {
 
               {isSelected ? (
                 <textarea
-                  value={scene.text}
-                  onChange={(e) => updateScene(i, { text: e.target.value })}
+                  value={draftText ?? scene.text}
+                  onChange={(e) => onDraftChange(i, e.target.value)}
+                  onBlur={(e) => { if (draftTimer.current) commitDraft(i, e.target.value) }}
                   onClick={(e) => e.stopPropagation()}
                   style={{
                     width: '100%', minHeight: 48,

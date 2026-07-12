@@ -12,6 +12,7 @@ from pathlib import Path
 
 from celery.exceptions import SoftTimeLimitExceeded
 
+from app.auth.email import send_video_ready_email
 from app.config import settings
 from app.redis_pool import get_redis
 from app.services.compositor import compose_short
@@ -316,10 +317,10 @@ def task_generate_images(self, data: dict, job_id: str, template_id: str) -> dic
                 return data
             hint = scene.get("visual_hint", "").strip()
             if not hint:
-                raise ValueError(f"cena {i+1} sem visual_hint")
+                raise ValueError(f"cena {i + 1} sem visual_hint")
 
             full_prompt = f"{hint}, {template.media.style_suffix}"
-            out_path = job_img_dir / f"scene_{i+1}.png"
+            out_path = job_img_dir / f"scene_{i + 1}.png"
             provider.generate(full_prompt, out_path)
 
             image_paths.append(str(out_path))
@@ -329,7 +330,7 @@ def task_generate_images(self, data: dict, job_id: str, template_id: str) -> dic
                 "processing",
                 "generating_images",
                 progress,
-                detail=f"Imagem {i+1}/{len(scenes)} OK",
+                detail=f"Imagem {i + 1}/{len(scenes)} OK",
             )
 
         data["image_paths"] = image_paths
@@ -368,13 +369,19 @@ def task_generate_videos(self, data: dict, job_id: str, template_id: str) -> dic
         for i, scene in enumerate(scenes):
             hint = scene.get("visual_hint", "").strip()
             if not hint:
-                raise ValueError(f"cena {i+1} sem visual_hint")
+                raise ValueError(f"cena {i + 1} sem visual_hint")
             prompts.append(f"{hint}, {suffix}" if suffix else hint)
 
-        from app.services.video_gen_provider import generate_scenes
+        from app.services.video_gen_provider import VideoGenCancelled, generate_scenes
 
         videos_dir = get_job_dir(job_id) / "videos"
-        paths = asyncio.run(generate_scenes(prompts, str(videos_dir)))
+        try:
+            paths = asyncio.run(generate_scenes(prompts, str(videos_dir), cancelled=lambda: _is_cancelled(job_id)))
+        except VideoGenCancelled:
+            # Cancelou no meio dos 6-10 min de polls: estado cancelled + refund
+            # (idempotente) — antes disso o job completava e COBRAVA mesmo cancelado.
+            _cancel_job(job_id)
+            return data
         data["video_paths"] = paths
         _update_job(job_id, "processing", "generating_videos", 0.30, detail=f"{len(paths)} clipes IA prontos.")
         return data
@@ -1047,8 +1054,9 @@ def _estimate_api_cost_usd(job_id: str, script_data: dict | None) -> float:
     if template.media.source == "ai_image":
         cost += len(scenes) * settings.API_COST_GPT_IMAGE_PER_IMAGE_USD
     elif template.media.source == "ai_video":
-        total_secs = sum(float(s.get("duration_hint", 5) or 5) for s in scenes)
-        cost += total_secs * settings.API_COST_SEEDANCE_PER_SECOND_USD
+        # Seedance cobra por clipe FIXO de VIDEO_GEN_CLIP_SECONDS por cena — nao pelo
+        # duration_hint (que so guia a narracao); somar hints distorcia a estimativa.
+        cost += len(scenes) * settings.VIDEO_GEN_CLIP_SECONDS * settings.API_COST_SEEDANCE_PER_SECOND_USD
     return round(cost, 4)
 
 
@@ -1083,6 +1091,42 @@ def _build_telemetry(job_id: str, script_data: dict | None) -> dict:
         "total_seconds": total,
         "api_cost_usd_est": _estimate_api_cost_usd(job_id, script_data),
     }
+
+
+def _video_ready_recipient(job_id: str) -> tuple[str | None, str | None, str | None] | None:
+    """Email, nome e tema do dono do job (None se o job/dono nao existir)."""
+    from sqlalchemy import select
+
+    from app.db.engine import worker_session as async_session  # NullPool: seguro com asyncio.run() por task
+    from app.db.models import Job, User
+
+    async def _fetch():
+        async with async_session() as session:
+            row = await session.execute(
+                select(User.email, User.name, Job.topic).join(User, User.id == Job.user_id).where(Job.id == job_id)
+            )
+            return row.first()
+
+    row = asyncio.run(_fetch())
+    return (row[0], row[1], row[2]) if row else None
+
+
+def _send_video_ready_email(job_id: str) -> None:
+    """Chama o usuario de volta quando o video vira editavel (jobs levam 3-10 min).
+
+    1x por job (SET NX — retry do finalize/re-render nao repete) e best-effort:
+    notificacao NUNCA falha o finalize.
+    """
+    try:
+        if not _redis.set(f"job:{job_id}:notified", "1", nx=True, ex=7 * 86400):
+            return  # ja notificado
+        info = _video_ready_recipient(job_id)
+        if not info or not info[0]:
+            return
+        email, name, topic = info
+        send_video_ready_email(email, name or "criador(a)", topic or "seu video", job_id)
+    except Exception:  # noqa: BLE001 — notificacao nunca derruba o finalize
+        logger.exception("Falha ao enviar email de video pronto (job %s)", job_id)
 
 
 @celery_app.task(name="finalize", bind=True, soft_time_limit=120, time_limit=150)
@@ -1130,6 +1174,8 @@ def task_finalize(self, video_path: str, job_id: str) -> str:
                     await session.commit()
 
             asyncio.run(_save_script())
+            # So depois do commit (job realmente editavel): convite de volta 1x por job.
+            _send_video_ready_email(job_id)
         except Exception as e:
             logger.warning(f"Could not save script to DB: {e}")
 

@@ -26,13 +26,13 @@ function ShowcaseFan() {
   return (
     <div ref={ref} className="relative mx-auto flex max-w-md items-center justify-center py-6">
       <div className="w-[120px] -rotate-6 translate-y-5 opacity-80 sm:w-[150px]">
-        <VideoPhone src={ocean.src} title={ocean.title} accent={ocean.accent} active={false} badge={false} />
+        <VideoPhone src={ocean.src} poster={ocean.poster} title={ocean.title} accent={ocean.accent} active={false} badge={false} />
       </div>
       <div className="z-10 -mx-5 w-[170px] sm:w-[195px]">
-        <VideoPhone src={cerebro.src} title={cerebro.title} accent={cerebro.accent} active={inView} />
+        <VideoPhone src={cerebro.src} poster={cerebro.poster} title={cerebro.title} accent={cerebro.accent} active={inView} />
       </div>
       <div className="w-[120px] rotate-6 translate-y-5 opacity-80 sm:w-[150px]">
-        <VideoPhone src={ia.src} title={ia.title} accent={ia.accent} active={false} badge={false} />
+        <VideoPhone src={ia.src} poster={ia.poster} title={ia.title} accent={ia.accent} active={false} badge={false} />
       </div>
     </div>
   );

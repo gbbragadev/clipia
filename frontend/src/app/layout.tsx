@@ -67,27 +67,8 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="pt-BR" className={`h-full antialiased ${GeistSans.variable} ${sora.variable}`}>
-      <head>
-        <script
-          type="application/ld+json"
-          dangerouslySetInnerHTML={{
-            __html: JSON.stringify({
-              "@context": "https://schema.org",
-              "@type": "SoftwareApplication",
-              "name": "ClipIA",
-              "applicationCategory": "MultimediaApplication",
-              "operatingSystem": "Web",
-              "offers": {
-                "@type": "Offer",
-                "price": "0",
-                "priceCurrency": "BRL"
-              },
-              "description": "Plataforma de geração automatizada de vídeos curtos com IA",
-              "url": "https://clipia.com.br"
-            })
-          }}
-        />
-      </head>
+      {/* JSON-LD de SoftwareApplication vive na home (app/page.tsx) — em artigo,
+          auth e viewer o schema global confundia parsers (rich results imprecisos). */}
       <body className="min-h-full flex flex-col">
         <TrackingScripts />
         <FilmGrain />

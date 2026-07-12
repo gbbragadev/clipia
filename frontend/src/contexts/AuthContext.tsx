@@ -106,6 +106,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const register = useCallback(async (email: string, name: string, password: string, turnstileToken?: string, consent?: boolean) => {
     const utm = getStoredUTM();
     const res = await authRegister(email, name, password, { ...utm, turnstile_token: turnstileToken, consent });
+    // Intenção de nicho (/criar/[nicho] → utm_campaign=nicho-{slug}): sobrevive ao
+    // cadastro para o dashboard aplicar template/estilo/tema recomendados UMA vez
+    // após o OTP — quem chega buscando "drama histórico" não cai num form genérico.
+    if (utm.utm_campaign?.startsWith("nicho-")) {
+      localStorage.setItem("clipia_signup_intent", utm.utm_campaign.slice("nicho-".length));
+    }
     clearStoredUTM();
     setToken(res.access_token);
     try {

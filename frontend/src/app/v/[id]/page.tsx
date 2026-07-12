@@ -15,6 +15,7 @@ interface ShowcaseEntry {
   template: string;
   niche: string;
   video: string;
+  poster?: string;
 }
 
 const VIDEOS: ShowcaseEntry[] = (showcase as { videos: ShowcaseEntry[] }).videos;
@@ -36,11 +37,28 @@ export async function generateMetadata({
   const title = `${v.title} — feito com ClipIA`;
   const description =
     "Vídeo vertical gerado e editado no ClipIA: roteiro, narração em português e legendas sincronizadas. Crie o seu grátis.";
+  // No Next 16 a metadata mescla por chave de topo: redefinir openGraph SUBSTITUI o
+  // objeto global inteiro — sem images aqui, o WhatsApp mostrava card SEM imagem.
+  const ogImage = `https://clipia.com.br/showcase/og/${v.id}.jpg`;
   return {
     title,
     description,
     alternates: { canonical: `https://clipia.com.br/v/${v.id}` },
-    openGraph: { title, description, type: "video.other" },
+    openGraph: {
+      title,
+      description,
+      type: "video.other",
+      url: `https://clipia.com.br/v/${v.id}`,
+      siteName: "ClipIA",
+      locale: "pt_BR",
+      images: [{ url: ogImage, width: 1200, height: 630, alt: v.title }],
+    },
+    twitter: {
+      card: "summary_large_image",
+      title,
+      description,
+      images: [ogImage],
+    },
   };
 }
 
@@ -57,6 +75,22 @@ export default async function SharePage({
 
   return (
     <div className="flex min-h-screen flex-col bg-ink text-cloud antialiased">
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{
+          __html: JSON.stringify({
+            "@context": "https://schema.org",
+            "@type": "VideoObject",
+            name: v.title,
+            description: `Vídeo vertical de ${v.niche} gerado e editado no ClipIA (template ${v.template}).`,
+            thumbnailUrl: `https://clipia.com.br/showcase/og/${v.id}.jpg`,
+            contentUrl: `https://clipia.com.br${v.video}`,
+            // Data de publicação do showcase atual (arquivos de 04/2026).
+            uploadDate: "2026-04-04",
+            inLanguage: "pt-BR",
+          }),
+        }}
+      />
       <header className="flex items-center justify-between px-5 py-4 sm:px-8">
         <Link href="/" aria-label="ClipIA — início">
           <Logo />
@@ -73,6 +107,7 @@ export default async function SharePage({
               {/* controles nativos: página de share precisa de play/pause/som simples */}
               <video
                 src={v.video}
+                poster={v.poster}
                 controls
                 playsInline
                 preload="metadata"

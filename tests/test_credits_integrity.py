@@ -13,7 +13,7 @@ async def test_generate_debits_exactly_one_credit(client, db_session, verified_u
         json={"topic": "Tema valido para gerar video", "style": "educational", "duration_target": 45},
     )
 
-    assert response.status_code == 200, "Generate should succeed for verified users with credits."
+    assert response.status_code == 202, "Generate should succeed for verified users with credits."
     after = (await db_session.get(User, verified_user.id)).credits
     assert before - after == 1, "Generate should debit exactly one credit."
     app.state.dispatch_pipeline.assert_called_once()
@@ -35,7 +35,7 @@ async def test_generate_ai_image_template_debits_ai_image_floor(client, db_sessi
         },
     )
 
-    assert response.status_code == 200
+    assert response.status_code == 202
     assert response.json()["credit_cost"] == 5
     after = (await db_session.get(User, verified_user.id)).credits
     assert before - after == 5

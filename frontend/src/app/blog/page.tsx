@@ -6,10 +6,12 @@ export const metadata: Metadata = {
   title: "Blog — ClipIA",
   description:
     "Dicas, tutoriais e novidades sobre criação de vídeos curtos com IA. Shorts, Reels e TikTok automáticos.",
+  alternates: { canonical: "https://clipia.com.br/blog" },
   openGraph: {
     title: "Blog — ClipIA",
     description: "Dicas e tutoriais sobre vídeos curtos com IA",
     url: "https://clipia.com.br/blog",
+    images: [{ url: "/og-image.png", width: 1200, height: 630 }],
   },
 };
 

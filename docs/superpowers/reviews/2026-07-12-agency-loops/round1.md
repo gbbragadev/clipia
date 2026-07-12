@@ -84,12 +84,19 @@ na sessão; próximas rodadas podem usar `agentType: agency-*` direto.
    ameaça o custo do template ai_video (L p/ reagir, S p/ validar o claim).
 5. **Revid: templates "brainrot"** (PDF/Text-to-Brainrot) (S!) — candidato a template novo barato.
 
-## Verify (preencher ao fim do lote)
+## Verify (fechado)
 
-- pytest completo: (em execução)
-- npx next typegen + tsc --noEmit: (em execução)
-- Smoke browser dos fluxos tocados: pendente
-- Deploy: pendente (frontend rebuild+restart; backend restart p/ /status novo)
+- pytest completo: **435 verdes** (incl. teste de regressão novo do refund-safe)
+- npx next typegen + tsc --noEmit: **exit 0**
+- Deploy: frontend build+restart (49 chunks 200, build consistente) + backend via schtask
+  (PID antigo 59272 morto, novo /health 200). GOTCHA aprendido: deletar a schtask enquanto
+  roda MATA a árvore do processo (1ª tentativa morreu com ^C antes do kill) — esperar o log
+  do script concluir antes do /delete; e /health NÃO é sinal de restart (o velho também
+  responde) — validar por PID/campo novo.
+- Smoke em produção: home 200 console limpo · editor logado carrega com console limpo
+  (EditorContext novo vivo, painel de transições visível) · `/status` vivo retorna
+  `pending_credits` (SMOKE OK, era AUSENTE antes do restart de verdade).
+- PR #7 mergeado na main (`d75972b`); site servindo o código novo.
 
 ## Custo da rodada
 

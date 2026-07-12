@@ -67,11 +67,16 @@ class GenerateRequest(BaseModel):
             # editado com N cenas num template de imagem/video IA = N geracoes PAGAS.
             from app.config import settings
 
-            max_scenes = min(settings.MAX_SCENES_PER_VIDEO, max(6, -(-self.duration_target // 4)))
+            template = TEMPLATES.get(self.template_id)
+            # ai_video tem teto PROPRIO de cenas: cada cena e um clipe Seedance pago
+            # (o teto global proporcional a duracao chega a 40 e estoura a margem).
+            if template is not None and template.media.source == "ai_video":
+                max_scenes = min(settings.MAX_SCENES_AI_VIDEO, max(6, -(-self.duration_target // 4)))
+            else:
+                max_scenes = min(settings.MAX_SCENES_PER_VIDEO, max(6, -(-self.duration_target // 4)))
             if len(scenes) > max_scenes:
                 raise ValueError(ErrorMessages.INVALID_INPUT)
 
-            template = TEMPLATES.get(self.template_id)
             needs_hint = bool(template and template.script.needs_visual_hint)
             is_dialogue = self.narration_mode == "dialogue" or bool(template and template.script.is_dialogue)
             for sc in scenes:

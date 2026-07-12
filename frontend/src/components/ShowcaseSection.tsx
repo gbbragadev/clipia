@@ -49,6 +49,7 @@ export function ShowcaseCard({ item, featured = false }: { item: ShowcaseVideo; 
           <video
             ref={videoRef}
             autoPlay muted loop playsInline preload="none"
+            poster={item.poster}
             className="w-full h-full object-cover"
             src={item.video}
           />
@@ -66,9 +67,19 @@ export function ShowcaseCard({ item, featured = false }: { item: ShowcaseVideo; 
             {item.beforeScript && (
               <p className="mt-2 text-xs text-white/50 italic">Prompt: &ldquo;{item.beforeScript}&rdquo;</p>
             )}
-            <span className="inline-block mt-3 text-xs px-3 py-1 rounded-full bg-white/10 text-white/80 backdrop-blur-md border border-white/5">
-              {item.template}
-            </span>
+            <div className="mt-3 flex items-center justify-between gap-2">
+              <span className="inline-block text-xs px-3 py-1 rounded-full bg-white/10 text-white/80 backdrop-blur-md border border-white/5">
+                {item.template}
+              </span>
+              {/* Link explícito (não envolve o card: hover/touch controlam o som) */}
+              <Link
+                href={`/v/${item.id}`}
+                onClick={(e) => e.stopPropagation()}
+                className="text-xs text-coral-soft hover:text-coral transition whitespace-nowrap"
+              >
+                Ver e compartilhar →
+              </Link>
+            </div>
           </div>
         </div>
       </div>

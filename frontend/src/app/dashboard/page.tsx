@@ -13,6 +13,7 @@ import ReferralCard from '@/components/dashboard/ReferralCard'
 import { InlineError, useToast } from '@/components/ui/feedback'
 import { PretextHeading } from '@/components/ui/PretextHeading'
 import { fetchPublicConfig } from '@/lib/config'
+import { getNicheBySlug } from '@/lib/niches'
 
 export default function DashboardPage() {
   const router = useRouter()
@@ -23,6 +24,21 @@ export default function DashboardPage() {
   const [error, setError] = useState<string | null>(null)
   const [prefill, setPrefill] = useState<TrendSelection | null>(null)
   const formRef = useRef<HTMLDivElement>(null)
+  // Intenção de nicho gravada no cadastro (via /criar/[nicho]): aplica template/
+  // estilo/tema recomendados UMA vez após o OTP e descarta a chave.
+  useEffect(() => {
+    const slug = localStorage.getItem('clipia_signup_intent')
+    if (!slug) return
+    localStorage.removeItem('clipia_signup_intent')
+    const niche = getNicheBySlug(slug)
+    if (!niche) return
+    setPrefill({
+      topic: niche.exampleTopics[0] ?? '',
+      trendContext: null,
+      templateId: niche.recommendedTemplate,
+      style: niche.generateStyle,
+    })
+  }, [])
   // Número prometido no banner vem do backend (guardrail: nunca hardcodar oferta).
   const [welcomeBonus, setWelcomeBonus] = useState<number | null>(null)
   useEffect(() => {

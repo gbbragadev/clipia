@@ -57,7 +57,7 @@ const sharedFaq = (): NicheFAQ[] => [
   },
   {
     question: 'Quanto custa para começar?',
-    answer: 'Você ganha 2 vídeos grátis ao criar a conta, sem cartão de crédito. Depois, pacotes de créditos a partir de R$19,90.',
+    answer: 'Você ganha créditos de boas-vindas ao criar a conta, sem cartão de crédito — cada crédito gera um vídeo completo. Depois, pacotes de créditos a partir de R$19,90, sem assinatura.',
   },
   {
     question: 'Posso usar os vídeos comercialmente?',
@@ -76,7 +76,7 @@ export const NICHES: NicheContent[] = [
     generateStyle: 'educational',
     metaTitle: 'Como Criar Vídeos de Curiosidades com IA | ClipIA',
     metaDescription:
-      'Crie vídeos de curiosidades para YouTube Shorts, Reels e TikTok em minutos. Roteiro, narração em português e legendas animadas automáticos. 2 vídeos grátis.',
+      'Crie vídeos de curiosidades para YouTube Shorts, Reels e TikTok em minutos. Roteiro, narração em português e legendas animadas automáticos. Comece grátis, sem cartão.',
     h1: 'Crie vídeos de curiosidades automaticamente',
     heroSubtitle: 'Do tema ao Short pronto em minutos — sem roteirista e sem editor de vídeo.',
     intro:
@@ -122,7 +122,7 @@ export const NICHES: NicheContent[] = [
     generateStyle: 'storytelling',
     metaTitle: 'Como Criar Vídeos Gospel e de Fé com IA | ClipIA',
     metaDescription:
-      'Crie vídeos de mensagens de fé, reflexões e versículos para Shorts, Reels e TikTok. Narração em português e legendas automáticas. Comece com 2 vídeos grátis.',
+      'Crie vídeos de mensagens de fé, reflexões e versículos para Shorts, Reels e TikTok. Narração em português e legendas automáticas. Comece grátis, sem cartão.',
     h1: 'Crie vídeos de fé e reflexão automaticamente',
     heroSubtitle: 'Leve mensagens que tocam o coração para milhares de pessoas, todos os dias.',
     intro:
@@ -168,7 +168,7 @@ export const NICHES: NicheContent[] = [
     generateStyle: 'educational',
     metaTitle: 'Como Criar Vídeos Motivacionais com IA | ClipIA',
     metaDescription:
-      'Crie vídeos motivacionais e de desenvolvimento pessoal para Shorts, Reels e TikTok em minutos. Narração em português e legendas automáticas. 2 vídeos grátis.',
+      'Crie vídeos motivacionais e de desenvolvimento pessoal para Shorts, Reels e TikTok em minutos. Narração em português e legendas automáticas. Comece grátis, sem cartão.',
     h1: 'Crie vídeos motivacionais automaticamente',
     heroSubtitle: 'Transforme uma ideia em uma mensagem que move pessoas a agir.',
     intro:
@@ -214,7 +214,7 @@ export const NICHES: NicheContent[] = [
     generateStyle: 'educational',
     metaTitle: 'Como Criar Vídeos de Educação Financeira com IA | ClipIA',
     metaDescription:
-      'Crie vídeos de educação financeira e dicas de dinheiro para Shorts, Reels e TikTok em minutos. Narração em português e legendas automáticas. 2 vídeos grátis.',
+      'Crie vídeos de educação financeira e dicas de dinheiro para Shorts, Reels e TikTok em minutos. Narração em português e legendas automáticas. Comece grátis, sem cartão.',
     h1: 'Crie vídeos de educação financeira automaticamente',
     heroSubtitle: 'Explique dinheiro de um jeito simples e construa uma audiência que confia em você.',
     intro:
@@ -260,7 +260,7 @@ export const NICHES: NicheContent[] = [
     generateStyle: 'storytelling',
     metaTitle: 'Como Criar Vídeos de Histórias e Mistério com IA | ClipIA',
     metaDescription:
-      'Crie vídeos de histórias, casos reais e mistérios para Shorts, Reels e TikTok. Narração envolvente em português e legendas automáticas. 2 vídeos grátis.',
+      'Crie vídeos de histórias, casos reais e mistérios para Shorts, Reels e TikTok. Narração envolvente em português e legendas automáticas. Comece grátis, sem cartão.',
     h1: 'Crie vídeos de histórias e mistério automaticamente',
     heroSubtitle: 'Narrativas que prendem do começo ao fim — o formato campeão de tempo de tela.',
     intro:
@@ -306,7 +306,7 @@ export const NICHES: NicheContent[] = [
     generateStyle: 'comedy',
     metaTitle: 'Como Criar Vídeos Engraçados com IA | ClipIA',
     metaDescription:
-      'Crie vídeos engraçados com personagem narrador para Shorts, Reels e TikTok. Humor automático, narração em português e legendas. Comece com 2 vídeos grátis.',
+      'Crie vídeos engraçados com personagem narrador para Shorts, Reels e TikTok. Humor automático, narração em português e legendas. Comece grátis, sem cartão.',
     h1: 'Crie vídeos engraçados automaticamente',
     heroSubtitle: 'Um personagem narrando fatos absurdos com aquele tom cômico que viraliza.',
     intro:
@@ -352,7 +352,7 @@ export const NICHES: NicheContent[] = [
     generateStyle: 'storytelling',
     metaTitle: 'Como Criar Vídeos de História com IA Cinematográfica | ClipIA',
     metaDescription:
-      'Crie vídeos de fatos históricos narrados como trailer cinematográfico, com imagens geradas por IA. Para Shorts, Reels e TikTok. 2 vídeos grátis.',
+      'Crie vídeos de fatos históricos narrados como trailer cinematográfico, com imagens geradas por IA. Para Shorts, Reels e TikTok. Comece grátis, sem cartão.',
     h1: 'Crie vídeos de drama histórico automaticamente',
     heroSubtitle: 'Fatos reais narrados como um trailer de cinema, com imagens geradas por IA.',
     intro:
