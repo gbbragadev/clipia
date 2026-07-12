@@ -1,6 +1,6 @@
 # 008 — Reduced-motion gentil (não nuclear) + polish dos indicadores de status
 
-- **Status**: TODO
+- **Status**: DONE (executado por GPT-5.6 Sol via cgpt em 2026-07-12; gate Opus: APROVADO sem findings; tsc verde)
 - **Commit**: 6428262
 - **Severity**: LOW-MEDIUM
 - **Category**: Accessibility (AUDIT seção 6) + Purpose & frequency (seção 1)

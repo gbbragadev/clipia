@@ -15,7 +15,7 @@ Gerados por `/improve-animations` em 2026-07-12 (auditoria completa: 4 auditores
 | [005](005-tokens-css-e-fim-do-transition-all.md) | Tokens CSS de motion + fim do `transition: all` | MEDIUM | DONE |
 | [006](006-press-feedback-ctas.md) | Press feedback nos CTAs (cobertura completa) | MEDIUM | DONE |
 | [007](007-generateform-transicoes-de-estado.md) | GenerateForm: transições nas mudanças de estado | MEDIUM | DONE |
-| [008](008-reduced-motion-gentil-e-status.md) | Reduced-motion gentil + polish dos indicadores de status | LOW-MED | TODO |
+| [008](008-reduced-motion-gentil-e-status.md) | Reduced-motion gentil + polish dos indicadores de status | LOW-MED | DONE |
 | [009](009-delight-video-pronto-e-creditos.md) | Delight: celebração "vídeo pronto" + tick de créditos | LOW | TODO |
 
 ## Ordem de execução recomendada

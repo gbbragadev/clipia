@@ -126,13 +126,23 @@ body::before {
 .bg-raised { background: var(--bg-raised); }
 .border-subtle { border-color: var(--border-subtle); }
 
-/* ── Fase 0: Respeita usuarios com motion reduzido (rede de seguranca CSS) ── */
+/* ── Fase 0: Respeita usuarios com motion reduzido ──
+   Gentil, nao nuclear: transicoes curtas de opacity/cor FICAM (ajudam compreensao,
+   nao disparam desconforto vestibular — movimento e que dispara); keyframes
+   decorativos morrem; spinners de loading sao excecao (indicacao essencial de
+   estado — parados comunicam "travou"). */
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
-    transition-duration: 0.01ms !important;
+    transition-duration: 150ms !important;
     scroll-behavior: auto !important;
+  }
+  .editor-loading__spinner,
+  .export-status__spinner,
+  .animate-spin {
+    animation-duration: 1s !important;
+    animation-iteration-count: infinite !important;
   }
   .reveal { opacity: 1 !important; transform: none !important; }
 }
