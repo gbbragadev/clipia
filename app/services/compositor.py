@@ -97,8 +97,41 @@ def _has_nvenc() -> bool:
     return _NVENC_AVAILABLE
 
 
-def _prepare_video_scene(media_path: str, duration: float, output_path: str) -> str:
+def _junction_fades(duration: float, scene_index: int, total_scenes: int) -> str:
+    """Fade-through-black nas JUNCOES entre cenas (roadmap item 12: hard cuts).
+
+    O concat demuxer nao suporta xfade; fade out/in dentro de cada clipe entrega o
+    dissolve-por-preto sem re-arquitetar o concat e SEM mudar a duracao (a sincronia
+    cena<->narracao depende dela). Sem fade-in na primeira cena nem fade-out na
+    ultima (a vinheta/outro ja fecha o video).
+    # ponytail: fadeblack por clipe; xfade real (dissolve) exigiria filter_complex
+    # encadeado no lugar do concat — upgrade path se o fadeblack nao bastar.
+    """
+    d = min(0.25, duration / 4)
+    parts = []
+    if scene_index > 0:
+        parts.append(f"fade=t=in:st=0:d={d:.2f}")
+    if total_scenes and scene_index < total_scenes - 1:
+        parts.append(f"fade=t=out:st={max(duration - d, 0):.2f}:d={d:.2f}")
+    return ("," + ",".join(parts)) if parts else ""
+
+
+def _prepare_video_scene(
+    media_path: str, duration: float, output_path: str, scene_index: int = 0, total_scenes: int = 0
+) -> str:
     """Prepare a single scene clip: resize to 1080x1920, loop if needed, set exact duration."""
+    # Drift lateral sutil (roadmap item 9: Ken Burns so existia em imagem): upscale 8%
+    # e pan horizontal ao longo da cena, alternando a direcao por cena. Fixed-size crop
+    # com x(t) e barato e nao tem o jitter do zoompan em video.
+    if scene_index % 2 == 0:
+        pan_x = f"(iw-ow)*t/{duration:.2f}"
+    else:
+        pan_x = f"(iw-ow)*(1-t/{duration:.2f})"
+    vf = (
+        "scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,setsar=1,"
+        f"scale=1166:2074,crop=1080:1920:x='{pan_x}':y='(ih-oh)/2',setsar=1"
+        f"{_junction_fades(duration, scene_index, total_scenes)}"
+    )
     cmd = [
         "ffmpeg",
         "-y",
@@ -107,7 +140,7 @@ def _prepare_video_scene(media_path: str, duration: float, output_path: str) -> 
         "-i",
         media_path,
         "-vf",
-        ("scale=1080:1920:force_original_aspect_ratio=increase," "crop=1080:1920," "setsar=1"),
+        vf,
         "-t",
         str(duration),
         "-an",  # no audio
@@ -127,7 +160,9 @@ def _prepare_video_scene(media_path: str, duration: float, output_path: str) -> 
     return output_path
 
 
-def _prepare_static_image(img_path: str, duration: float, output_clip: str, scene_index: int = 0) -> None:
+def _prepare_static_image(
+    img_path: str, duration: float, output_clip: str, scene_index: int = 0, total_scenes: int = 0
+) -> None:
     """Convert a still image into a short MP4 clip with Ken Burns (zoompan) effect."""
     fps = 25
     frames = int(round(duration * fps))
@@ -141,6 +176,7 @@ def _prepare_static_image(img_path: str, duration: float, output_clip: str, scen
         f"zoompan=z='{z_expr}':d={frames}:s=1080x1920:fps={fps},"
         f"scale=1080:1920:force_original_aspect_ratio=increase,"
         f"crop=1080:1920,setsar=1"
+        f"{_junction_fades(duration, scene_index, total_scenes)}"
     )
 
     # Sem -t de INPUT: zoompan emite d frames POR frame de entrada, entao um input
@@ -174,13 +210,15 @@ def _prepare_static_image(img_path: str, duration: float, output_clip: str, scen
     _run(cmd, "prepare static image")
 
 
-def _prepare_scene(media_path: str, duration: float, output_clip: str, scene_index: int = 0) -> None:
+def _prepare_scene(
+    media_path: str, duration: float, output_clip: str, scene_index: int = 0, total_scenes: int = 0
+) -> None:
     """Route to video or static-image preparation based on file extension."""
     ext = Path(media_path).suffix.lower()
     if ext in (".png", ".jpg", ".jpeg", ".webp"):
-        _prepare_static_image(media_path, duration, output_clip, scene_index=scene_index)
+        _prepare_static_image(media_path, duration, output_clip, scene_index=scene_index, total_scenes=total_scenes)
     else:
-        _prepare_video_scene(media_path, duration, output_clip)
+        _prepare_video_scene(media_path, duration, output_clip, scene_index=scene_index, total_scenes=total_scenes)
 
 
 def _watermark_filter() -> str:
@@ -558,7 +596,7 @@ def compose_short(
         if i >= len(media_paths):
             break
         clip_path = str(job_dir / f"clip_{i}.mp4")
-        _prepare_scene(media_paths[i], dur, clip_path, scene_index=i)
+        _prepare_scene(media_paths[i], dur, clip_path, scene_index=i, total_scenes=len(scenes))
         prepared.append(clip_path)
 
     if not prepared:

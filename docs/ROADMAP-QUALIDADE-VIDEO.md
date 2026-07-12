@@ -60,10 +60,10 @@ O ClipIA **já tem toda a maquinaria** (Remotion, FFmpeg, legenda word-level, SF
 |---|---|---|---|---|
 | 7 | ~~**Sem ducking**~~ ✅ FEITO 11/07 — `_audio_mix_filter()` compartilhado pelos 3 layouts; medido −7,2dB na música sob a voz (encode real) | `sidechaincompress=threshold=0.035:ratio=7:attack=25:release=420` | `compositor.py` (helper único) | 🔴 |
 | 8 | ~~Loudness flutuante~~ ✅ FEITO 11/07 — `loudnorm` no bus final de TODOS os caminhos (com e sem música); medido −13,6 LUFS (encode real) | `loudnorm=I=-14:TP=-1.5:LRA=11` + aresample 48k pós-loudnorm | `compositor.py` (`_LOUDNORM_AF`) | 🟡 |
-| 9 | Vídeos Pexels sem drift (Ken Burns só em imagem) | `zoompan` em `_prepare_video_scene`, campo `zoom_drift` (0.03) | `compositor.py:92-119`, `templates.py` | 🟡 |
+| 9 | ~~Vídeos Pexels sem drift~~ ✅ FEITO 11/07 — pan lateral sutil (upscale 8% + crop x(t), direção alterna por cena; zoompan tem jitter em vídeo) | `_prepare_video_scene` | `compositor.py` | 🟡 |
 | 10 | Imagens/screenshots full-cover (crop) vs card | novo `_prepare_card_scene` (gblur 42 + eq + fg centrado + drift) — ref `marketing/concept3-anatomia/compose.py:74-90` | `compositor.py:161-167` | 🟡 |
-| 11 | Legenda cobre money-shot | `suppress_windows` (pular chunks numa janela) | `subtitles.py:43-122`, `tasks.py:769-778` | 🟡 |
-| 12 | **Geração inicial = hard cuts** (sem xfade) | `tpad`+`xfade` (dissolve/fadeblack por beat) — ref `compose.py:xfade()` | `compositor.py:532-550` | 🔴 |
+| 11 | Legenda cobre money-shot | `suppress_windows` — ⏸️ ADIADO 11/07: sem money-shot marcado na geração automática não há driver; o editor já permite ajustar legendas. Retomar se surgir sinal de money-shot (item 14) | `subtitles.py`, `tasks.py` | 🟡 |
+| 12 | ~~**Geração inicial = hard cuts**~~ ✅ FEITO 11/07 — fade-through-black 0,25s nas junções (dentro da duração do clipe: sincronia com narração preservada; sem fade-in na 1ª cena nem fade-out na última). Validado com encode real (curva 126→46→31 YAVG) | `_junction_fades()` em `compositor.py` | 🔴 |
 | 13 | SFX cena-level, não beat/word | `mix_transitions(words=...)` map SFX aos word timestamps | `sfx.py:75-88`, `tasks.py:759-789` | 🟡 |
 
 ### P2 — Complexo ou impacto médio
