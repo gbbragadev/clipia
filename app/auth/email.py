@@ -134,6 +134,43 @@ def send_welcome_email(to_email: str, user_name: str, credits: int) -> bool:
         return False
 
 
+def send_video_ready_email(to_email: str, user_name: str, topic: str, job_id: str) -> bool:
+    """ "Seu video esta pronto" com deep-link para o editor do job.
+
+    Fire-and-forget como o welcome: nunca levanta excecao, so loga falha.
+    """
+    if not settings.SMTP_HOST:
+        logger.info("Video ready email skipped (SMTP not configured) for %s", to_email)
+        return True
+
+    from app.email_templates import email_video_ready
+
+    subject = "ClipIA - Seu video esta pronto!"
+    msg = MIMEMultipart("alternative")
+    msg["Subject"] = subject
+    msg["From"] = settings.SMTP_FROM
+    msg["To"] = to_email
+    msg["Reply-To"] = settings.SUPPORT_EMAIL
+    msg.attach(
+        MIMEText(
+            f"Seu video sobre '{topic}' esta pronto: https://clipia.com.br/editor/{job_id}",
+            "plain",
+        )
+    )
+    msg.attach(MIMEText(email_video_ready(user_name, topic, job_id), "html"))
+
+    try:
+        with smtplib.SMTP(settings.SMTP_HOST, settings.SMTP_PORT) as server:
+            server.starttls()
+            server.login(settings.SMTP_USER, settings.SMTP_PASSWORD)
+            server.send_message(msg)
+        logger.info("Video ready email sent to %s (job %s)", to_email, job_id)
+        return True
+    except Exception:
+        logger.exception("Failed to send video ready email to %s", to_email)
+        return False
+
+
 def send_account_deleted_email(to_email: str, user_name: str) -> bool:
     if not settings.SMTP_HOST:
         logger.warning("Account deleted email not configured, skipping SMTP send for %s", to_email)
