@@ -93,6 +93,7 @@ body::before {
   font-size: 15px;
 }
 .btn-primary:hover { opacity: 0.9; transform: translateY(-1px); }
+.btn-primary:active { transform: translateY(0) scale(0.97); }
 
 .btn-outline {
   border: 1px solid var(--border-subtle);
@@ -104,6 +105,7 @@ body::before {
   font-size: 15px;
 }
 .btn-outline:hover { border-color: var(--border-hover); color: var(--text-primary); }
+.btn-outline:active { transform: scale(0.97); }
 
 /* ── Fase 0: Typography utilities ── */
 .font-display { font-family: var(--font-display); }

@@ -527,7 +527,7 @@ export default function GenerateForm({ onJobCreated, prefillTopic, prefillTrendC
                     type="button"
                     onClick={handleGenerateDraft}
                     disabled={draftLoading || generating || topic.trim().length < 10}
-                    className="w-full py-2.5 rounded-xl border border-azure/40 bg-azure/10 text-azure text-xs font-semibold hover:bg-azure/15 transition cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                    className="w-full py-2.5 rounded-xl border border-azure/40 bg-azure/10 text-azure text-xs font-semibold hover:bg-azure/15 active:scale-[0.98] transition cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     {draftLoading ? 'Escrevendo rascunho…' : '✨ Gerar rascunho do roteiro (grátis)'}
                   </button>
@@ -682,7 +682,7 @@ export default function GenerateForm({ onJobCreated, prefillTopic, prefillTrendC
       <button
         onClick={handleGenerate}
         disabled={generating || !canSubmit}
-        className={`w-full py-3.5 rounded-xl border-none text-base font-semibold transition cursor-pointer ${
+        className={`w-full py-3.5 rounded-xl border-none text-base font-semibold enabled:active:scale-[0.98] transition cursor-pointer ${
           generating || !canSubmit
             ? 'bg-[var(--bg-surface-hover)] text-[var(--text-tertiary)] cursor-not-allowed'
             : 'bg-gradient-to-r from-coral to-azure text-white hover:opacity-90'

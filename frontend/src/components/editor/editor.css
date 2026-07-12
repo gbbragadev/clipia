@@ -47,15 +47,17 @@
 .editor-header__export {
   padding: 6px 16px; background: var(--color-coral);
   border: none; border-radius: 7px; color: white; font-weight: 600; font-size: 12px;
-  cursor: pointer; transition: opacity 0.15s;
+  cursor: pointer; transition: opacity 0.15s var(--ease-out), transform 0.16s var(--ease-out);
 }
 .editor-header__export:hover { opacity: 0.9; }
+.editor-header__export:active { transform: scale(0.97); }
 .editor-header__icon-btn {
   display: inline-flex; align-items: center; justify-content: center;
   width: 36px; height: 36px; border: 1px solid rgba(255,255,255,0.08); border-radius: 7px;
-  background: transparent; color: var(--text-secondary); cursor: pointer; transition: color 0.15s var(--ease-out), background-color 0.15s var(--ease-out), opacity 0.15s var(--ease-out);
+  background: transparent; color: var(--text-secondary); cursor: pointer; transition: color 0.15s var(--ease-out), background-color 0.15s var(--ease-out), opacity 0.15s var(--ease-out), transform 0.16s var(--ease-out);
 }
 .editor-header__icon-btn:hover:not(:disabled) { color: var(--text-primary); background: rgba(255,255,255,0.06); }
+.editor-header__icon-btn:active:not(:disabled) { transform: scale(0.95); }
 .editor-header__icon-btn:disabled { opacity: 0.35; cursor: default; }
 
 /* ── Workspace (row 2) ───────────────────── */
@@ -201,9 +203,10 @@
 .editor-timeline__transport-btn {
   background: none; border: none; color: var(--text-secondary);
   font-size: 16px; cursor: pointer; padding: 2px 6px; border-radius: 4px;
-  transition: color 0.12s var(--ease-out), background-color 0.12s var(--ease-out);
+  transition: color 0.12s var(--ease-out), background-color 0.12s var(--ease-out), transform 0.12s var(--ease-out);
 }
 .editor-timeline__transport-btn:hover { color: var(--text-primary); background: rgba(255,255,255,0.06); }
+.editor-timeline__transport-btn:active { transform: scale(0.95); }
 .editor-timeline__transport-btn--active { color: var(--color-coral); }
 .editor-timeline__time {
   font-size: 11px; color: var(--text-secondary); font-variant-numeric: tabular-nums;
@@ -260,9 +263,10 @@
   padding: 5px 10px; background: var(--bg-surface);
   border: 1px solid rgba(255,255,255,0.08); border-radius: 5px;
   color: var(--text-secondary); font-size: 11px; font-weight: 600;
-  cursor: pointer; transition: background-color 0.12s var(--ease-out), color 0.12s var(--ease-out), border-color 0.12s var(--ease-out);
+  cursor: pointer; transition: background-color 0.12s var(--ease-out), color 0.12s var(--ease-out), border-color 0.12s var(--ease-out), transform 0.16s var(--ease-out);
 }
 .editor-btn-sm:hover { background: var(--border-default); color: var(--text-primary); }
+.editor-btn-sm:active { transform: scale(0.97); }
 
 .editor-placeholder {
   display: flex; flex-direction: column; align-items: center; justify-content: center;
@@ -309,6 +313,7 @@
   margin-left: auto; flex-shrink: 0; border: none; border-radius: 6px;
   background: var(--color-coral); color: #fff; padding: 4px 10px;
   font-size: 12px; cursor: pointer;
+  transition: transform 0.16s var(--ease-out);
 }
 
 .export-progress {
@@ -330,6 +335,7 @@
   transition: opacity 0.15s var(--ease-out), transform 0.15s var(--ease-out);
 }
 .export-download:hover:not(:disabled) { opacity: 0.92; transform: translateY(-1px); }
+.export-download:active:not(:disabled) { transform: scale(0.97); }
 .export-download:disabled { background: rgba(255,255,255,0.08); color: rgba(255,255,255,0.35); cursor: not-allowed; }
 .export-download--previous { background: rgba(255,255,255,0.08); color: rgba(255,255,255,0.75); border: 1px solid rgba(255,255,255,0.12); }
 .export-download--previous:hover:not(:disabled) { background: rgba(255,255,255,0.12); opacity: 1; }
@@ -343,7 +349,9 @@
 .export-stale__btn {
   border: none; border-radius: 6px; padding: 6px 12px; font-size: 12px;
   cursor: pointer; background: var(--color-coral); color: #fff;
+  transition: transform 0.16s var(--ease-out);
 }
+.export-status__retry:active, .export-stale__btn:active { transform: scale(0.97); }
 .export-stale__btn--ghost { background: rgba(255,255,255,0.08); color: var(--text-secondary); border: 1px solid rgba(255,255,255,0.15); }
 
 .export-caption {

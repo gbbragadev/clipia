@@ -62,14 +62,14 @@ export default function Navbar() {
                 {/* Dashboard button */}
                 <a
                   href="/dashboard"
-                  className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-gradient-to-r from-coral to-azure text-white text-sm font-medium hover:opacity-90 transition"
+                  className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-gradient-to-r from-coral to-azure text-white text-sm font-medium hover:opacity-90 active:scale-[0.97] transition"
                 >
                   <LayoutDashboard className="w-4 h-4" />
                   Dashboard
                 </a>
               </div>
             ) : (
-              <a href="/auth/login" className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-gradient-to-r from-coral to-azure text-white hover:opacity-90 transition">
+              <a href="/auth/login" className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-gradient-to-r from-coral to-azure text-white hover:opacity-90 active:scale-[0.97] transition">
                 <LogIn className="w-4 h-4" />
                 {strings.auth.login.submit}
               </a>
@@ -116,12 +116,12 @@ export default function Navbar() {
                     <span className="text-coral font-semibold text-sm">{user.credits}</span>
                     <span className="text-sm text-3">créditos</span>
                   </div>
-                  <a href="/dashboard" onClick={() => setOpen(false)} className="w-full text-center px-4 py-3 rounded-lg bg-gradient-to-r from-coral to-azure text-white font-medium">
+                  <a href="/dashboard" onClick={() => setOpen(false)} className="w-full text-center px-4 py-3 rounded-lg bg-gradient-to-r from-coral to-azure text-white font-medium active:scale-[0.97] transition">
                     Dashboard
                   </a>
                 </>
               ) : (
-                <a href="/auth/login" onClick={() => setOpen(false)} className="w-full text-center px-4 py-3 rounded-lg bg-gradient-to-r from-coral to-azure text-white font-medium">
+                <a href="/auth/login" onClick={() => setOpen(false)} className="w-full text-center px-4 py-3 rounded-lg bg-gradient-to-r from-coral to-azure text-white font-medium active:scale-[0.97] transition">
                   {strings.auth.login.submit}
                 </a>
               )}
