@@ -332,8 +332,13 @@ async def purchase_factory(test_db, verified_user):
         provider: str = "mercadopago",
         mp_preference_id: str = "pref_123",
         mp_payment_id: str | None = None,
+        bonus_credits: int | None = None,
     ) -> CreditPurchase:
         pkg = CREDIT_PACKAGES[package_name]
+        if provider == "stripe" and mp_preference_id == "pref_123":
+            mp_preference_id = "cs_test_1"
+        if bonus_credits is None:
+            bonus_credits = pkg["credits"] * settings.PURCHASE_BONUS_PERCENT // 100
         async with test_db["session_factory"]() as session:
             purchase = CreditPurchase(
                 user_id=user_id or verified_user.id,
@@ -343,6 +348,7 @@ async def purchase_factory(test_db, verified_user):
                 provider=provider,
                 mp_preference_id=mp_preference_id,
                 mp_payment_id=mp_payment_id,
+                bonus_credits=bonus_credits,
                 status=status,
             )
             session.add(purchase)

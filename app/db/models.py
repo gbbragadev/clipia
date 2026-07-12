@@ -35,6 +35,20 @@ class CreditPurchase(Base):
     user: Mapped["User"] = relationship(back_populates="purchases")
 
 
+class ProcessedPaymentEvent(Base):
+    """Minimal idempotency claim for an authoritative provider event."""
+
+    __tablename__ = "processed_payment_events"
+
+    provider: Mapped[str] = mapped_column(String(20), primary_key=True)
+    event_key: Mapped[str] = mapped_column(String(255), primary_key=True)
+    purchase_id: Mapped[uuid.UUID] = mapped_column(
+        GUID(), ForeignKey("credit_purchases.id"), nullable=False, index=True
+    )
+    event_type: Mapped[str] = mapped_column(String(100), nullable=False)
+    processed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
 class CreditAdjustment(Base):
     """Auditoria de ajuste manual de creditos pelo admin (e dinheiro: quem, quanto, por que)."""
 

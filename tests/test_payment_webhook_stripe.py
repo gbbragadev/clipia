@@ -50,17 +50,46 @@ def _patch_retrieve(monkeypatch, session_obj):
     monkeypatch.setattr(stripe.checkout.Session, "retrieve", staticmethod(lambda _id: session_obj))
 
 
+def _authoritative_session(purchase, *, payment_status="paid", payment_intent="pi_test_1"):
+    return {
+        "id": purchase.mp_preference_id,
+        "payment_status": payment_status,
+        "client_reference_id": str(purchase.id),
+        "metadata": {"purchase_id": str(purchase.id)},
+        "amount_total": purchase.price_brl,
+        "currency": "brl",
+        "payment_intent": payment_intent,
+    }
+
+
+def _patch_full_refund(monkeypatch, purchase, payment_intent="pi_test_1"):
+    monkeypatch.setattr(
+        stripe.Charge,
+        "retrieve",
+        staticmethod(
+            lambda _id: {
+                "id": "ch_1",
+                "payment_intent": payment_intent,
+                "amount": purchase.price_brl,
+                "amount_refunded": purchase.price_brl,
+                "currency": "brl",
+                "refunded": True,
+            }
+        ),
+    )
+    monkeypatch.setattr(
+        stripe.PaymentIntent,
+        "retrieve",
+        staticmethod(lambda _id: {"id": payment_intent, "metadata": {"purchase_id": str(purchase.id)}}),
+    )
+
+
 @pytest.mark.asyncio
 async def test_stripe_webhook_credits_on_paid_via_api(client, db_session, purchase_factory, verified_user, monkeypatch):
     purchase = await purchase_factory(package_name="popular", provider="stripe")
     _patch_retrieve(
         monkeypatch,
-        {
-            "id": "cs_test_1",
-            "payment_status": "paid",
-            "client_reference_id": str(purchase.id),
-            "payment_intent": "pi_test_1",
-        },
+        _authoritative_session(purchase),
     )
 
     response = await client.post(
@@ -81,12 +110,7 @@ async def test_stripe_webhook_is_idempotent(client, db_session, purchase_factory
     purchase = await purchase_factory(package_name="popular", provider="stripe")
     _patch_retrieve(
         monkeypatch,
-        {
-            "id": "cs_test_1",
-            "payment_status": "paid",
-            "client_reference_id": str(purchase.id),
-            "payment_intent": "pi_test_1",
-        },
+        _authoritative_session(purchase),
     )
     body = {"type": "checkout.session.completed", "data": {"object": {"id": "cs_test_1"}}}
 
@@ -105,12 +129,7 @@ async def test_stripe_pix_pending_does_not_credit(client, db_session, purchase_f
     credits_before = (await db_session.get(User, verified_user.id)).credits
     _patch_retrieve(
         monkeypatch,
-        {
-            "id": "cs_test_1",
-            "payment_status": "unpaid",  # Pix ainda nao confirmado
-            "client_reference_id": str(purchase.id),
-            "payment_intent": "pi_test_1",
-        },
+        _authoritative_session(purchase, payment_status="unpaid"),
     )
 
     response = await client.post(
@@ -135,6 +154,9 @@ async def test_stripe_webhook_with_valid_signature_credits(
                 "id": "cs_test_1",
                 "payment_status": "paid",
                 "client_reference_id": str(purchase.id),
+                "metadata": {"purchase_id": str(purchase.id)},
+                "amount_total": purchase.price_brl,
+                "currency": "brl",
                 "payment_intent": "pi_test_1",
             }
         },
@@ -180,9 +202,7 @@ async def test_stripe_refund_reverts_credits(client, db_session, purchase_factor
     credits_with_purchase = user.credits
 
     monkeypatch.setattr("app.payments.routes.settings.STRIPE_WEBHOOK_SECRET", "")
-    monkeypatch.setattr(
-        stripe.Charge, "retrieve", staticmethod(lambda _id: {"id": "ch_1", "payment_intent": "pi_test_1"})
-    )
+    _patch_full_refund(monkeypatch, purchase)
 
     response = await client.post(
         "/api/v1/webhooks/stripe",
@@ -216,12 +236,15 @@ async def test_stripe_webhook_credits_when_sdk_returns_object_not_dict(
 ):
     """Regressão: SDK stripe>=15 retorna objeto (não dict); dict(session) quebrava e nada creditava.
     Só o pagamento real pegou (dict nos mocks mascarava). Handler deve normalizar via to_dict."""
-    purchase = await purchase_factory(package_name="starter", provider="stripe")
+    purchase = await purchase_factory(package_name="starter", provider="stripe", mp_preference_id="cs_test_obj")
     obj = _FakeStripeObj(
         {
             "id": "cs_test_obj",
             "payment_status": "paid",
             "client_reference_id": str(purchase.id),
+            "metadata": {"purchase_id": str(purchase.id)},
+            "amount_total": purchase.price_brl,
+            "currency": "brl",
             "payment_intent": "pi_test_obj",
         }
     )

@@ -125,7 +125,16 @@ async def test_webhook_replay_only_credits_purchase_once(
         class payment:
             @staticmethod
             def get(_payment_id):
-                return {"response": {"status": "approved", "external_reference": str(purchase.id)}}
+                return {
+                    "response": {
+                        "id": "999",
+                        "status": "approved",
+                        "external_reference": str(purchase.id),
+                        "transaction_amount": purchase.price_brl / 100,
+                        "currency_id": "BRL",
+                        "preference_id": purchase.mp_preference_id,
+                    }
+                }
 
     monkeypatch.setattr("app.payments.service._get_sdk", lambda: _Sdk())
 

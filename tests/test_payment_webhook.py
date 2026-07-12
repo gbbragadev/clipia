@@ -8,6 +8,17 @@ from sqlalchemy import select
 from app.db.models import CreditPurchase, User
 
 
+def _authoritative_payment(purchase, status: str, payment_id: str = "123"):
+    return {
+        "id": payment_id,
+        "status": status,
+        "external_reference": str(purchase.id),
+        "transaction_amount": purchase.price_brl / 100,
+        "currency_id": "BRL",
+        "preference_id": purchase.mp_preference_id,
+    }
+
+
 @pytest.mark.asyncio
 async def test_checkout_creates_pending_purchase(client, db_session, verified_user, auth_headers, monkeypatch):
     class _Sdk:
@@ -97,7 +108,7 @@ async def test_webhook_with_valid_signature_credits_purchase(
         class payment:
             @staticmethod
             def get(_payment_id):
-                return {"response": {"status": "approved", "external_reference": str(purchase.id)}}
+                return {"response": _authoritative_payment(purchase, "approved")}
 
     monkeypatch.setattr("app.payments.service._get_sdk", lambda: _Sdk())
 
@@ -147,7 +158,7 @@ async def test_webhook_reverts_credits_on_refund(client, db_session, purchase_fa
         class payment:
             @staticmethod
             def get(_payment_id):
-                return {"response": {"status": mp_status["value"], "external_reference": str(purchase.id)}}
+                return {"response": _authoritative_payment(purchase, mp_status["value"])}
 
     monkeypatch.setattr("app.payments.service._get_sdk", lambda: _Sdk())
 
@@ -192,7 +203,7 @@ async def test_webhook_refund_of_unapproved_purchase_is_noop(
         class payment:
             @staticmethod
             def get(_payment_id):
-                return {"response": {"status": "refunded", "external_reference": str(purchase.id)}}
+                return {"response": _authoritative_payment(purchase, "refunded")}
 
     monkeypatch.setattr("app.payments.service._get_sdk", lambda: _Sdk())
 
@@ -222,7 +233,7 @@ async def test_webhook_approved_replay_is_idempotent(client, db_session, purchas
         class payment:
             @staticmethod
             def get(_payment_id):
-                return {"response": {"status": "approved", "external_reference": str(purchase.id)}}
+                return {"response": _authoritative_payment(purchase, "approved")}
 
     monkeypatch.setattr("app.payments.service._get_sdk", lambda: _Sdk())
 
