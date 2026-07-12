@@ -166,8 +166,8 @@ export default function VideoPlayerModal({ job, onClose, onEdit }: VideoPlayerMo
               </p>
               <div className="h-1 w-40 overflow-hidden rounded-full bg-white/10">
                 <div
-                  className="h-full rounded-full bg-gradient-to-r from-coral to-azure transition-all duration-300"
-                  style={{ width: `${Math.max(4, loadProgress * 100)}%` }}
+                  className="h-full w-full origin-left rounded-full bg-gradient-to-r from-coral to-azure transition-transform duration-300"
+                  style={{ transform: `scaleX(${Math.max(0.04, loadProgress)})` }}
                 />
               </div>
             </div>

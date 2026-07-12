@@ -256,7 +256,7 @@ export function ExportPanel({ onClose }: { onClose: () => void }) {
             <div className="export-status__body">
               <div>{renderDetail || 'Aplicando suas edições… (~2 min)'}</div>
               <div className="export-progress">
-                <div className="export-progress__fill" style={{ width: `${Math.max(6, renderProgress * 100)}%` }} />
+                <div className="export-progress__fill" style={{ transform: `scaleX(${Math.max(0.06, renderProgress)})` }} />
               </div>
             </div>
           </div>

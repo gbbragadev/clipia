@@ -245,8 +245,8 @@ export default function VideoCard({ job, onEdit, onCancel }: VideoCardProps) {
               </div>
               <div className="h-1 rounded-full overflow-hidden bg-white/10">
                 <div
-                  className="h-full rounded-full bg-gradient-to-r from-coral to-azure transition-all duration-500 ease-out"
-                  style={{ width: `${Math.max(4, (job.progress ?? 0) * 100)}%` }}
+                  className="h-full w-full origin-left rounded-full bg-gradient-to-r from-coral to-azure transition-transform duration-500 ease-out"
+                  style={{ transform: `scaleX(${Math.max(0.04, job.progress ?? 0)})` }}
                 />
               </div>
             </div>

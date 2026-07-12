@@ -316,9 +316,10 @@
   border-radius: 999px; overflow: hidden; background: rgba(255,255,255,0.08);
 }
 .export-progress__fill {
-  height: 100%; border-radius: 999px;
+  height: 100%; width: 100%; border-radius: 999px;
   background: linear-gradient(90deg, var(--color-coral), var(--color-azure, #3e9bff));
-  transition: width 0.5s ease-out;
+  transform-origin: left;
+  transition: transform 0.5s var(--ease-out, ease-out);
 }
 
 .export-download {

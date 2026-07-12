@@ -115,8 +115,8 @@ export function PhonePreview({
         {typeof progress === "number" && (
           <div className="absolute inset-x-0 top-0 z-10 h-[3px] bg-white/10">
             <div
-              className="h-full bg-coral transition-[width] duration-150 ease-linear"
-              style={{ width: `${Math.min(100, Math.max(0, progress * 100))}%` }}
+              className="h-full w-full origin-left bg-coral transition-transform duration-150 ease-linear"
+              style={{ transform: `scaleX(${Math.min(1, Math.max(0, progress))})` }}
             />
           </div>
         )}

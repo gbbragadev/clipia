@@ -11,7 +11,7 @@ Gerados por `/improve-animations` em 2026-07-12 (auditoria completa: 4 auditores
 | [001](001-modais-fisica-entrada-saida.md) | Modais com física de entrada/saída (Modal, ExportPanel, VideoPlayerModal) | HIGH | TODO |
 | [002](002-toasts-entrada-saida-restack.md) | Toasts com entrada, saída e restack suave | HIGH | TODO |
 | [003](003-playhead-transform-nao-layout.md) | Playhead das timelines: transform, não `left` | HIGH | DONE |
-| [004](004-progress-bars-scalex.md) | Barras de progresso: `scaleX` em vez de `width` | MEDIUM | TODO |
+| [004](004-progress-bars-scalex.md) | Barras de progresso: `scaleX` em vez de `width` | MEDIUM | DONE |
 | [005](005-tokens-css-e-fim-do-transition-all.md) | Tokens CSS de motion + fim do `transition: all` | MEDIUM | DONE |
 | [006](006-press-feedback-ctas.md) | Press feedback nos CTAs (cobertura completa) | MEDIUM | TODO |
 | [007](007-generateform-transicoes-de-estado.md) | GenerateForm: transições nas mudanças de estado | MEDIUM | TODO |
