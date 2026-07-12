@@ -5,11 +5,12 @@ import { getAllNicheSlugs } from "@/lib/niches";
 export default function sitemap(): MetadataRoute.Sitemap {
   const base = "https://clipia.com.br";
 
+  // Auth fica fora do sitemap (páginas utilitárias, noindex no layout); o hub
+  // /blog entra — os posts sem o hub ficavam órfãos de descoberta.
   const staticPages: MetadataRoute.Sitemap = [
     { url: base, changeFrequency: "daily", priority: 1 },
     { url: `${base}/exemplos`, changeFrequency: "weekly", priority: 0.6 },
-    { url: `${base}/auth/login`, changeFrequency: "monthly", priority: 0.3 },
-    { url: `${base}/auth/register`, changeFrequency: "monthly", priority: 0.5 },
+    { url: `${base}/blog`, changeFrequency: "weekly", priority: 0.6 },
   ];
 
   const nichePages: MetadataRoute.Sitemap = getAllNicheSlugs().map((slug) => ({

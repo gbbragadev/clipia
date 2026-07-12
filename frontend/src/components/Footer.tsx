@@ -22,6 +22,7 @@ export default function Footer() {
             <h4 className="text-white font-semibold mb-4 uppercase tracking-wider text-xs">Produto</h4>
             <ul className="space-y-3">
               <li><Link href="/exemplos" className="hover:text-coral transition">Exemplos</Link></li>
+              <li><Link href="/blog" className="hover:text-coral transition">Blog</Link></li>
               <li><Link href="/#demo" className="hover:text-coral transition">Como Funciona</Link></li>
               {process.env.NEXT_PUBLIC_PUBLIC_SIGNUP === "true" && (
                 <li><Link href="/auth/register" className="hover:text-coral transition">Criar Conta</Link></li>

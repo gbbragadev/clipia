@@ -19,12 +19,20 @@ export async function generateMetadata({
   return {
     title: `${post.title} — ClipIA`,
     description: post.description,
+    alternates: { canonical: `https://clipia.com.br/blog/${post.slug}` },
     openGraph: {
       title: post.title,
       description: post.description,
       url: `https://clipia.com.br/blog/${post.slug}`,
       type: "article",
       publishedTime: post.date,
+      images: [{ url: "/og-image.png", width: 1200, height: 630 }],
+    },
+    twitter: {
+      card: "summary_large_image",
+      title: post.title,
+      description: post.description,
+      images: ["/og-image.png"],
     },
   };
 }
@@ -40,6 +48,22 @@ export default async function BlogPostPage({
 
   return (
     <div className="min-h-screen bg-[#0b0d15]">
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{
+          __html: JSON.stringify({
+            "@context": "https://schema.org",
+            "@type": "BlogPosting",
+            headline: post.title,
+            description: post.description,
+            datePublished: post.date,
+            inLanguage: "pt-BR",
+            mainEntityOfPage: `https://clipia.com.br/blog/${post.slug}`,
+            author: { "@type": "Organization", name: "ClipIA", url: "https://clipia.com.br" },
+            publisher: { "@type": "Organization", name: "ClipIA", url: "https://clipia.com.br" },
+          }),
+        }}
+      />
       <article className="max-w-3xl mx-auto px-4 py-16">
         <Link
           href="/blog"
@@ -133,7 +157,7 @@ export default async function BlogPostPage({
               Pronto para criar seu primeiro vídeo?
             </h2>
             <p className="text-slate-400 mb-6">
-              2 créditos grátis. Sem cartão de crédito.
+              Créditos grátis de boas-vindas. Sem cartão de crédito.
             </p>
             <Link
               href="/auth/register"

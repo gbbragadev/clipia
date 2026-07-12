@@ -21,21 +21,21 @@ Ferramentas de IA para criação de vídeos automatizam todo o processo: do rote
 
 O ClipIA transforma qualquer tema em vídeo pronto para publicar em 3 passos simples:
 
-1. **Digite seu tema** — Pode ser qualquer assunto: curiosidades, finanças, receitas, história, tecnologia
-2. **Escolha o estilo** — Selecione entre 12 estilos visuais e 3 vozes de narração em português
-3. **Pronto!** — Em menos de 2 minutos, seu vídeo está completo com roteiro, narração, legendas animadas e mídia de fundo
+1. **Digite seu tema** — Pode ser qualquer assunto: [curiosidades](https://clipia.com.br/criar/curiosidades), [finanças](https://clipia.com.br/criar/financas), receitas, história, tecnologia
+2. **Escolha o estilo** — Selecione o template, o estilo visual e a voz de narração em português
+3. **Pronto!** — Em poucos minutos, seu vídeo está completo com roteiro, narração, legendas animadas e mídia de fundo
 
 ## O que está incluído no vídeo gerado
 
-- **Roteiro inteligente**: gerado por IA (Claude), otimizado para engajamento em formato curto
-- **Narração em português**: 3 vozes naturais (Antonio, Francisca, Thalita) via Edge TTS
+- **Roteiro inteligente**: gerado por IA, otimizado para engajamento em formato curto
+- **Narração em português**: vozes pt-BR naturais, com opções premium e diálogo a duas vozes
 - **Legendas sincronizadas**: word-level timestamps com Whisper para máxima precisão
 - **Mídia de fundo**: vídeos stock selecionados automaticamente do Pexels
 - **Editor interativo**: ajuste cenas, legendas e elementos antes de publicar
 
 ## Quanto custa?
 
-O ClipIA oferece **2 créditos grátis** ao criar sua conta. Cada crédito gera um vídeo completo. Depois, você pode comprar pacotes de créditos a partir de R$9,90.
+O ClipIA oferece **créditos grátis de boas-vindas** ao criar sua conta. Cada crédito gera um vídeo completo. Depois, você pode comprar pacotes de créditos a partir de R$19,90 — sem assinatura.
 
 ## Para quem é ideal?
 
@@ -73,11 +73,11 @@ Ao escolher uma ferramenta de IA para criar vídeos curtos, considere:
 
 O ClipIA foi desenvolvido especificamente para o mercado brasileiro:
 
-- **3 vozes em pt-BR** que soam naturais, não como robôs
+- **Vozes em pt-BR** que soam naturais, não como robôs — incluindo diálogo a duas vozes
 - **Roteiros otimizados** para o formato de vídeo curto (30s a 90s)
-- **Whisper Large V3** para legendas com precisão de palavra
-- **Editor com preview em tempo real** — ajuste antes de publicar
-- **GPU dedicada (RTX 3090)** — vídeos prontos em menos de 2 minutos
+- **Legendas com precisão de palavra** (word-level timestamps)
+- **Editor com preview em tempo real** — o que você vê é o que exporta
+- **Compra única em reais** — créditos sem assinatura mensal
 
 ## Formatos suportados
 
@@ -90,7 +90,7 @@ Os vídeos são gerados no formato 9:16 (vertical), perfeitos para:
 
 ## Experimente gratuitamente
 
-Teste o ClipIA com 2 créditos grátis em [clipia.com.br](https://clipia.com.br).
+Teste o ClipIA com créditos grátis de boas-vindas em [clipia.com.br](https://clipia.com.br). Se o seu conteúdo é de um nicho específico, veja os guias de [vídeos de finanças](https://clipia.com.br/criar/financas) e [vídeos de curiosidades](https://clipia.com.br/criar/curiosidades).
 `,
   },
   {
@@ -116,7 +116,7 @@ Com o ClipIA, o processo inteiro leva menos de 2 minutos:
 1. Acesse [clipia.com.br](https://clipia.com.br) e faça login
 2. No dashboard, digite o tema do seu Reel (ex: "5 dicas de produtividade para empreendedores")
 3. Escolha o estilo visual e a voz de narração
-4. Clique em "Gerar" e aguarde ~90 segundos
+4. Clique em "Gerar" e acompanhe o progresso — o vídeo fica pronto em poucos minutos
 5. Baixe o vídeo pronto ou edite no editor integrado
 
 ## Recursos que fazem a diferença
@@ -135,11 +135,11 @@ Não gostou de uma cena? Troque a mídia de fundo. Quer mudar a cor da legenda? 
 
 ## Dica extra: produção em escala
 
-Com o plano gratuito (2 créditos), você testa a qualidade. Para produção em escala, pacotes de créditos permitem gerar dezenas de Reels por semana — ideal para agências e social media managers.
+Com os créditos grátis de boas-vindas, você testa a qualidade. Para produção em escala, pacotes de créditos permitem gerar dezenas de Reels por semana — ideal para agências e social media managers.
 
 ## Comece agora
 
-Crie seu primeiro Reel automático em [clipia.com.br](https://clipia.com.br).
+Crie seu primeiro Reel automático em [clipia.com.br](https://clipia.com.br) — e se o seu perfil é de [conteúdo motivacional](https://clipia.com.br/criar/motivacional) ou [curiosidades](https://clipia.com.br/criar/curiosidades), os guias por nicho mostram exemplos reais.
 `,
   },
 ];

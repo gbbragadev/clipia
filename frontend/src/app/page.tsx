@@ -18,6 +18,21 @@ import { Footer } from "@/components/landing/sections/Footer";
 export default function Home() {
   return (
     <div id="top" className="min-h-screen bg-ink text-cloud antialiased">
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{
+          __html: JSON.stringify({
+            "@context": "https://schema.org",
+            "@type": "SoftwareApplication",
+            name: "ClipIA",
+            applicationCategory: "MultimediaApplication",
+            operatingSystem: "Web",
+            offers: { "@type": "Offer", price: "0", priceCurrency: "BRL" },
+            description: "Plataforma de geração automatizada de vídeos curtos com IA",
+            url: "https://clipia.com.br",
+          }),
+        }}
+      />
       <SkipLink />
       <Nav />
       <main id="conteudo">

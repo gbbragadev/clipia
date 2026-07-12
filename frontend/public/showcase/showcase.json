@@ -47,7 +47,8 @@
       "captionStyle": "tiktok",
       "captionAccent": "#f87171",
       "gradient": "from-red-900/60 to-rose-950/60",
-      "icon": "🎭"
+      "icon": "🎭",
+      "poster": "/showcase/posters/o-fato-historico-que-quase-ninguem-conhece.jpg"
     },
     {
       "id": "3-formas-de-economizar-sem-perceber",
@@ -59,7 +60,8 @@
       "captionStyle": "tiktok",
       "captionAccent": "#34d399",
       "gradient": "from-emerald-900/60 to-green-900/50",
-      "icon": "💰"
+      "icon": "💰",
+      "poster": "/showcase/posters/3-formas-de-economizar-sem-perceber.jpg"
     },
     {
       "id": "a-disciplina-vence-a-motivacao",
@@ -71,7 +73,8 @@
       "captionStyle": "tiktok",
       "captionAccent": "#fb923c",
       "gradient": "from-orange-900/60 to-red-900/50",
-      "icon": "🔥"
+      "icon": "🔥",
+      "poster": "/showcase/posters/a-disciplina-vence-a-motivacao.jpg"
     },
     {
       "id": "mensagem-de-fe-para-o-seu-dia",
@@ -83,7 +86,8 @@
       "captionStyle": "tiktok",
       "captionAccent": "#fbbf24",
       "gradient": "from-amber-900/60 to-yellow-900/50",
-      "icon": "🙏"
+      "icon": "🙏",
+      "poster": "/showcase/posters/mensagem-de-fe-para-o-seu-dia.jpg"
     },
     {
       "id": "segredos-do-oceano-profundo",
@@ -95,7 +99,8 @@
       "captionStyle": "tiktok",
       "captionAccent": "#22d3ee",
       "gradient": "from-blue-900/60 to-cyan-900/60",
-      "icon": "🧠"
+      "icon": "🧠",
+      "poster": "/showcase/posters/segredos-do-oceano-profundo.jpg"
     },
     {
       "id": "ocean",
@@ -109,7 +114,8 @@
       "gradient": "from-blue-900/60 to-cyan-900/60",
       "icon": "🌊",
       "hero": true,
-      "beforeScript": "Você sabia que conhecemos menos de 5% dos oceanos?"
+      "beforeScript": "Você sabia que conhecemos menos de 5% dos oceanos?",
+      "poster": "/showcase/posters/ocean.jpg"
     },
     {
       "id": "ia",
@@ -123,7 +129,8 @@
       "gradient": "from-purple-900/60 to-indigo-900/60",
       "icon": "🤖",
       "hero": true,
-      "beforeScript": "A IA não vai te substituir. Mas quem usa IA, vai."
+      "beforeScript": "A IA não vai te substituir. Mas quem usa IA, vai.",
+      "poster": "/showcase/posters/ia.jpg"
     },
     {
       "id": "cerebro",
@@ -137,7 +144,8 @@
       "gradient": "from-amber-900/60 to-orange-900/60",
       "icon": "🧠",
       "hero": true,
-      "beforeScript": "Seu cérebro mente para você o dia inteiro."
+      "beforeScript": "Seu cérebro mente para você o dia inteiro.",
+      "poster": "/showcase/posters/cerebro.jpg"
     }
   ]
 }
