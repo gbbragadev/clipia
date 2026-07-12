@@ -55,16 +55,19 @@ export function SceneTimeline() {
 
       {/* Playhead indicator */}
       <div style={{
-        position: 'absolute', top: 0, bottom: 0,
-        left: `${playheadPercent}%`,
-        width: 2,
-        background: 'white',
-        boxShadow: '0 0 6px rgba(255,255,255,0.5)',
-        borderRadius: 1,
+        position: 'absolute', inset: 0,
         pointerEvents: 'none',
-        transition: 'left 0.05s linear',
+        transform: `translateX(${playheadPercent}%)`,
+        transition: 'transform 0.05s linear',
         opacity: playheadPercent > 0 ? 0.8 : 0,
-      }} />
+      }}>
+        <div style={{
+          position: 'absolute', top: 0, bottom: 0, left: -1, width: 2,
+          background: 'white',
+          boxShadow: '0 0 6px rgba(255,255,255,0.5)',
+          borderRadius: 1,
+        }} />
+      </div>
     </div>
   )
 }
