@@ -236,7 +236,11 @@ export async function fetchTemplates(): Promise<VideoTemplateInfo[]> {
   return res.json()
 }
 
-export async function generateVideo(params: GenerateParams): Promise<{ job_id: string; status: string }> {
+export async function generateVideo(
+  params: GenerateParams,
+): Promise<{ job_id: string; status: string; credit_cost: number }> {
+  // credit_cost é o débito REAL do servidor (base + refinos liquidados) — confirmação
+  // do custo prometido na UI. Backend responde 202 (aceito p/ fila; fetchJSON usa res.ok).
   return fetchJSON(`${API_BASE}/generate`, {
     method: 'POST',
     headers: getAuthHeaders(),

@@ -94,7 +94,11 @@ export default function GenerateForm({ onJobCreated, prefillTopic, prefillTrendC
     .filter((t) => t.length >= 10)
     .slice(0, MAX_BATCH)
   const runCount = batchMode ? batchList.length : variations
-  const totalCost = runCount * creditCost
+  // Refinos acumulados: o servidor soma floor(pendente) ao débito do PRIMEIRO /generate
+  // (e o lote é uma sequência de POSTs) — sem somar aqui, a tela prometia só o custo-base
+  // e o clique podia acabar em 402 (quebra do guardrail "custo antes da ação").
+  const refineDue = Math.floor(refinePending)
+  const totalCost = runCount * creditCost + refineDue
   const canSubmit = batchMode ? batchList.length > 0 : topic.trim().length >= 10
 
   const lastRequestRef = useRef<GenerateParams | null>(null)
@@ -247,6 +251,8 @@ export default function GenerateForm({ onJobCreated, prefillTopic, prefillTrendC
       }
       setVariations(1)
       discardDraft() // rascunho consumido (ou irrelevante p/ lote)
+      // O servidor liquidou a parte inteira dos refinos no 1º POST; só o resto carrega.
+      setRefinePending((p) => Math.round((p % 1) * 100) / 100)
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Erro ao iniciar geração'
       // Honestidade em falha parcial: diz quantos ENTRARAM antes do erro.
@@ -261,7 +267,7 @@ export default function GenerateForm({ onJobCreated, prefillTopic, prefillTrendC
     if (generating || !canSubmit) return
     const topics = batchMode ? batchList : Array<string>(variations).fill(topic.trim())
 
-    if (user && user.credits < topics.length * creditCost) {
+    if (user && user.credits < topics.length * creditCost + refineDue) {
       setShowCreditsModal(true)
       info('Sem créditos suficientes', 'Adicione créditos para iniciar as gerações.')
       return
@@ -698,12 +704,14 @@ export default function GenerateForm({ onJobCreated, prefillTopic, prefillTrendC
         </p>
       )}
 
-      {/* Credits info — custo antes da ação */}
+      {/* Credits info — custo antes da ação (inclui refinos pendentes já liquidáveis) */}
       {user && !generating && canSubmit && (
         <p className="text-center text-[11px] text-[var(--text-tertiary)] mt-2">
           {runCount > 1
-            ? `${totalCost} créditos (${runCount} × ${creditCost}) serão usados · ${user.credits} disponíveis`
-            : `${creditCost} crédito${creditCost > 1 ? 's' : ''} será${creditCost > 1 ? 'ão' : ''} usado${creditCost > 1 ? 's' : ''} · ${user.credits} disponíve${user.credits === 1 ? 'l' : 'is'}`}
+            ? `${totalCost} créditos (${runCount} × ${creditCost}${refineDue > 0 ? ` + ${refineDue} de refino` : ''}) serão usados · ${user.credits} disponíveis`
+            : totalCost > 1
+              ? `${totalCost} créditos${refineDue > 0 ? ` (${creditCost} + ${refineDue} de refino)` : ''} serão usados · ${user.credits} disponíve${user.credits === 1 ? 'l' : 'is'}`
+              : `1 crédito será usado · ${user.credits} disponíve${user.credits === 1 ? 'l' : 'is'}`}
         </p>
       )}
 
@@ -724,7 +732,8 @@ export default function GenerateForm({ onJobCreated, prefillTopic, prefillTrendC
           </ul>
         )}
         <p className="mb-5 rounded-xl border border-coral/25 bg-coral/10 px-3.5 py-2.5 text-sm text-coral">
-          Custo total: <strong>{(confirmTopics?.length ?? 0) * creditCost} créditos</strong> ({confirmTopics?.length} × {creditCost})
+          Custo total: <strong>{(confirmTopics?.length ?? 0) * creditCost + refineDue} créditos</strong> ({confirmTopics?.length} × {creditCost}
+          {refineDue > 0 ? ` + ${refineDue} de refino` : ''})
           {user ? <span className="text-coral/80"> · você tem {user.credits}</span> : null}
         </p>
         <div className="flex gap-2">
