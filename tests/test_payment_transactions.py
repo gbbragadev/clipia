@@ -4,6 +4,7 @@ from types import SimpleNamespace
 import pytest
 import stripe
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 
 from app.db import models
 from app.db.models import CreditPurchase, User
@@ -234,6 +235,58 @@ async def test_mp_replay_and_later_refund_each_apply_once(db_session, purchase_f
     event_model = getattr(models, "ProcessedPaymentEvent", None)
     assert event_model is not None
     assert await db_session.scalar(select(func.count()).select_from(event_model)) == 2
+
+
+@pytest.mark.asyncio
+async def test_mp_merchant_order_id_does_not_replace_missing_preference_id(
+    db_session, purchase_factory, verified_user, monkeypatch
+):
+    purchase = await purchase_factory()
+    payment = _mp_payment(purchase, "approved")
+    payment.pop("preference_id")
+    payment["order"] = {"id": "merchant-order-456"}
+    _patch_mp(monkeypatch, {"123": payment})
+
+    assert await process_webhook("123", db_session) is True
+    db_session.expire_all()
+    assert (await db_session.get(CreditPurchase, purchase.id)).status == "approved"
+    assert (await db_session.get(User, verified_user.id)).credits == 15
+
+
+@pytest.mark.asyncio
+async def test_unrelated_integrity_error_without_event_claim_is_propagated(
+    test_db, db_session, purchase_factory, monkeypatch
+):
+    purchase = await purchase_factory(provider="stripe")
+
+    async def fail_flush(*_args, **_kwargs):
+        raise IntegrityError("INSERT unrelated_table", {}, RuntimeError("unrelated constraint"))
+
+    monkeypatch.setattr(db_session, "flush", fail_flush)
+
+    with pytest.raises(IntegrityError):
+        await process_webhook_stripe(_paid_event(purchase), db_session)
+
+    event_model = getattr(models, "ProcessedPaymentEvent")
+    async with test_db["session_factory"]() as verification_session:
+        assert await verification_session.scalar(select(func.count()).select_from(event_model)) == 0
+
+
+@pytest.mark.asyncio
+async def test_mp_cancelled_remains_pending_without_payment_id_or_claim(
+    db_session, purchase_factory, verified_user, monkeypatch
+):
+    purchase = await purchase_factory()
+    _patch_mp(monkeypatch, {"123": _mp_payment(purchase, "cancelled")})
+
+    assert await process_webhook("123", db_session) is False
+    db_session.expire_all()
+    refreshed = await db_session.get(CreditPurchase, purchase.id)
+    assert refreshed.status == "pending"
+    assert refreshed.mp_payment_id is None
+    assert (await db_session.get(User, verified_user.id)).credits == 5
+    event_model = getattr(models, "ProcessedPaymentEvent")
+    assert await db_session.scalar(select(func.count()).select_from(event_model)) == 0
 
 
 @pytest.mark.asyncio

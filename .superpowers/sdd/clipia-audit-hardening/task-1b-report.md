@@ -92,3 +92,48 @@ resposta final porque este relatorio faz parte do proprio commit.
   teste, nao serializacao multiprocesso real em PostgreSQL.
 - Nao foi executada a suite completa por instrucao do coordenador; o gate exigido de pagamento/creditos,
   Ruff e smoke da migration passou.
+
+## Correcao apos revisao
+
+Commit base revisado: `cc4d476` (`feat: harden payment event transactions`).
+
+Achados corrigidos:
+
+- `payment.order.id` nao e mais usado como fallback de preference do Mercado Pago; somente
+  `payment.preference_id`, quando presente, participa da validacao.
+- `IntegrityError` so vira duplicate depois de rollback e consulta de uma claim com o mesmo
+  `provider + event_key` apontando para a mesma compra. Sem essa claim, o erro e logado e propagado.
+- status MP `cancelled` agora e no-op: compra permanece `pending`, sem `mp_payment_id` e sem claim.
+
+RED focal antes da correcao:
+
+```text
+tests/test_payment_transactions.py::<3 regressoes da revisao>
+3 failed, 13 warnings in 5.54s
+```
+
+GREEN focal:
+
+```text
+tests/test_payment_transactions.py::<3 regressoes da revisao>
+3 passed, 13 warnings in 3.56s
+```
+
+Gate cobridor solicitado pela revisao:
+
+```text
+tests/test_payment_transactions.py
+tests/test_payment_webhook.py
+tests/test_payment_webhook_stripe.py
+tests/test_credits_integrity.py
+tests/test_concurrent_usage.py
+49 passed, 13 warnings in 60.61s
+
+python -m ruff check app/payments/service.py tests/test_payment_transactions.py
+All checks passed!
+
+git diff --check
+exit 0
+```
+
+Commit separado planejado: `fix: address payment transaction review` (hash na resposta final).

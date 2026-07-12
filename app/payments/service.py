@@ -124,9 +124,37 @@ async def _apply_payment_event(
                 )
 
             await db.commit()
-        except IntegrityError:
+        except IntegrityError as exc:
             await db.rollback()
-            return False
+            try:
+                duplicate = await db.get(
+                    ProcessedPaymentEvent,
+                    {"provider": provider, "event_key": event_key},
+                )
+                duplicate_purchase_id = duplicate.purchase_id if duplicate is not None else None
+                await db.rollback()
+            except Exception:
+                await db.rollback()
+                logger.exception(
+                    "Failed to verify payment event claim after IntegrityError "
+                    "(provider=%s, event_key=%s, purchase=%s)",
+                    provider,
+                    event_key,
+                    purchase_id,
+                )
+                raise exc
+            if duplicate_purchase_id == purchase_id:
+                return False
+            logger.error(
+                "Payment event IntegrityError without matching claim "
+                "(provider=%s, event_key=%s, purchase=%s, claimed_purchase=%s)",
+                provider,
+                event_key,
+                purchase_id,
+                duplicate_purchase_id,
+                exc_info=(type(exc), exc, exc.__traceback__),
+            )
+            raise
         except Exception:
             await db.rollback()
             raise
@@ -214,7 +242,7 @@ async def process_webhook(payment_id: str, db: AsyncSession) -> bool:
     mp_status = payment.get("status")
     if mp_status == "approved":
         transition = "approve"
-    elif mp_status in ("refunded", "charged_back", "cancelled"):
+    elif mp_status in ("refunded", "charged_back"):
         transition = "full_refund"
     else:
         return False
@@ -224,9 +252,6 @@ async def process_webhook(payment_id: str, db: AsyncSession) -> bool:
     amount_cents = _money_to_cents(payment.get("transaction_amount"))
     currency = payment.get("currency_id")
     preference_id = payment.get("preference_id")
-    order = payment.get("order")
-    if preference_id is None and isinstance(order, dict):
-        preference_id = order.get("id")
     if (
         purchase_id is None
         or authoritative_id is None
