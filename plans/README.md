@@ -9,7 +9,7 @@ Gerados por `/improve-animations` em 2026-07-12 (auditoria completa: 4 auditores
 | # | Título | Severidade | Status |
 |---|--------|------------|--------|
 | [001](001-modais-fisica-entrada-saida.md) | Modais com física de entrada/saída (Modal, ExportPanel, VideoPlayerModal) | HIGH | DONE |
-| [002](002-toasts-entrada-saida-restack.md) | Toasts com entrada, saída e restack suave | HIGH | TODO |
+| [002](002-toasts-entrada-saida-restack.md) | Toasts com entrada, saída e restack suave | HIGH | DONE |
 | [003](003-playhead-transform-nao-layout.md) | Playhead das timelines: transform, não `left` | HIGH | DONE |
 | [004](004-progress-bars-scalex.md) | Barras de progresso: `scaleX` em vez de `width` | MEDIUM | DONE |
 | [005](005-tokens-css-e-fim-do-transition-all.md) | Tokens CSS de motion + fim do `transition: all` | MEDIUM | DONE |
