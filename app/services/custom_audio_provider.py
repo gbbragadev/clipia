@@ -23,15 +23,11 @@ class CustomAudioProvider(VoiceProvider):
         self,
         text: str,
         output_path: str,
-        voice_id: str,  # unused — audio already exists
-        source_path: str = "",
+        voice_id: str,
         **kwargs,
     ) -> Path:
-        """'Synthesize' by normalizing the uploaded audio to standard WAV."""
-        if not source_path or not Path(source_path).exists():
-            raise FileNotFoundError(f"Source audio not found: {source_path}")
-        normalize_audio(source_path, output_path)
-        return Path(output_path)
+        """Reject arbitrary local sources; uploads belong to an authenticated job route."""
+        raise RuntimeError("Custom synthesis paths are disabled; upload audio to an owned job")
 
     async def list_voices(self) -> list[VoiceInfo]:
         return [

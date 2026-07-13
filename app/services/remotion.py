@@ -15,6 +15,7 @@ import subprocess
 from pathlib import Path
 
 from app.config import BASE_DIR, settings
+from app.services.music import legacy_music_url_to_asset_id, validate_music_asset_id
 from app.utils.media_url import sign_media_url
 
 logger = logging.getLogger(__name__)
@@ -42,7 +43,7 @@ DEFAULT_VOICE_CONFIG = {
 }
 
 # Fields the editor may have changed that we trust from editor_state.composition.
-_EDITABLE_KEYS = ("subtitleStyle", "overlays", "musicUrl", "musicVolume", "voiceConfig", "layoutType")
+_EDITABLE_KEYS = ("subtitleStyle", "overlays", "musicVolume", "layoutType")
 
 
 def _read_json(path: Path):
@@ -72,7 +73,7 @@ def build_composition_props(
     job_id: str,
     backend_url: str | None = None,
     audio_filename: str = "narration.wav",
-    default_music_url: str | None = None,
+    default_music_asset_id: str | None = None,
 ) -> dict:
     """Build the Remotion CompositionData for a job.
 
@@ -122,7 +123,7 @@ def build_composition_props(
         "width": settings.VIDEO_WIDTH,
         "height": settings.VIDEO_HEIGHT,
         "overlays": [],
-        "musicUrl": default_music_url,
+        "musicAssetId": default_music_asset_id,
         "musicVolume": settings.AUTO_MUSIC_VOLUME,
         "isRendering": True,
         "layoutType": "fullscreen",
@@ -132,11 +133,32 @@ def build_composition_props(
     if state_path.exists():
         comp = (_read_json(state_path) or {}).get("composition", {}) or {}
         for key in _EDITABLE_KEYS:
-            if key == "musicUrl":
-                if "musicUrl" in comp:  # respeita None explicito (usuario tirou a musica)
-                    props["musicUrl"] = comp["musicUrl"]
-            elif comp.get(key) is not None:
+            if comp.get(key) is not None:
                 props[key] = comp[key]
+
+        if "musicAssetId" in comp:
+            asset_id = comp["musicAssetId"]
+            if asset_id is None:
+                props["musicAssetId"] = None
+            else:
+                try:
+                    props["musicAssetId"] = validate_music_asset_id(asset_id)
+                except (TypeError, ValueError):
+                    logger.warning("Ignoring invalid music asset ID for job %s", job_id)
+        elif "musicUrl" in comp:
+            legacy_value = comp["musicUrl"]
+            if legacy_value is None:
+                props["musicAssetId"] = None
+            else:
+                migrated_id = legacy_music_url_to_asset_id(legacy_value)
+                if migrated_id is not None:
+                    props["musicAssetId"] = migrated_id
+
+        voice_config = comp.get("voiceConfig")
+        if isinstance(voice_config, dict):
+            props["voiceConfig"] = {
+                key: voice_config[key] for key in ("voiceId", "voiceProvider", "rate", "pitch") if key in voice_config
+            }
 
     if settings.WATERMARK_ENABLED and settings.WATERMARK_TEXT:
         props["watermark"] = settings.WATERMARK_TEXT
@@ -150,7 +172,7 @@ def invoke_remotion_render(
     on_progress=None,
     timeout: int | None = None,
     audio_filename: str = "narration.wav",
-    default_music_url: str | None = None,
+    default_music_asset_id: str | None = None,
 ) -> str:
     """Render a job's composition to output_path via the Remotion CLI helper.
 
@@ -168,15 +190,10 @@ def invoke_remotion_render(
         job_id,
         backend_url=local_backend,
         audio_filename=audio_filename,
-        default_music_url=default_music_url,
+        default_music_asset_id=default_music_asset_id,
     )
-    # musicUrl e asset do publicDir do front (/music/*.mp3); o render server-side do Remotion nao
-    # resolve o publicDir local (404). Reescrevemos para URL absoluta servida pelo backend (igual
-    # audio/midia). Fica aqui, e nao no build_composition_props, para o preview/testes manterem o
-    # caminho relativo.
-    music = props.get("musicUrl")
-    if isinstance(music, str) and music.startswith("/"):
-        props["musicUrl"] = f"{local_backend}{music}"
+    # Public music asset IDs are resolved by Remotion's staticFile mapping inside
+    # the frontend bundle; the backend never accepts or constructs a client path.
     props_path = job_dir / "remotion_props.json"
     props_path.write_text(json.dumps(props, ensure_ascii=False), encoding="utf-8")
 

@@ -1818,14 +1818,7 @@ def task_synthesize_audio(self, script: dict, job_id: str, template_id: str = "s
 
             synthesize_dialogue(script["scenes"], output_path, duration_target=duration_target)
         elif voice_provider_name == "custom":
-            # Custom audio — just copy the uploaded file (already validated)
-            uploaded_path = voice_config.get("source_path", "") if voice_config else ""
-            if uploaded_path and Path(uploaded_path).exists():
-                from app.services.custom_audio_provider import normalize_audio
-
-                normalize_audio(uploaded_path, output_path)
-            else:
-                raise RuntimeError("Custom audio source not found")
+            raise RuntimeError("Custom generation paths are disabled; upload audio to an owned job")
         elif voice_provider_name == "elevenlabs":
             # ElevenLabs premium TTS
             from app.services.elevenlabs_provider import ElevenLabsProvider
@@ -2359,7 +2352,7 @@ def task_rerender_video(
         rerender_t0 = time.monotonic()
         _update_job(job_id, "rendering", "preparing", 0.05, detail="Preparando arquivos para re-render...")
         job_dir = get_job_dir(job_id)
-        from app.config import BASE_DIR, settings
+        from app.config import settings
         from app.services.compositor import compose_short
 
         script_path = job_dir / "script.json"
@@ -2375,7 +2368,7 @@ def task_rerender_video(
             raise RuntimeError("narration.wav not found")
 
         from app.job_config import resolve_job_flag
-        from app.services.music import auto_music_url
+        from app.services.music import auto_music_asset_id
 
         template_id = _redis_hget(f"job:{job_id}", "template_id") or "stock_narration"
 
@@ -2388,7 +2381,7 @@ def task_rerender_video(
             audio_basename = Path(audio_path).name  # narration_sfx.wav se mixou; senao narration.wav
 
         music_enabled = resolve_job_flag(_redis, job_id, "music_enabled", settings.AUTO_MUSIC_ENABLED)
-        default_music_url = auto_music_url(template_id) if music_enabled else None
+        default_music_asset_id = auto_music_asset_id(template_id) if music_enabled else None
 
         # Collect media file paths
         media_paths = []
@@ -2437,7 +2430,7 @@ def task_rerender_video(
                 job_id,
                 output_path,
                 audio_filename=audio_basename,
-                default_music_url=default_music_url,
+                default_music_asset_id=default_music_asset_id,
                 on_progress=lambda p: _update_job(
                     job_id,
                     "rendering",
@@ -2449,10 +2442,14 @@ def task_rerender_video(
         else:
             # FFmpeg+NVENC fallback path
             music_path = None
-            music_url = comp_data.get("musicUrl", default_music_url)
-            if music_url:
-                music_file = BASE_DIR / "frontend" / "public" / music_url.lstrip("/")
-                if music_file.exists():
+            from app.services.music import legacy_music_url_to_asset_id, resolve_music_asset_path
+
+            music_asset_id = comp_data.get("musicAssetId", default_music_asset_id)
+            if "musicAssetId" not in comp_data and "musicUrl" in comp_data:
+                music_asset_id = legacy_music_url_to_asset_id(comp_data["musicUrl"])
+            if music_asset_id:
+                music_file = resolve_music_asset_path(music_asset_id)
+                if music_file:
                     music_path = str(music_file)
 
             operation_suffix = operation_id or "legacy"

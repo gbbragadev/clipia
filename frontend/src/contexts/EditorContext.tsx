@@ -3,6 +3,7 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react'
 import type { PlayerRef } from '@remotion/player'
 import type { CompositionData, Scene, SubtitleStyle, VideoOverlay, VoiceConfig } from '@/remotion/types'
+import type { MusicAssetId } from '@/remotion/music-assets'
 import { fetchComposition, saveEditorState } from '@/lib/editor-api'
 
 type PanelKey = 'scenes' | 'voice' | 'subtitles' | 'elements' | 'ai'
@@ -42,7 +43,7 @@ interface EditorContextValue {
   removeOverlay: (index: number) => void
   updateOverlay: (index: number, updates: Partial<VideoOverlay>) => void
   updateAudio: (words: Array<Record<string, unknown>>, audioUrl: string) => void
-  updateMusic: (musicUrl: string | null, musicVolume?: number) => void
+  updateMusic: (musicAssetId: MusicAssetId | null, musicVolume?: number) => void
   getSceneStartFrame: (sceneIndex: number) => number
   undo: () => void
   redo: () => void
@@ -224,10 +225,10 @@ export function EditorProvider({ jobId, children }: { jobId: string; children: R
   }, [updateComposition])
 
   // Music update
-  const updateMusic = useCallback((musicUrl: string | null, musicVolume?: number) => {
+  const updateMusic = useCallback((musicAssetId: MusicAssetId | null, musicVolume?: number) => {
     updateComposition((prev) => ({
       ...prev,
-      musicUrl,
+      musicAssetId,
       ...(musicVolume !== undefined ? { musicVolume } : {}),
     }))
   }, [updateComposition])

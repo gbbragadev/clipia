@@ -160,11 +160,10 @@ def test_synthesize_audio_elevenlabs_uses_template_default_voice(monkeypatch, tm
     assert synth_mock.await_args.kwargs["voice_id"] == "KHmfNHtEjHhLK9eER20w"
 
 
-def test_synthesize_audio_custom(monkeypatch, tmp_path):
+def test_synthesize_audio_custom_rejects_arbitrary_source_path(monkeypatch, tmp_path):
     redis_client = LocalRedis()
     source_path = tmp_path / "source.wav"
     source_path.write_bytes(b"audio")
-    output_path = tmp_path / "narration.wav"
     redis_client.hset(
         "job:job-custom",
         mapping={
@@ -172,24 +171,17 @@ def test_synthesize_audio_custom(monkeypatch, tmp_path):
             "voice_config": json.dumps({"source_path": str(source_path)}),
         },
     )
-    normalize_calls = []
     monkeypatch.setattr(worker_tasks, "_redis", redis_client)
     monkeypatch.setattr(worker_tasks, "_check_cancelled", lambda _job_id: False)
     monkeypatch.setattr(worker_tasks, "get_job_dir", lambda _job_id: tmp_path)
-    monkeypatch.setattr(
-        "app.services.custom_audio_provider.normalize_audio",
-        lambda src, dst: (normalize_calls.append((src, dst)), output_path.write_bytes(b"x" * 12000)),
-    )
-
-    result = worker_tasks.task_synthesize_audio.run.__func__(
-        FakeTaskSelf(),
-        {"narration": "texto", "_duration_target": 45},
-        "job-custom",
-        "stock_narration",
-    )
-
-    assert result == str(output_path)
-    assert normalize_calls == [(str(source_path), str(output_path))]
+    monkeypatch.setattr(worker_tasks, "_fail_job", lambda _job_id, _error: None)
+    with pytest.raises(RuntimeError, match="Custom generation paths are disabled"):
+        worker_tasks.task_synthesize_audio.run.__func__(
+            FakeTaskSelf(retries=2),
+            {"narration": "texto", "_duration_target": 45},
+            "job-custom",
+            "stock_narration",
+        )
 
 
 def test_synthesize_audio_custom_missing_source(monkeypatch, tmp_path):
@@ -207,7 +199,7 @@ def test_synthesize_audio_custom_missing_source(monkeypatch, tmp_path):
     monkeypatch.setattr(worker_tasks, "get_job_dir", lambda _job_id: tmp_path)
     monkeypatch.setattr(worker_tasks, "_fail_job", lambda job_id, error: failures.append((job_id, error)))
 
-    with pytest.raises(RuntimeError, match="Custom audio source not found"):
+    with pytest.raises(RuntimeError, match="Custom generation paths are disabled"):
         worker_tasks.task_synthesize_audio.run.__func__(
             FakeTaskSelf(retries=2),
             {"narration": "texto", "_duration_target": 45},
@@ -215,7 +207,9 @@ def test_synthesize_audio_custom_missing_source(monkeypatch, tmp_path):
             "stock_narration",
         )
 
-    assert failures == [("job-custom-missing", "TTS failed: Custom audio source not found")]
+    assert failures == [
+        ("job-custom-missing", "TTS failed: Custom generation paths are disabled; upload audio to an owned job")
+    ]
 
 
 def test_synthesize_audio_elevenlabs_no_voice_id(monkeypatch, tmp_path):
