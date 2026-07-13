@@ -211,27 +211,22 @@ async def test_reap_marks_old_queued_jobs_failed_and_refunds(test_db, db_session
     assert "órfão" in refunded[0][2] or "orfao" in refunded[0][2]
 
 
-def test_reap_orphan_queued_jobs_routes_each_orphan_to_refund(monkeypatch):
-    """O wrapper sincrono coleta IDs e roteia cada um para _refund_job_credit(failed)."""
-    fake_ids = ["job-a", "job-b"]
-    refunded: list[tuple] = []
-    monkeypatch.setattr(
-        worker_tasks,
-        "_find_orphan_queued_jobs_async",
-        lambda: __import__("asyncio").sleep(0, result=fake_ids),
-    )
-    monkeypatch.setattr(
-        worker_tasks,
-        "_refund_job_credit",
-        lambda job_id, status_value, error, **_: refunded.append((job_id, status_value, error)),
-    )
+def test_reap_orphan_queued_jobs_delegates_to_marker_aware_reconciler(monkeypatch):
+    """O entrypoint legado nao pode mais refundar queued genericamente."""
 
-    reaped = worker_tasks._reap_orphan_queued_jobs()
+    async def reconciled():
+        return {
+            "generation_backfilled": 1,
+            "generation_refunded": 2,
+            "rerender_backfilled": 1,
+            "rerender_refunded": 1,
+            "cancel_flags_removed": 0,
+            "cancel_flags_ttl_applied": 0,
+        }
 
-    assert reaped == 2
-    assert {r[0] for r in refunded} == {"job-a", "job-b"}
-    assert all(r[1] == "failed" for r in refunded)
-    assert all("órfão" in r[2] or "orfao" in r[2] for r in refunded)
+    monkeypatch.setattr(worker_tasks, "_reconcile_undispatched_job_operations_async", reconciled)
+
+    assert worker_tasks._reap_orphan_queued_jobs() == 3
 
 
 @pytest.mark.asyncio

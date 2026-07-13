@@ -18,7 +18,8 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from app.auth.service import decode_access_token
 from app.config import settings
 from app.db.engine import build_engine
-from app.db.models import CreditPurchase, Job
+from app.db.models import CreditPurchase, Job, JobDispatch
+from app.payments.states import canonical_payment_state_expression
 from app.redis_pool import get_redis
 from app.worker.celery_app import celery_app
 
@@ -27,6 +28,7 @@ logger = logging.getLogger("clipia.access")
 _START_TIME = time.monotonic()
 _REQUEST_COUNTS: Counter[tuple[str, str, str]] = Counter()
 _CREDIT_TOTALS: Counter[str] = Counter()
+_AUTH_TRANSPORT_COUNTS: Counter[str] = Counter()
 _METRIC_LOCK = Lock()
 _HEALTH_CACHE: dict[str, Any] = {"expires_at": 0.0, "payload": None}
 
@@ -43,6 +45,28 @@ def record_credit_metric(kind: str, amount: float) -> None:
         _CREDIT_TOTALS[kind] += amount
 
 
+def record_auth_transport(transport: str) -> None:
+    if transport not in {"bearer", "cookie"}:
+        return
+    with _METRIC_LOCK:
+        _AUTH_TRANSPORT_COUNTS[transport] += 1
+
+
+def _metric_path(request: Request) -> str:
+    fastapi_scope = request.scope.get("fastapi")
+    if isinstance(fastapi_scope, dict):
+        effective_context = fastapi_scope.get("effective_route_context")
+        effective_path = getattr(effective_context, "path", None)
+        if isinstance(effective_path, str) and effective_path:
+            return effective_path
+
+    route = request.scope.get("route")
+    route_path = getattr(route, "path", None)
+    if isinstance(route_path, str) and route_path:
+        return route_path
+    return "__unmatched__"
+
+
 async def access_log_middleware(request: Request, call_next):
     request_id = request.headers.get("X-Request-ID") or str(uuid.uuid4())[:8]
     start = time.perf_counter()
@@ -50,24 +74,24 @@ async def access_log_middleware(request: Request, call_next):
 
     duration_ms = round((time.perf_counter() - start) * 1000, 2)
     path = request.url.path
-    record_request_metric(request.method, path, response.status_code)
+    record_request_metric(request.method, _metric_path(request), response.status_code)
 
     if path not in {"/health", "/health/deep"}:
-        user_id = None
-        auth_header = request.headers.get("authorization", "")
-        if auth_header.lower().startswith("bearer "):
-            user_id = decode_access_token(auth_header.split(" ", 1)[1])
-
         payload = {
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "method": request.method,
             "path": path,
             "status_code": response.status_code,
             "duration_ms": duration_ms,
-            "client_ip": request.client.host if request.client else None,
-            "user_id": user_id,
             "request_id": request_id,
         }
+        if path != "/api/v1/analytics/events":
+            user_id = None
+            auth_header = request.headers.get("authorization", "")
+            if auth_header.lower().startswith("bearer "):
+                user_id = decode_access_token(auth_header.split(" ", 1)[1])
+            payload["client_ip"] = request.client.host if request.client else None
+            payload["user_id"] = user_id
         logger.info(json.dumps(payload, ensure_ascii=False, separators=(",", ":")))
 
     response.headers["X-Request-ID"] = request_id
@@ -114,6 +138,9 @@ async def _compute_deep_health(version: str) -> dict[str, Any]:
             "celery": celery,
         },
         "version": version,
+        "git_sha": settings.GIT_SHA,
+        "app_version": version,
+        "deployed_at": settings.DEPLOYED_AT,
         "uptime_seconds": int(time.monotonic() - _START_TIME),
     }
 
@@ -187,7 +214,9 @@ async def _check_celery() -> dict[str, Any]:
 async def render_metrics() -> str:
     active_jobs = await _get_active_job_counts()
     credit_totals = await _get_credit_totals()
+    process_credit_totals = _snapshot_credit_totals()
     request_counts = _snapshot_request_counts()
+    auth_transport_counts = _snapshot_auth_transport_counts()
 
     lines = [
         "# HELP clipia_requests_total Total requests",
@@ -209,12 +238,32 @@ async def render_metrics() -> str:
     lines.extend(
         [
             "",
-            "# HELP clipia_credits_total Total credits transacted",
+            "# HELP clipia_credits_total Authoritative credits from durable database state",
             "# TYPE clipia_credits_total counter",
         ]
     )
-    for kind, amount in sorted(credit_totals.items()):
+    for kind, amount in (("credit", credit_totals["purchased"]), ("debit", credit_totals["consumed"])):
         lines.append(f'clipia_credits_total{{type="{kind}"}} {amount}')
+
+    lines.extend(
+        [
+            "",
+            "# HELP clipia_credit_mutations_process_total Process-local mutation observations; resets on restart",
+            "# TYPE clipia_credit_mutations_process_total counter",
+        ]
+    )
+    for kind, amount in sorted(process_credit_totals.items()):
+        lines.append(f'clipia_credit_mutations_process_total{{type="{kind}"}} {amount}')
+
+    lines.extend(
+        [
+            "",
+            "# HELP clipia_auth_transport_total Authenticated requests by phase-one transport",
+            "# TYPE clipia_auth_transport_total counter",
+        ]
+    )
+    for transport, count in sorted(auth_transport_counts.items()):
+        lines.append(f'clipia_auth_transport_total{{transport="{transport}"}} {count}')
 
     return "\n".join(lines) + "\n"
 
@@ -222,6 +271,16 @@ async def render_metrics() -> str:
 def _snapshot_request_counts() -> Counter[tuple[str, str, str]]:
     with _METRIC_LOCK:
         return Counter(_REQUEST_COUNTS)
+
+
+def _snapshot_credit_totals() -> Counter[str]:
+    with _METRIC_LOCK:
+        return Counter(_CREDIT_TOTALS)
+
+
+def _snapshot_auth_transport_counts() -> Counter[str]:
+    with _METRIC_LOCK:
+        return Counter(_AUTH_TRANSPORT_COUNTS)
 
 
 async def _get_active_job_counts() -> dict[str, int]:
@@ -240,11 +299,22 @@ async def _get_active_job_counts() -> dict[str, int]:
 
 async def _get_credit_totals() -> dict[str, float]:
     async with _runtime_session() as session:
-        purchased = await session.scalar(select(func.coalesce(func.sum(CreditPurchase.credits_amount), 0)))
-    with _METRIC_LOCK:
-        debit_total = float(_CREDIT_TOTALS.get("debit", 0))
-        bonus_total = float(_CREDIT_TOTALS.get("credit", 0))
+        canonical_state = canonical_payment_state_expression(
+            CreditPurchase.status,
+            CreditPurchase.payment_state,
+        )
+        purchased = await session.scalar(
+            select(
+                func.coalesce(
+                    func.sum(CreditPurchase.credits_amount + CreditPurchase.bonus_credits),
+                    0,
+                )
+            ).where(canonical_state == "paid")
+        )
+        consumed = await session.scalar(
+            select(func.coalesce(func.sum(JobDispatch.debited_credits), 0)).where(JobDispatch.state == "completed")
+        )
     return {
-        "credit": float(purchased or 0) + bonus_total,
-        "debit": debit_total,
+        "purchased": float(purchased or 0),
+        "consumed": float(consumed or 0),
     }

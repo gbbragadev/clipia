@@ -1,6 +1,9 @@
 import re
+from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator
+
+from app.credits import PublicPackageIntent
 
 
 def _validate_password_strength(v: str) -> str:
@@ -33,11 +36,15 @@ class RegisterRequest(BaseModel):
     utm_source: str | None = Field(default=None, max_length=100)
     utm_medium: str | None = Field(default=None, max_length=100)
     utm_campaign: str | None = Field(default=None, max_length=100)
+    selected_package: PublicPackageIntent | None = Field(
+        default=None,
+        description="Optional public package intent to resume after email verification",
+    )
     turnstile_token: str | None = Field(
         default=None, max_length=2048, description="Cloudflare Turnstile token (anti-bot)"
     )
-    consent: bool | None = Field(
-        default=None,
+    consent: Literal[True] = Field(
+        ...,
         description="LGPD: aceite expresso dos Termos e Política de Privacidade no cadastro (registrado para auditoria).",
     )
 
@@ -70,6 +77,7 @@ class LoginRequest(BaseModel):
 class TokenResponse(BaseModel):
     access_token: str = Field(..., description="JWT access token")
     token_type: str = Field(default="bearer", description="Token type (bearer)")
+    csrf_token: str = Field(..., description="CSRF token bound to the HttpOnly session")
 
 
 class UserResponse(BaseModel):
@@ -80,6 +88,7 @@ class UserResponse(BaseModel):
     plan: str = Field(..., description="Current plan")
     email_verified: bool = Field(..., description="Email verification status")
     referral_code: str = Field(..., description="User's unique referral code")
+    selected_package: PublicPackageIntent | None = Field(default=None, description="Saved public package intent")
 
 
 class VerifyEmailRequest(BaseModel):

@@ -3,18 +3,18 @@
 import { Eye, EyeOff } from 'lucide-react';
 import { strings } from '@/lib/strings';
 import { meetsPasswordPolicy, PasswordStrength } from '@/lib/password';
-import { useState } from "react";
-import { useRouter } from "next/navigation";
+import { Suspense, useEffect, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { useAuth } from "@/contexts/AuthContext";
 import Logo from "@/components/brand/Logo";
 import { FilmstripBackground } from "@/components/ui/FilmstripBackground";
-import { trackEvent, trackGA } from "@/components/TrackingScripts";
 import { TurnstileWidget } from "@/components/auth/TurnstileWidget";
 import { fetchPublicConfig } from "@/lib/config";
-import { useEffect } from "react";
+import { FREE_CLAIM } from "@/components/landing/lib/data";
+import { parseSelectedPackage } from "@/lib/package-intent";
 
-export default function RegisterPage() {
+function RegisterForm() {
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -30,6 +30,8 @@ export default function RegisterPage() {
   }, []);
   const { register } = useAuth();
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const selectedPackage = parseSelectedPackage(searchParams.get("selected_package"));
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -45,10 +47,10 @@ export default function RegisterPage() {
     }
     setLoading(true);
     try {
-      await register(email, name, password, captchaToken, consentAccepted);
-      trackEvent("CompleteRegistration");
-      trackGA("sign_up", { method: "email" });
-      router.push(`/auth/verify?email=${encodeURIComponent(email)}`);
+      await register(email, name, password, captchaToken, consentAccepted, selectedPackage ?? undefined);
+      const verifyParams = new URLSearchParams({ email });
+      if (selectedPackage) verifyParams.set("selected_package", selectedPackage);
+      router.push(`/auth/verify?${verifyParams.toString()}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Erro ao criar conta");
     } finally {
@@ -69,7 +71,9 @@ export default function RegisterPage() {
           {strings.auth.register.title}
         </h1>
         <p className="text-[var(--text-secondary)] text-center text-sm mb-8">
-          {welcomeBonus
+          {welcomeBonus === 2
+            ? FREE_CLAIM
+            : welcomeBonus
             ? <>Confirme o e-mail e ganhe <span className="text-mint font-semibold">{welcomeBonus} créditos</span> — cada crédito é um vídeo narrado.</>
             : strings.auth.register.subtitle}
         </p>
@@ -179,5 +183,13 @@ export default function RegisterPage() {
         </p>
       </div>
     </div>
+  );
+}
+
+export default function RegisterPage() {
+  return (
+    <Suspense fallback={null}>
+      <RegisterForm />
+    </Suspense>
   );
 }

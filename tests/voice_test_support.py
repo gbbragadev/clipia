@@ -14,6 +14,8 @@ from app.db.base import Base
 from app.db.models import Job, User, VoiceClone
 from app.worker import tasks as worker_tasks
 
+VALID_WAV = b"RIFF\x10\x00\x00\x00WAVEfmt "
+
 
 def run(coro):
     return asyncio.run(coro)
@@ -33,11 +35,18 @@ class FakeRedis:
     def hget(self, key: str, field: str) -> str | None:
         return self.data.get(key, {}).get(field)
 
-    def set(self, key: str, value: str):
+    def set(self, key: str, value: str, ex: int | None = None, nx: bool = False):
+        if nx and key in self.values:
+            return None
         self.values[key] = str(value)
+        return True
 
     def get(self, key: str) -> str | None:
         return self.values.get(key)
+
+    def delete(self, key: str):
+        self.data.pop(key, None)
+        self.values.pop(key, None)
 
 
 @dataclass
@@ -45,9 +54,14 @@ class DummyUpload:
     filename: str
     content: bytes
     content_type: str = "audio/wav"
+    offset: int = 0
 
-    async def read(self) -> bytes:
-        return self.content
+    async def read(self, size: int = -1) -> bytes:
+        if size < 0:
+            size = len(self.content) - self.offset
+        chunk = self.content[self.offset : self.offset + size]
+        self.offset += len(chunk)
+        return chunk
 
 
 class DummyForm:

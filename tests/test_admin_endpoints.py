@@ -33,6 +33,26 @@ async def test_admin_purchases_filter_by_status(client, admin_user, purchase_fac
     assert data["purchases"][0]["package_name"] == "popular"
     assert data["purchases"][0]["user_email"] == "verified@example.com", "Lista traz o email via join."
     assert "bonus_credits" in data["purchases"][0]
+    assert data["purchases"][0]["status"] == "paid"
+
+
+@pytest.mark.asyncio
+async def test_admin_purchases_filter_uses_canonical_state_precedence(
+    client, admin_user, purchase_factory, auth_headers
+):
+    await purchase_factory(package_name="starter", status="approved", payment_state="refunded")
+    await purchase_factory(package_name="popular", status="pending", payment_state="paid")
+
+    paid = await client.get("/api/v1/admin/purchases", params={"status": "paid"}, headers=auth_headers(admin_user))
+    refunded = await client.get(
+        "/api/v1/admin/purchases", params={"status": "refunded"}, headers=auth_headers(admin_user)
+    )
+
+    assert paid.status_code == refunded.status_code == 200
+    assert [item["package_name"] for item in paid.json()["purchases"]] == ["popular"]
+    assert [item["status"] for item in paid.json()["purchases"]] == ["paid"]
+    assert [item["package_name"] for item in refunded.json()["purchases"]] == ["starter"]
+    assert [item["status"] for item in refunded.json()["purchases"]] == ["refunded"]
 
 
 @pytest.mark.asyncio
@@ -75,17 +95,19 @@ async def test_admin_adjust_credits_creates_audit(client, db_session, admin_user
 
 
 @pytest.mark.asyncio
-async def test_admin_adjust_credits_clamps_at_zero(client, db_session, admin_user, verified_user, auth_headers):
+async def test_admin_adjust_credits_rejects_negative_balance(
+    client, db_session, admin_user, verified_user, auth_headers
+):
     response = await client.post(
         f"/api/v1/admin/users/{verified_user.id}/adjust-credits",
         json={"delta": -100, "reason": "estorno manual"},
         headers=auth_headers(admin_user),
     )
 
-    assert response.status_code == 200
-    assert response.json()["new_balance"] == 0, "Saldo nunca fica negativo."
+    assert response.status_code == 409
+    assert response.json()["detail"] == "insufficient_credits"
     db_session.expire_all()
-    assert (await db_session.get(User, verified_user.id)).credits == 0
+    assert (await db_session.get(User, verified_user.id)).credits == 5
 
 
 @pytest.mark.asyncio

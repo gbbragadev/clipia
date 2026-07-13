@@ -2,26 +2,26 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { useEditor } from '@/contexts/EditorContext'
+import { musicAssetUrl, type MusicAssetId } from '@/remotion/music-assets'
 import { ThrottledRange } from './ThrottledRange'
 
 interface MusicTrack {
-  id: string
+  id: MusicAssetId
   name: string
   mood: string
-  url: string
 }
 
 const TRACKS: MusicTrack[] = [
-  { id: 'lofi-chill', name: 'Lo-Fi Chill', mood: 'Relaxante', url: '/music/lofi-chill.mp3' },
-  { id: 'upbeat-energy', name: 'Upbeat Energy', mood: 'Energetico', url: '/music/upbeat-energy.mp3' },
-  { id: 'dramatic-epic', name: 'Dramatic Epic', mood: 'Dramatico', url: '/music/dramatic-epic.mp3' },
-  { id: 'ambient-calm', name: 'Ambient Calm', mood: 'Tranquilo', url: '/music/ambient-calm.mp3' },
-  { id: 'cinematic-tension', name: 'Cinematic Tension', mood: 'Cinematico', url: '/music/cinematic-tension.mp3' },
-  { id: 'happy-pop', name: 'Happy Pop', mood: 'Alegre', url: '/music/happy-pop.mp3' },
-  { id: 'dark-ambient', name: 'Dark Ambient', mood: 'Sombrio', url: '/music/dark-ambient.mp3' },
-  { id: 'inspirational', name: 'Inspirational', mood: 'Motivacional', url: '/music/inspirational.mp3' },
-  { id: 'dreamy-space', name: 'Dreamy Space', mood: 'Onirico', url: '/music/dreamy-space.mp3' },
-  { id: 'tech-pulse', name: 'Tech Pulse', mood: 'Tecnologico', url: '/music/tech-pulse.mp3' },
+  { id: 'lofi-chill', name: 'Lo-Fi Chill', mood: 'Relaxante' },
+  { id: 'upbeat-energy', name: 'Upbeat Energy', mood: 'Energetico' },
+  { id: 'dramatic-epic', name: 'Dramatic Epic', mood: 'Dramatico' },
+  { id: 'ambient-calm', name: 'Ambient Calm', mood: 'Tranquilo' },
+  { id: 'cinematic-tension', name: 'Cinematic Tension', mood: 'Cinematico' },
+  { id: 'happy-pop', name: 'Happy Pop', mood: 'Alegre' },
+  { id: 'dark-ambient', name: 'Dark Ambient', mood: 'Sombrio' },
+  { id: 'inspirational', name: 'Inspirational', mood: 'Motivacional' },
+  { id: 'dreamy-space', name: 'Dreamy Space', mood: 'Onirico' },
+  { id: 'tech-pulse', name: 'Tech Pulse', mood: 'Tecnologico' },
 ]
 
 const MOOD_COLORS: Record<string, string> = {
@@ -42,7 +42,7 @@ export function MusicSelector() {
   const [previewId, setPreviewId] = useState<string | null>(null)
   const audioRef = useRef<HTMLAudioElement | null>(null)
 
-  const selectedUrl = composition?.musicUrl || null
+  const selectedAssetId = composition?.musicAssetId || null
   const volume = composition?.musicVolume ?? 0.15
 
   // Cleanup audio on unmount
@@ -58,11 +58,13 @@ export function MusicSelector() {
     }
     if (audioRef.current) audioRef.current.pause()
 
-    const audio = new Audio(track.url)
+    const trackUrl = musicAssetUrl(track.id)
+    if (!trackUrl) return
+    const audio = new Audio(trackUrl)
     audio.volume = Math.max(0.3, volume)
     audio.loop = true
     audio.onerror = () => {
-      console.error('Failed to load audio:', track.url)
+      console.error('Failed to load audio:', track.id)
       setPreviewId(null)
     }
     audio.play()
@@ -75,7 +77,7 @@ export function MusicSelector() {
   }
 
   const selectTrack = (track: MusicTrack | null) => {
-    updateMusic(track?.url ?? null)
+    updateMusic(track?.id ?? null)
   }
 
   // Volume ao vivo no preview de áudio; commit no contexto vem throttled do
@@ -84,7 +86,7 @@ export function MusicSelector() {
     if (audioRef.current) audioRef.current.volume = v / 100
   }
   const commitVolume = (v: number) => {
-    updateMusic(selectedUrl, v / 100)
+    updateMusic(selectedAssetId, v / 100)
   }
 
   return (
@@ -99,8 +101,8 @@ export function MusicSelector() {
           width: '100%',
           padding: '10px 12px',
           borderRadius: 8,
-          border: selectedUrl === null ? '1px solid var(--color-coral)' : '1px solid #333',
-          background: selectedUrl === null ? 'rgba(255, 86, 56, 0.15)' : '#2A2A2A',
+          border: selectedAssetId === null ? '1px solid var(--color-coral)' : '1px solid #333',
+          background: selectedAssetId === null ? 'rgba(255, 86, 56, 0.15)' : '#2A2A2A',
           color: '#E8E8E8',
           cursor: 'pointer',
           fontSize: 13,
@@ -113,7 +115,7 @@ export function MusicSelector() {
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
         {TRACKS.map((track) => {
-          const isSelected = selectedUrl === track.url
+          const isSelected = selectedAssetId === track.id
           const isPreviewing = previewId === track.id
           const moodColor = MOOD_COLORS[track.mood] || 'var(--color-coral)'
 

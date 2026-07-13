@@ -20,11 +20,11 @@ def test_audio_filename_overrides_audio_url(tmp_path, monkeypatch):
     assert props["audioUrl"].split("?")[0].endswith("/storage/jobs/job1/narration_sfx.wav")
 
 
-def test_default_music_url_applied_when_no_editor_state(tmp_path, monkeypatch):
+def test_default_music_asset_id_applied_when_no_editor_state(tmp_path, monkeypatch):
     _make_job(tmp_path)
     monkeypatch.setattr(remotion.settings, "STORAGE_DIR", tmp_path)
-    props = remotion.build_composition_props("job1", default_music_url="/music/lofi-chill.mp3")
-    assert props["musicUrl"] == "/music/lofi-chill.mp3"
+    props = remotion.build_composition_props("job1", default_music_asset_id="lofi-chill")
+    assert props["musicAssetId"] == "lofi-chill"
     # volume default tem que bater com o que /composition devolve (AUTO_MUSIC_VOLUME), sem divergir
     assert props["musicVolume"] == remotion.settings.AUTO_MUSIC_VOLUME
 
@@ -32,12 +32,12 @@ def test_default_music_url_applied_when_no_editor_state(tmp_path, monkeypatch):
 def test_editor_state_null_music_is_respected(tmp_path, monkeypatch):
     _make_job(tmp_path, with_state={"musicUrl": None})
     monkeypatch.setattr(remotion.settings, "STORAGE_DIR", tmp_path)
-    props = remotion.build_composition_props("job1", default_music_url="/music/lofi-chill.mp3")
-    assert props["musicUrl"] is None  # usuario removeu a musica no editor -> respeitar
+    props = remotion.build_composition_props("job1", default_music_asset_id="lofi-chill")
+    assert props["musicAssetId"] is None  # usuario removeu a musica no editor -> respeitar
 
 
 def test_editor_state_track_overrides_default(tmp_path, monkeypatch):
     _make_job(tmp_path, with_state={"musicUrl": "/music/happy-pop.mp3"})
     monkeypatch.setattr(remotion.settings, "STORAGE_DIR", tmp_path)
-    props = remotion.build_composition_props("job1", default_music_url="/music/lofi-chill.mp3")
-    assert props["musicUrl"] == "/music/happy-pop.mp3"
+    props = remotion.build_composition_props("job1", default_music_asset_id="lofi-chill")
+    assert props["musicAssetId"] == "happy-pop"

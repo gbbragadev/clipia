@@ -2,35 +2,70 @@ import hashlib
 import hmac
 import json
 import logging
+import time
 from json import JSONDecodeError
+from typing import Annotated
+from uuid import UUID
 
 import stripe
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, Header, HTTPException, Request
+from fastapi.responses import JSONResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.dependencies import get_current_user
 from app.config import settings
+from app.credits import (
+    PUBLIC_PACKAGE_INTENTS,
+    credit_equivalences,
+    normalize_checkout_package,
+)
 from app.db.engine import get_db
 from app.db.models import CreditPurchase, User
 from app.payments.schemas import (
     CREDIT_PACKAGES,
     CheckoutRequest,
     CheckoutResponse,
+    CheckoutStatusResponse,
     PackageResponse,
     PurchaseHistoryItem,
     PurchaseHistoryResponse,
 )
 from app.payments.service import (
+    PaymentEventResult,
     create_checkout,
     create_checkout_stripe,
     process_webhook,
     process_webhook_stripe,
     verify_stripe_event_via_api,
 )
+from app.payments.states import canonical_payment_state
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["payments"])
+
+
+def _payment_result_payload(result: PaymentEventResult) -> dict[str, str | int | None]:
+    return {
+        "status": "processed" if result.applied else "not_processed",
+        "state": result.state,
+        "balance_delta": result.balance_delta,
+    }
+
+
+def _stripe_timestamp_within_tolerance(signature: str) -> bool:
+    try:
+        timestamps = [
+            int(value)
+            for part in signature.split(",")
+            for key, separator, value in [part.strip().partition("=")]
+            if separator and key == "t"
+        ]
+    except ValueError:
+        return False
+    if len(timestamps) != 1:
+        return False
+    return abs(time.time() - timestamps[0]) <= stripe.Webhook.DEFAULT_TOLERANCE
 
 
 @router.get(
@@ -40,23 +75,30 @@ router = APIRouter(tags=["payments"])
     description="Returns available credit packages.",
     responses={200: {"description": "List of packages"}},
 )
-async def list_packages(user: User = Depends(get_current_user)):
+async def list_packages():
     """Get available credit packages."""
     packages = []
-    for key, pkg in CREDIT_PACKAGES.items():
+    for public_key in PUBLIC_PACKAGE_INTENTS:
+        key = normalize_checkout_package(public_key)
+        pkg = CREDIT_PACKAGES[key]
         price = pkg["price_brl"]
         reais = price // 100
         centavos = price % 100
         bonus = pkg["credits"] * settings.PURCHASE_BONUS_PERCENT // 100
+        total = pkg["credits"] + bonus
         packages.append(
             PackageResponse(
-                id=key,
+                id=public_key,
+                selected_package=public_key,
                 name=pkg["name"],
                 credits=pkg["credits"],
+                base_credits=pkg["credits"],
                 price_brl=price,
                 price_display=f"R$ {reais},{centavos:02d}",
                 bonus_percent=settings.PURCHASE_BONUS_PERCENT if bonus else 0,
                 bonus_credits=bonus,
+                total_credits=total,
+                equivalences=credit_equivalences(total),
             )
         )
     return packages
@@ -67,24 +109,82 @@ async def list_packages(user: User = Depends(get_current_user)):
     response_model=CheckoutResponse,
     summary="Checkout package",
     description="Creates a checkout URL to buy credits.",
-    responses={200: {"description": "Checkout URL"}},
+    responses={
+        200: {"description": "Checkout URL"},
+        202: {
+            "description": "Checkout creation is pending durable reconciliation",
+            "model": CheckoutStatusResponse,
+        },
+    },
 )
 async def checkout(
     req: CheckoutRequest,
+    idempotency_key: Annotated[
+        str | None,
+        Header(
+            alias="Idempotency-Key",
+            max_length=200,
+            description="Client retry key scoped to the authenticated user",
+        ),
+    ] = None,
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Initiate a credit purchase via Mercado Pago (default) ou Stripe."""
-    if req.package not in CREDIT_PACKAGES:
-        raise HTTPException(status_code=400, detail="Pacote invalido")
-    if req.provider not in ("mercadopago", "stripe"):
-        raise HTTPException(status_code=400, detail="Provedor invalido")
+    if not user.email_verified:
+        raise HTTPException(status_code=403, detail="email_verification_required")
+    from app.payments.checkout_outbox import (
+        CheckoutFailed,
+        CheckoutIdempotencyConflict,
+        CheckoutPending,
+        InvalidCheckoutIdempotencyKey,
+    )
 
+    request_key = idempotency_key
     try:
         if req.provider == "stripe":
-            checkout_url, purchase_id = await create_checkout_stripe(user, req.package, db)
+            if request_key is None:
+                checkout_url, purchase_id = await create_checkout_stripe(user, req.package, db)
+            else:
+                checkout_url, purchase_id = await create_checkout_stripe(
+                    user,
+                    req.package,
+                    db,
+                    request_key=request_key,
+                )
         else:
-            checkout_url, purchase_id = await create_checkout(user, req.package, db)
+            if request_key is None:
+                checkout_url, purchase_id = await create_checkout(user, req.package, db)
+            else:
+                checkout_url, purchase_id = await create_checkout(
+                    user,
+                    req.package,
+                    db,
+                    request_key=request_key,
+                )
+    except CheckoutPending as exc:
+        return JSONResponse(
+            status_code=202,
+            content={
+                "purchase_id": str(exc.outcome.purchase_id),
+                "dispatch_id": str(exc.outcome.dispatch_id),
+                "state": "pending",
+            },
+        )
+    except CheckoutIdempotencyConflict:
+        raise HTTPException(status_code=409, detail="idempotency_key_conflict")
+    except InvalidCheckoutIdempotencyKey:
+        raise HTTPException(status_code=400, detail="invalid_idempotency_key")
+    except CheckoutFailed as exc:
+        logger.error("Checkout (%s) failed permanently: %s", req.provider, exc)
+        raise HTTPException(
+            status_code=502,
+            detail="NÃ£o foi possÃ­vel iniciar o pagamento. Tente novamente em instantes.",
+        )
+    except ValueError as exc:
+        if str(exc) == "Invalid credit package":
+            raise HTTPException(status_code=400, detail="Pacote invalido")
+        raise
     except Exception as e:  # noqa: BLE001
         logger.error("Checkout (%s) falhou: %s", req.provider, e)
         raise HTTPException(
@@ -92,6 +192,31 @@ async def checkout(
             detail="Não foi possível iniciar o pagamento. Tente novamente em instantes.",
         )
     return CheckoutResponse(checkout_url=checkout_url, purchase_id=purchase_id)
+
+
+@router.get(
+    "/credits/checkout/{purchase_id}",
+    response_model=CheckoutStatusResponse,
+    response_model_exclude_none=True,
+    summary="Checkout status",
+    responses={200: {"description": "Checkout dispatch status"}, 404: {"description": "Not found"}},
+)
+async def checkout_status(
+    purchase_id: UUID,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    from app.payments.checkout_outbox import get_checkout_outcome
+
+    outcome = await get_checkout_outcome(db, purchase_id=purchase_id, user_id=user.id)
+    if outcome is None:
+        raise HTTPException(status_code=404, detail="checkout_not_found")
+    return CheckoutStatusResponse(
+        purchase_id=outcome.purchase_id,
+        dispatch_id=outcome.dispatch_id,
+        state=outcome.state,
+        checkout_url=outcome.checkout_url if outcome.state == "ready" else None,
+    )
 
 
 @router.post(
@@ -160,8 +285,8 @@ async def mercadopago_webhook(
         logger.warning("Webhook without payment ID: %s", parsed)
         return {"status": "no_payment_id"}
 
-    credited = await process_webhook(payment_id, db)
-    return {"status": "credited" if credited else "not_credited"}
+    result = await process_webhook(payment_id, db)
+    return _payment_result_payload(result)
 
 
 @router.post(
@@ -180,6 +305,9 @@ async def stripe_webhook(
 
     if settings.STRIPE_WEBHOOK_SECRET:
         sig = request.headers.get("stripe-signature", "")
+        if not _stripe_timestamp_within_tolerance(sig):
+            logger.warning("Stripe webhook timestamp outside tolerance")
+            return {"status": "invalid_signature"}
         try:
             event = stripe.Webhook.construct_event(payload, sig, settings.STRIPE_WEBHOOK_SECRET)
         except Exception as e:  # noqa: BLE001 — assinatura invalida / payload malformado
@@ -196,8 +324,8 @@ async def stripe_webhook(
         if event is None:
             return {"status": "unverified"}
 
-    credited = await process_webhook_stripe(event, db)
-    return {"status": "credited" if credited else "not_credited"}
+    result = await process_webhook_stripe(event, db)
+    return _payment_result_payload(result)
 
 
 @router.get(
@@ -228,7 +356,7 @@ async def purchase_history(
                 package_name=p.package_name,
                 credits_amount=p.credits_amount,
                 price_brl=p.price_brl,
-                status=p.status,
+                status=canonical_payment_state(p.status, p.payment_state),
                 created_at=p.created_at,
                 paid_at=p.paid_at,
             )

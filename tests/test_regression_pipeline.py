@@ -129,7 +129,7 @@ def test_composition_endpoint_unchanged(tmp_path, monkeypatch):
         "width",
         "height",
         "pending_credits",
-        "music_url",
+        "music_asset_id",
         "music_volume",
     }
 
@@ -204,10 +204,10 @@ def test_credits_debit_1_for_edge(tmp_path, monkeypatch):
 
 def test_render_endpoint_unchanged(tmp_path, monkeypatch):
     env = create_test_env(tmp_path, monkeypatch)
-    job = create_job(env)
+    job = create_job(env, status="completed")
     (env.storage_dir / "jobs" / str(job.id)).mkdir(parents=True)
-    delay_mock = Mock()
-    monkeypatch.setattr("app.worker.tasks.task_rerender_video.delay", delay_mock)
+    apply_async_mock = Mock()
+    monkeypatch.setattr("app.worker.tasks.task_rerender_video.apply_async", apply_async_mock)
 
     async def _case():
         async with env.session_factory() as db:
@@ -215,7 +215,11 @@ def test_render_endpoint_unchanged(tmp_path, monkeypatch):
 
     response = run(_case())
     assert response["status"] == "rendering"
-    delay_mock.assert_called_once_with(str(job.id))
+    apply_async_mock.assert_called_once()
+    call = apply_async_mock.call_args
+    assert call.kwargs["args"][0] == str(job.id)
+    assert len(call.kwargs["args"]) == 4
+    assert call.kwargs["args"][3] == call.kwargs["task_id"]
 
 
 def test_job_list_format_unchanged(tmp_path, monkeypatch):

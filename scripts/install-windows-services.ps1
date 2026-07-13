@@ -6,7 +6,7 @@
 $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $PSScriptRoot
 $pythonExe = Join-Path $root ".venv312\Scripts\python.exe"
-$npmCmd = (Get-Command npm).Source
+$powershellExe = (Get-Command powershell.exe).Source
 $logDir = Join-Path $root "storage\service-logs"
 New-Item -ItemType Directory -Force -Path $logDir | Out-Null
 
@@ -32,7 +32,7 @@ function Install-ClipiaService {
     nssm set $Name AppRotateFiles 1
     nssm set $Name AppRotateBytes 10485760
     nssm set $Name Start SERVICE_AUTO_START
-    nssm set $Name AppEnvironmentExtra "PYTHONUNBUFFERED=1"
+    nssm set $Name AppEnvironmentExtra "PYTHONUNBUFFERED=1" "ENVIRONMENT=production"
 }
 
 Install-ClipiaService `
@@ -49,13 +49,13 @@ Install-ClipiaService `
 
 Install-ClipiaService `
     -Name "clipia-frontend" `
-    -Exe "$npmCmd" `
-    -Arguments "run start -- -p 3003" `
-    -WorkDir (Join-Path $root "frontend")
+    -Exe "$powershellExe" `
+    -Arguments "-NoProfile -ExecutionPolicy Bypass -File `"$root\scripts\_run-frontend.ps1`" -Root `"$root`"" `
+    -WorkDir $root
 
 Write-Host ""
 Write-Host "Services instalados (ainda NAO iniciados). Para iniciar:" -ForegroundColor Green
 Write-Host "  Start-Service clipia-backend,clipia-worker,clipia-frontend"
 Write-Host ""
 Write-Host "IMPORTANTE: Antes de iniciar o frontend:"
-Write-Host "  cd frontend; npm run build"
+Write-Host "  powershell -ExecutionPolicy Bypass -File scripts\restart-frontend.ps1 -Rebuild"

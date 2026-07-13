@@ -1,11 +1,13 @@
 "use client";
 import { useScrolledPast } from "@/components/landing/lib/motion";
 import { Button } from "@/components/landing/ui/Button";
-import { CTA_LABEL, signupUrl } from "@/components/landing/lib/data";
+import { CTA_LABEL } from "@/components/landing/lib/data";
+import { useAb } from "@/components/landing/lib/ab";
 import { cn } from "@/components/landing/utils/cn";
 
 export function StickyCta() {
   const past = useScrolledPast("hero");
+  const ab = useAb();
 
   return (
     <div
@@ -21,7 +23,7 @@ export function StickyCta() {
             <p className="truncate text-sm font-semibold text-cloud">{CTA_LABEL}</p>
             <p className="truncate text-[11px] text-mist">Sem cartão · narração em pt-BR</p>
           </div>
-          <Button href={signupUrl("sticky")} size="md" iconRight="arrowRight" className="shrink-0">
+          <Button href={ab.signup("sticky")} size="md" iconRight="arrowRight" className="shrink-0">
             Começar
           </Button>
         </div>

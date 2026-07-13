@@ -1,16 +1,17 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { blogPosts } from "@/lib/blog-posts";
+import { canonicalUrl } from "@/lib/site";
 
 export const metadata: Metadata = {
   title: "Blog — ClipIA",
   description:
     "Dicas, tutoriais e novidades sobre criação de vídeos curtos com IA. Shorts, Reels e TikTok automáticos.",
-  alternates: { canonical: "https://clipia.com.br/blog" },
+  alternates: { canonical: canonicalUrl("/blog") },
   openGraph: {
     title: "Blog — ClipIA",
     description: "Dicas e tutoriais sobre vídeos curtos com IA",
-    url: "https://clipia.com.br/blog",
+    url: canonicalUrl("/blog"),
     images: [{ url: "/og-image.png", width: 1200, height: 630 }],
   },
 };
@@ -45,6 +46,7 @@ export default function BlogPage(_props: PageProps<"/blog">) {
                   day: "2-digit",
                   month: "long",
                   year: "numeric",
+                  timeZone: "UTC",
                 })}
               </time>
               <h2 className="text-xl font-bold text-white mt-2 mb-2 group-hover:text-coral-soft transition">

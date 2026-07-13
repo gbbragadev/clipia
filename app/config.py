@@ -1,12 +1,23 @@
 import logging
 from pathlib import Path
+from typing import Literal
+from urllib.parse import urlsplit
 
+from pydantic import field_validator
 from pydantic_settings import BaseSettings
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 
 class Settings(BaseSettings):
+    ENVIRONMENT: Literal["development", "test", "production"] = "development"
+
+    # Proveniencia do build, injetada pelo pipeline/deploy. Defaults nao inventam
+    # uma revisao ou horario quando o processo local nao recebeu esses metadados.
+    APP_VERSION: str = "0.1.0"
+    GIT_SHA: str = "unknown"
+    DEPLOYED_AT: str = "unknown"
+
     # API Keys
     PEXELS_API_KEY: str = ""
 
@@ -39,6 +50,8 @@ class Settings(BaseSettings):
     JWT_SECRET: str = "dev-secret-change-in-production"
     JWT_ALGORITHM: str = "HS256"
     JWT_EXPIRE_MINUTES: int = 1440  # 24 hours
+    TERMS_VERSION: str = "2026-07-02"
+    PRIVACY_VERSION: str = "2026-07-02"
 
     # Redis
     REDIS_URL: str = "redis://localhost:6382/0"
@@ -132,24 +145,41 @@ class Settings(BaseSettings):
     # Ajuste junto com OPENROUTER_VIDEO_MODEL/VIDEO_GEN_RESOLUTION.
 
     # Credit costs
-    CREDIT_COST_EDGE: int = 1
-    CREDIT_COST_ELEVENLABS: int = 2
-    CREDIT_COST_CUSTOM_AUDIO: int = 1
-    CREDIT_COST_AI_IMAGE: int = 5
-    CREDIT_COST_AI_VIDEO: int = 30  # template premium de video IA (ver nota de precificacao acima)
+    CREDIT_COST_EDGE: Literal[1] = 1
+    CREDIT_COST_ELEVENLABS: Literal[2] = 2
+    CREDIT_COST_CUSTOM_AUDIO: Literal[1] = 1
+    CREDIT_COST_AI_IMAGE: Literal[5] = 5
+    CREDIT_COST_AI_VIDEO: Literal[30] = 30  # template premium de video IA (ver nota de precificacao acima)
     CREDIT_COST_VOICE_DESIGN: int = 5  # criar voz custom (ElevenLabs Voice Design) — operacao paga
     CREDIT_COST_VOICE_CLONE: int = 5  # clonar voz (ElevenLabs Instant Voice Clone) — operacao paga
 
-    # Bonus de creditos ao verificar email. Default 2 (publico). Elevar temporariamente
-    # para um beta fechado (ex: 20) para que testadores consigam gerar varios videos sem
-    # comprar; voltar para 2 antes do lancamento publico. Nao afeta o bonus do referrer
-    # (sempre +2 fixo, ver app/auth/routes.py).
-    WELCOME_CREDIT_BONUS: int = 2
+    # Oferta publica fixa: 2 creditos depois da verificacao. Testadores recebem +18
+    # somente pelo ajuste admin auditado, com reason=beta_invite_2026.
+    WELCOME_CREDIT_BONUS: Literal[2] = 2
 
-    # Promocao de compra (beta): % de creditos BONUS sobre o pacote comprado, aplicado no
-    # credito pos-webhook (_credit_once — ponto unico MP+Stripe). 0 desliga. Ex.: 20 -> pacote
-    # popular (30) credita 36. Nao mexe em preco cobrado; rollback = voltar a 0 no .env + restart.
-    PURCHASE_BONUS_PERCENT: int = 0
+    # Oferta publica de compra: o bonus de 20% e congelado no checkout e aplicado pelo
+    # webhook canonico para que API, cobranca e credito nunca divirjam.
+    PURCHASE_BONUS_PERCENT: Literal[20] = 20
+
+    @field_validator(
+        "CREDIT_COST_EDGE",
+        "CREDIT_COST_ELEVENLABS",
+        "CREDIT_COST_CUSTOM_AUDIO",
+        "CREDIT_COST_AI_IMAGE",
+        "CREDIT_COST_AI_VIDEO",
+        "WELCOME_CREDIT_BONUS",
+        "PURCHASE_BONUS_PERCENT",
+        mode="before",
+    )
+    @classmethod
+    def parse_frozen_integer_setting(cls, value: object) -> object:
+        """Normalize textual environment values before enforcing fixed offers."""
+        if isinstance(value, str):
+            try:
+                return int(value.strip())
+            except ValueError:
+                return value
+        return value
 
     # Guardrail anti-burn: teto DIARIO de geracoes de video IA (Seedance ~R$0,67/s, ~R$20/Short) por
     # usuario. 0 desliga. Mesmo conta admin/seed (999k creditos) nao queima $ ilimitado num dia — foi
@@ -188,9 +218,19 @@ class Settings(BaseSettings):
     RATE_LIMIT_AUTH: str = "5/minute"
     RATE_LIMIT_GENERATE: str = "10/minute"
     RATE_LIMIT_DEFAULT: str = "60/minute"
+    ANALYTICS_ENABLED: bool = False
+    # Operational attestation that the deployed Next.js bundle was built with
+    # NEXT_PUBLIC_ANALYTICS_ENABLED=true. The 14-day gate requires both flags.
+    ANALYTICS_FRONTEND_ENABLED: bool = False
+    ANALYTICS_RATE_LIMIT: str = "30/minute"
+    # Ledger append-only permanece em shadow ate sete reconciliacoes diarias
+    # consecutivas sem diferenca. `enforce` e bloqueado no startup sem esse gate.
+    CREDIT_LEDGER_MODE: Literal["shadow", "enforce"] = "shadow"
 
     # CORS
     CORS_ORIGINS: str = "http://localhost:3003"  # comma-separated, "*" for dev
+    TRUSTED_HOSTS: str = "localhost,127.0.0.1,testserver"
+    METRICS_TOKEN: str = ""
 
     # SMTP (email verification)
     SMTP_HOST: str = ""
@@ -219,6 +259,24 @@ def validate_production_settings(s: Settings) -> None:
     """Validate critical settings. Call on startup."""
     if s.JWT_SECRET in _WEAK_SECRETS or len(s.JWT_SECRET) < 32:
         raise ValueError("JWT_SECRET inseguro! Gere um com: openssl rand -hex 32")
+    if s.ENVIRONMENT == "production":
+        cors_origins = {origin.strip().rstrip("/") for origin in s.CORS_ORIGINS.split(",") if origin.strip()}
+        if "*" in cors_origins:
+            raise ValueError("CORS_ORIGINS nao pode conter '*' em producao")
+        trusted_hosts = {host.strip() for host in s.TRUSTED_HOSTS.split(",") if host.strip()}
+        if not trusted_hosts or "*" in trusted_hosts:
+            raise ValueError("TRUSTED_HOSTS deve listar hosts exatos em producao")
+        if len(s.METRICS_TOKEN) < 32:
+            raise ValueError("METRICS_TOKEN deve ter pelo menos 32 caracteres em producao")
+        if not s.FRONTEND_URL.startswith("https://"):
+            raise ValueError("FRONTEND_URL deve usar HTTPS em producao")
+        if not s.BACKEND_URL.startswith("https://"):
+            raise ValueError("BACKEND_URL deve usar HTTPS em producao")
+        if s.FRONTEND_URL.rstrip("/") not in cors_origins:
+            raise ValueError("CORS_ORIGINS deve incluir a origem exata de FRONTEND_URL")
+        backend_host = urlsplit(s.BACKEND_URL).hostname
+        if not backend_host or backend_host not in trusted_hosts:
+            raise ValueError("TRUSTED_HOSTS deve incluir o host exato de BACKEND_URL")
     warn_keys = ("OPEN_ROUTER_API_KEY", "PEXELS_API_KEY", "GROQ_API_KEY", "OPENAI_API_KEY", "ELEVENLABS_API_KEY")
     for key in warn_keys:
         if not getattr(s, key):

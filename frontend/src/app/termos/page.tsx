@@ -1,4 +1,18 @@
-import { strings } from '@/lib/strings'
+import type { Metadata } from 'next'
+
+import { canonicalUrl } from '@/lib/site'
+
+export const metadata: Metadata = {
+  title: 'Termos de Uso — ClipIA',
+  description: 'Termos e regras para cadastro, créditos, pagamentos e uso da plataforma ClipIA.',
+  alternates: { canonical: canonicalUrl('/termos') },
+  openGraph: {
+    title: 'Termos de Uso — ClipIA',
+    description: 'Termos e regras de uso da plataforma ClipIA.',
+    url: canonicalUrl('/termos'),
+    type: 'website',
+  },
+}
 
 export default function TermosPage() {
   return (

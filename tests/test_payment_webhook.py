@@ -3,19 +3,36 @@ import hmac
 from datetime import datetime
 
 import pytest
+from sqlalchemy import select
 
 from app.db.models import CreditPurchase, User
 
 
+def _authoritative_payment(purchase, status: str, payment_id: str = "123"):
+    return {
+        "id": payment_id,
+        "status": status,
+        "external_reference": str(purchase.id),
+        "transaction_amount": purchase.price_brl / 100,
+        "currency_id": "BRL",
+        "preference_id": purchase.mp_preference_id,
+    }
+
+
 @pytest.mark.asyncio
 async def test_checkout_creates_pending_purchase(client, db_session, verified_user, auth_headers, monkeypatch):
+    preference_id = "202809963-a2201f8d-11cb-443f-adf6-de5a42eed67d"
+
     class _Sdk:
         class preference:
             @staticmethod
-            def create(_payload):
+            def create(_payload, request_options=None):
                 return {
                     "status": 201,
-                    "response": {"id": "pref_123", "init_point": "https://checkout.example/test"},
+                    "response": {
+                        "id": preference_id,
+                        "init_point": (f"https://www.mercadopago.com/mla/checkout/start?pref_id={preference_id}"),
+                    },
                 }
 
     monkeypatch.setattr("app.payments.service._get_sdk", lambda: _Sdk())
@@ -34,13 +51,39 @@ async def test_checkout_creates_pending_purchase(client, db_session, verified_us
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("provider", ["mercadopago", "stripe"])
+async def test_checkout_rejects_unverified_user_before_provider_or_purchase(
+    client, db_session, unverified_user, auth_headers, monkeypatch, provider
+):
+    provider_calls = []
+
+    async def unexpected_checkout(*_args, **_kwargs):
+        provider_calls.append(provider)
+        raise AssertionError("checkout provider must not be called for an unverified user")
+
+    monkeypatch.setattr("app.payments.routes.create_checkout", unexpected_checkout)
+    monkeypatch.setattr("app.payments.routes.create_checkout_stripe", unexpected_checkout)
+
+    response = await client.post(
+        "/api/v1/credits/checkout",
+        headers=auth_headers(unverified_user),
+        json={"package": "starter", "provider": provider},
+    )
+
+    assert response.status_code == 403
+    assert response.json()["detail"] == "email_verification_required"
+    assert provider_calls == []
+    assert await db_session.scalar(select(CreditPurchase)) is None
+
+
+@pytest.mark.asyncio
 async def test_checkout_rejects_invalid_package(client, verified_user, auth_headers):
     response = await client.post(
         "/api/v1/credits/checkout",
         headers=auth_headers(verified_user),
         json={"package": "bad-package"},
     )
-    assert response.status_code == 400, "Invalid credit packages must be rejected."
+    assert response.status_code == 422, "Invalid credit packages must be rejected by the request schema."
 
 
 @pytest.mark.asyncio
@@ -70,7 +113,7 @@ async def test_webhook_with_valid_signature_credits_purchase(
         class payment:
             @staticmethod
             def get(_payment_id):
-                return {"response": {"status": "approved", "external_reference": str(purchase.id)}}
+                return {"response": _authoritative_payment(purchase, "approved")}
 
     monkeypatch.setattr("app.payments.service._get_sdk", lambda: _Sdk())
 
@@ -84,7 +127,7 @@ async def test_webhook_with_valid_signature_credits_purchase(
         headers={"x-signature": f"ts={ts},v1={signature}", "x-request-id": "req-1"},
     )
 
-    assert response.json()["status"] == "credited", "Approved signed webhooks should credit the purchase."
+    assert response.json()["status"] == "processed", "Approved signed webhooks should credit the purchase."
     refreshed_purchase = await db_session.get(CreditPurchase, purchase.id)
     refreshed_user = await db_session.get(User, verified_user.id)
     assert refreshed_purchase.status == "approved", "Signed approved webhooks should mark purchases approved."
@@ -120,7 +163,7 @@ async def test_webhook_reverts_credits_on_refund(client, db_session, purchase_fa
         class payment:
             @staticmethod
             def get(_payment_id):
-                return {"response": {"status": mp_status["value"], "external_reference": str(purchase.id)}}
+                return {"response": _authoritative_payment(purchase, mp_status["value"])}
 
     monkeypatch.setattr("app.payments.service._get_sdk", lambda: _Sdk())
 
@@ -130,7 +173,7 @@ async def test_webhook_reverts_credits_on_refund(client, db_session, purchase_fa
         json={"action": "payment.updated", "data": {"id": "123"}},
         headers=_signed_headers(),
     )
-    assert approved.json()["status"] == "credited", "Approval should credit first."
+    assert approved.json()["status"] == "processed", "Approval should credit first."
 
     # 2) Estorno reverte
     mp_status["value"] = "refunded"
@@ -140,6 +183,7 @@ async def test_webhook_reverts_credits_on_refund(client, db_session, purchase_fa
         headers=_signed_headers(),
     )
     assert refunded.status_code == 200
+    assert refunded.json() == {"status": "processed", "state": "refunded", "balance_delta": -30}
 
     refreshed_purchase = await db_session.get(CreditPurchase, purchase.id)
     refreshed_user = await db_session.get(User, verified_user.id)
@@ -165,7 +209,7 @@ async def test_webhook_refund_of_unapproved_purchase_is_noop(
         class payment:
             @staticmethod
             def get(_payment_id):
-                return {"response": {"status": "refunded", "external_reference": str(purchase.id)}}
+                return {"response": _authoritative_payment(purchase, "refunded")}
 
     monkeypatch.setattr("app.payments.service._get_sdk", lambda: _Sdk())
 
@@ -175,7 +219,7 @@ async def test_webhook_refund_of_unapproved_purchase_is_noop(
         headers=_signed_headers(),
     )
 
-    assert response.json()["status"] == "not_credited", "Refund of a never-approved purchase must be a no-op."
+    assert response.json() == {"status": "processed", "state": "refunded", "balance_delta": 0}
     refreshed_user = await db_session.get(User, verified_user.id)
     assert refreshed_user.credits == credits_before, "No-op refund must not change the balance."
 
@@ -195,7 +239,7 @@ async def test_webhook_approved_replay_is_idempotent(client, db_session, purchas
         class payment:
             @staticmethod
             def get(_payment_id):
-                return {"response": {"status": "approved", "external_reference": str(purchase.id)}}
+                return {"response": _authoritative_payment(purchase, "approved")}
 
     monkeypatch.setattr("app.payments.service._get_sdk", lambda: _Sdk())
 
@@ -205,7 +249,7 @@ async def test_webhook_approved_replay_is_idempotent(client, db_session, purchas
         json={"action": "payment.updated", "data": {"id": "123"}},
         headers=_signed_headers(),
     )
-    assert first.json()["status"] == "credited", "First approved webhook must credit."
+    assert first.json()["status"] == "processed", "First approved webhook must credit."
 
     # 2) Replay do mesmo payment_id: nao re-credita
     second = await client.post(
@@ -213,7 +257,7 @@ async def test_webhook_approved_replay_is_idempotent(client, db_session, purchas
         json={"action": "payment.updated", "data": {"id": "123"}},
         headers=_signed_headers(),
     )
-    assert second.json()["status"] == "not_credited", "Duplicate MP webhook must not re-credit."
+    assert second.json()["status"] == "not_processed", "Duplicate MP webhook must not re-credit."
 
     refreshed_user = await db_session.get(User, verified_user.id)
     assert (

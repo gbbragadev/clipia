@@ -67,7 +67,7 @@ export interface CompositionData {
   height: number
   title: string
   overlays: VideoOverlay[]
-  musicUrl: string | null
+  musicAssetId: import('./music-assets').MusicAssetId | null
   musicVolume: number
   isRendering?: boolean
   templateId?: string

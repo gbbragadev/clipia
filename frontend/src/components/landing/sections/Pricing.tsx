@@ -9,7 +9,6 @@ import { useAb } from "@/components/landing/lib/ab";
 import {
   BONUS_PERCENT,
   CREDIT_COSTS,
-  CTA_LABEL,
   PACKAGES,
   formatBrl,
 } from "@/components/landing/lib/data";
@@ -19,7 +18,7 @@ export function Pricing() {
   const ab = useAb();
 
   return (
-    <section id="preco" className="relative scroll-mt-20 py-20 sm:py-24">
+    <section id="preco" className="relative overflow-clip scroll-mt-20 py-20 sm:py-24">
       {/* fundo */}
       <div aria-hidden className="pointer-events-none absolute inset-0 -z-10">
         <div
@@ -96,7 +95,7 @@ export function Pricing() {
                   <div className="font-display mt-3 text-4xl font-extrabold tracking-tight text-cloud">
                     {formatBrl(pkg.priceBrl)}
                   </div>
-                  <div className="mt-1 text-[13px] text-mist-2">pagamento único · Pix ou cartão</div>
+                  <div className="mt-1 text-[13px] text-mist-2">pagamento único · Pix e cartão</div>
 
                   <div className="mt-5 flex items-center gap-2">
                     <span className="text-lg font-semibold text-cloud">{pkg.credits} créditos</span>
@@ -116,12 +115,12 @@ export function Pricing() {
 
                   <div className="mt-6">
                     <Button
-                      href={ab.signup(`preco-${pkg.id}`)}
+                      href={ab.signup(`pricing-${pkg.id}`, pkg.id)}
                       variant={pkg.featured ? "primary" : "secondary"}
                       fullWidth
                       iconRight="arrowRight"
                     >
-                      {CTA_LABEL}
+                      Escolher {pkg.name}
                     </Button>
                   </div>
                 </div>

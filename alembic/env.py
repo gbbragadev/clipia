@@ -6,7 +6,15 @@ from sqlalchemy.ext.asyncio import create_async_engine
 
 from app.config import settings
 from app.db.base import Base
-from app.db.models import User, Job, WaitlistEntry, CreditPurchase  # noqa: F401
+from app.db.models import (  # noqa: F401
+    AnalyticsEvent,
+    CreditPurchase,
+    Job,
+    PasswordResetToken,
+    PaymentCheckoutDispatch,
+    User,
+    WaitlistEntry,
+)
 
 config = context.config
 if config.config_file_name is not None:

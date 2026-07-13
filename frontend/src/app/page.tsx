@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import { SkipLink } from "@/components/landing/SkipLink";
 import { Nav } from "@/components/landing/Nav";
 import { StickyCta } from "@/components/landing/StickyCta";
@@ -11,13 +12,20 @@ import { Pricing } from "@/components/landing/sections/Pricing";
 import { FAQ } from "@/components/landing/sections/FAQ";
 import { FinalCta } from "@/components/landing/sections/FinalCta";
 import { Footer } from "@/components/landing/sections/Footer";
+import { SITE } from "@/lib/site";
+import { AbProvider } from "@/components/landing/lib/ab";
+
+export const metadata: Metadata = {
+  alternates: { canonical: SITE.url },
+};
 
 // Anatomia de conversão: promessa concreta (Hero com vídeo real) → prova
 // (antes→depois) → fatos verificáveis → chamada por persona → nichos/SEO →
 // como funciona → preço transparente → FAQ honesta → CTA final.
 export default function Home() {
   return (
-    <div id="top" className="min-h-screen bg-ink text-cloud antialiased">
+    <AbProvider>
+      <div id="top" className="min-h-screen bg-ink text-cloud antialiased">
       <script
         type="application/ld+json"
         dangerouslySetInnerHTML={{
@@ -29,7 +37,7 @@ export default function Home() {
             operatingSystem: "Web",
             offers: { "@type": "Offer", price: "0", priceCurrency: "BRL" },
             description: "Plataforma de geração automatizada de vídeos curtos com IA",
-            url: "https://clipia.com.br",
+            url: SITE.url,
           }),
         }}
       />
@@ -48,6 +56,7 @@ export default function Home() {
       </main>
       <Footer />
       <StickyCta />
-    </div>
+      </div>
+    </AbProvider>
   );
 }

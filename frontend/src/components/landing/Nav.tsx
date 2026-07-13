@@ -4,11 +4,13 @@ import { cn } from "@/components/landing/utils/cn";
 import Logo from "@/components/brand/Logo";
 import { Button } from "@/components/landing/ui/Button";
 import { Icon } from "@/components/landing/icons";
-import { CTA_LABEL, NAV_LINKS, SITE, signupUrl } from "@/components/landing/lib/data";
+import { CTA_LABEL, NAV_LINKS, SITE } from "@/components/landing/lib/data";
+import { useAb } from "@/components/landing/lib/ab";
 import { useAuth } from "@/contexts/AuthContext";
 
 export function Nav() {
   const { user } = useAuth();
+  const ab = useAb();
   const [scrolled, setScrolled] = useState(false);
   const [open, setOpen] = useState(false);
 
@@ -62,7 +64,7 @@ export function Nav() {
               <Button href={SITE.login} variant="ghost" size="sm">
                 Entrar
               </Button>
-              <Button href={signupUrl("nav")} variant="primary" size="sm" iconRight="arrowRight">
+              <Button href={ab.signup("nav")} variant="primary" size="sm" iconRight="arrowRight">
                 {CTA_LABEL}
               </Button>
             </>
@@ -85,8 +87,10 @@ export function Nav() {
       <div
         id="menu-mobile"
         className={cn(
-          "overflow-hidden border-t border-white/8 bg-ink/95 backdrop-blur-xl transition-[max-height,opacity] duration-300 lg:hidden",
-          open ? "max-h-[26rem] opacity-100" : "max-h-0 opacity-0"
+          "border-t border-white/8 bg-ink/95 backdrop-blur-xl transition-[max-height,opacity] duration-300 lg:hidden",
+          open
+            ? "max-h-[calc(100dvh-4rem)] overflow-y-auto overscroll-y-contain opacity-100"
+            : "max-h-0 overflow-y-hidden opacity-0"
         )}
       >
         <div className="space-y-1 px-5 py-4">
@@ -107,7 +111,7 @@ export function Nav() {
               </Button>
             ) : (
               <>
-                <Button href={signupUrl("nav-mobile")} variant="primary" size="lg" fullWidth iconRight="arrowRight">
+                <Button href={ab.signup("nav-mobile")} variant="primary" size="lg" fullWidth iconRight="arrowRight">
                   {CTA_LABEL}
                 </Button>
                 <Button href={SITE.login} variant="secondary" size="md" fullWidth>

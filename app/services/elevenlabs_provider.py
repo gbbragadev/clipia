@@ -5,6 +5,7 @@ import logging
 from pathlib import Path
 
 from app.config import settings
+from app.credits import CREDIT_TARIFFS
 from app.redis_pool import get_redis
 from app.services.tts import _fit_to_duration
 from app.services.voice_provider import VoiceInfo, VoiceProvider
@@ -116,7 +117,7 @@ class ElevenLabsProvider(VoiceProvider):
         return voices
 
     def estimate_cost(self, text: str) -> int:
-        return settings.CREDIT_COST_ELEVENLABS
+        return int(CREDIT_TARIFFS.dialogue)
 
     async def design_voice(self, name: str, description: str, text: str | None = None) -> str:
         """Design a voice from a text description (Voice Design). Returns the new voice_id.

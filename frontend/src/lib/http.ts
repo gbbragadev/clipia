@@ -1,7 +1,19 @@
+import { clearAuthSession, getCsrfToken } from './session'
+
 export function notifySessionExpired(): void {
   if (typeof window === 'undefined') return
-  window.localStorage.removeItem('clipia_token')
+  clearAuthSession()
   window.dispatchEvent(new CustomEvent('clipia:session-expired'))
+}
+
+export class ApiError extends Error {
+  readonly status: number
+
+  constructor(status: number, message: string) {
+    super(message)
+    this.name = 'ApiError'
+    this.status = status
+  }
 }
 
 function friendlyStatusMessage(status: number, fallback: string): string {
@@ -64,19 +76,24 @@ export async function fetchJson<T>(
   fallbackMessage = 'Erro na requisição',
 ): Promise<T> {
   try {
+    const headers = new Headers(init.headers)
+    if (!headers.has('Content-Type')) headers.set('Content-Type', 'application/json')
+    const method = (init.method || 'GET').toUpperCase()
+    if (!['GET', 'HEAD', 'OPTIONS', 'TRACE'].includes(method) && !headers.has('X-CSRF-Token')) {
+      const csrf = getCsrfToken()
+      if (csrf) headers.set('X-CSRF-Token', csrf)
+    }
     const response = await fetch(input, {
       ...init,
-      headers: {
-        'Content-Type': 'application/json',
-        ...init.headers,
-      },
+      credentials: 'include',
+      headers,
     })
 
     if (!response.ok) {
       // NÃO deslogar aqui: um 401 de um recurso específico (job, download, composition…) não significa
       // sessão expirada. A expiração real é detectada por getMe() (load + polling 5min do AuthContext).
       // Deslogar em qualquer 401 derrubava a sessão válida por falhas pontuais (BUG-R003).
-      throw new Error(await readApiError(response, fallbackMessage))
+      throw new ApiError(response.status, await readApiError(response, fallbackMessage))
     }
 
     // await dentro do try: sem ele, um corpo 200 com JSON invalido rejeitaria FORA

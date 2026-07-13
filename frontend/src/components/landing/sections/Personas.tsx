@@ -24,14 +24,19 @@ function ShowcaseFan() {
   const { ref, inView } = useInView<HTMLDivElement>({ threshold: 0.3, once: false });
   const [ocean, cerebro, ia] = [SHOWCASE_HERO[1], SHOWCASE_HERO[0], SHOWCASE_HERO[2]];
   return (
-    <div ref={ref} className="relative mx-auto flex max-w-md items-center justify-center py-6">
-      <div className="w-[120px] -rotate-6 translate-y-5 opacity-80 sm:w-[150px]">
+    <div
+      ref={ref}
+      role="group"
+      aria-label="Exemplos de videos em celulares"
+      className="relative mx-auto grid w-full min-w-0 max-w-md grid-cols-[minmax(0,1fr)_minmax(0,1.42fr)_minmax(0,1fr)] items-center py-6"
+    >
+      <div className="min-w-0 w-full -rotate-6 translate-x-1 translate-y-5 opacity-80">
         <VideoPhone src={ocean.src} poster={ocean.poster} title={ocean.title} accent={ocean.accent} active={false} badge={false} />
       </div>
-      <div className="z-10 -mx-5 w-[170px] sm:w-[195px]">
+      <div className="z-10 min-w-0 w-full scale-[1.04]">
         <VideoPhone src={cerebro.src} poster={cerebro.poster} title={cerebro.title} accent={cerebro.accent} active={inView} />
       </div>
-      <div className="w-[120px] rotate-6 translate-y-5 opacity-80 sm:w-[150px]">
+      <div className="min-w-0 w-full rotate-6 -translate-x-1 translate-y-5 opacity-80">
         <VideoPhone src={ia.src} poster={ia.poster} title={ia.title} accent={ia.accent} active={false} badge={false} />
       </div>
     </div>
@@ -107,8 +112,8 @@ function PersonaBlock({ persona, flip }: { persona: Persona; flip: boolean }) {
   const a = accentMap[persona.accent];
 
   return (
-    <div className="relative grid items-center gap-10 lg:grid-cols-2 lg:gap-14">
-      <div className={cn("relative", flip && "lg:order-2")}>
+    <div className="relative grid w-full min-w-0 items-center gap-10 lg:grid-cols-2 lg:gap-14">
+      <div className={cn("relative min-w-0", flip && "lg:order-2")}>
         <span
           aria-hidden
           className="font-display pointer-events-none absolute -left-3 -top-14 select-none text-[7rem] font-extrabold leading-none text-white/[0.04] sm:text-[8.5rem]"
@@ -166,7 +171,7 @@ function PersonaBlock({ persona, flip }: { persona: Persona; flip: boolean }) {
         </Reveal>
       </div>
 
-      <Reveal delay={200} className={cn("w-full", flip && "lg:order-1")}>
+      <Reveal delay={200} className={cn("w-full min-w-0", flip && "lg:order-1")}>
         <PersonaVisual persona={persona} />
       </Reveal>
     </div>

@@ -3,10 +3,12 @@ import { Container } from "@/components/landing/ui/Container";
 import { SectionHeading } from "@/components/landing/ui/SectionHeading";
 import { Reveal } from "@/components/landing/Reveal";
 import { Icon } from "@/components/landing/icons";
-import { CTA_LABEL, FAQ_ITEMS, signupUrl } from "@/components/landing/lib/data";
+import { CTA_LABEL, FAQ_ITEMS } from "@/components/landing/lib/data";
+import { useAb } from "@/components/landing/lib/ab";
 import { Button } from "@/components/landing/ui/Button";
 
 export function FAQ() {
+  const ab = useAb();
   return (
     <section id="faq" className="relative scroll-mt-20 py-20 sm:py-24">
       <Container>
@@ -35,11 +37,9 @@ export function FAQ() {
 
           <Reveal delay={120} className="rounded-2xl border border-white/8 bg-panel/70 p-6 text-center">
             <p className="text-sm text-mist">Ainda com dúvida?</p>
-            <p className="mt-1 text-base font-semibold text-cloud">
-              Crie sua conta grátis e teste você mesmo — sem cartão.
-            </p>
+            <p className="mt-1 text-base font-semibold text-cloud">{ab.freeClaim}</p>
             <div className="mt-4 flex justify-center">
-              <Button href={signupUrl("faq")} iconRight="arrowRight">
+              <Button href={ab.signup("faq")} iconRight="arrowRight">
                 {CTA_LABEL}
               </Button>
             </div>

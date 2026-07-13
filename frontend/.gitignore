@@ -12,10 +12,13 @@
 
 # testing
 /coverage
+/.playwright-release-b/
 
 # next.js
 /.next/
 /.next-verify/
+/.next-release-b/
+/.next-releases/
 /out/
 
 # production

@@ -55,11 +55,11 @@ export function VideoPhone({
   }, [shouldPlay, src]);
 
   return (
-    <div ref={ref} className={cn("relative", className)}>
+    <div ref={ref} className={cn("relative isolate min-w-0", className)}>
       {/* glow atrás do aparelho */}
       <div
         aria-hidden
-        className="absolute -inset-6 -z-10 rounded-[3rem] opacity-50 blur-3xl"
+        className="pointer-events-none absolute inset-0 -z-10 rounded-[3rem] opacity-50 blur-3xl"
         style={{
           background:
             accent === "coral"

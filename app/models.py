@@ -7,6 +7,14 @@ from app.errors import ErrorMessages, json_size_bytes
 from app.templates import TEMPLATES
 
 
+def _is_opaque_voice_id(value: object) -> bool:
+    return (
+        isinstance(value, str)
+        and 1 <= len(value) <= 128
+        and all(char.isascii() and (char.isalnum() or char in "-_") for char in value)
+    )
+
+
 class GenerateRequest(BaseModel):
     topic: str = Field(..., min_length=10, max_length=500, description="The main topic of the video")
     style: Literal["educational", "storytelling", "news", "comedy"] = Field(
@@ -14,7 +22,7 @@ class GenerateRequest(BaseModel):
     )
     duration_target: int = Field(default=45, ge=15, le=180, description="Target duration in seconds")
     template_id: str = Field(default="stock_narration", description="Template to use for the video")
-    voice_provider: Literal["edge", "elevenlabs", "custom"] = Field(default="edge", description="Voice provider to use")
+    voice_provider: Literal["edge", "elevenlabs"] = Field(default="edge", description="Voice provider to use")
     voice_config: dict | None = Field(default=None, description="Voice configuration (voice_id, rate, pitch, etc)")
     trend_context: str | None = Field(
         default=None,
@@ -51,6 +59,19 @@ class GenerateRequest(BaseModel):
             if template and not (template.dialogue_capable or template.script.is_dialogue):
                 raise ValueError(ErrorMessages.INVALID_INPUT)
         return self
+
+    @field_validator("voice_config")
+    @classmethod
+    def reject_voice_paths(cls, value: dict | None) -> dict | None:
+        if value is None:
+            return None
+        forbidden_keys = {"source_path", "sourcePath", "voicePath", "path", "url"}
+        if forbidden_keys.intersection(value):
+            raise ValueError(ErrorMessages.INVALID_INPUT)
+        voice_id = value.get("voice_id")
+        if voice_id is not None and not _is_opaque_voice_id(voice_id):
+            raise ValueError(ErrorMessages.INVALID_INPUT)
+        return value
 
     @model_validator(mode="after")
     def validate_custom_script(self):
@@ -153,12 +174,41 @@ class CompositionResponse(BaseModel):
     width: int = Field(default=1080, description="Video width")
     height: int = Field(default=1920, description="Video height")
     pending_credits: float = Field(default=0.0, description="Pending credits cost")
-    music_url: str | None = Field(default=None, description="Faixa de fundo do mood (default quando sem editor_state)")
+    music_asset_id: str | None = Field(
+        default=None, description="ID opaco da faixa de fundo (default quando sem editor_state)"
+    )
     music_volume: float = Field(default=0.12, description="Volume default da musica de fundo")
 
 
 class EditRequest(BaseModel):
     editor_state: dict = Field(..., description="New editor state to save")
+
+    @field_validator("editor_state")
+    @classmethod
+    def validate_editor_assets(cls, value: dict) -> dict:
+        from app.services.music import validate_music_asset_id
+
+        composition = value.get("composition")
+        if not isinstance(composition, dict):
+            return value
+        if "musicUrl" in composition:
+            raise ValueError(ErrorMessages.INVALID_INPUT)
+        asset_id = composition.get("musicAssetId")
+        if asset_id is not None:
+            try:
+                validate_music_asset_id(asset_id)
+            except (TypeError, ValueError) as exc:
+                raise ValueError(ErrorMessages.INVALID_INPUT) from exc
+
+        voice_config = composition.get("voiceConfig")
+        if isinstance(voice_config, dict):
+            forbidden_keys = {"source_path", "sourcePath", "voicePath", "path", "url"}
+            if forbidden_keys.intersection(voice_config):
+                raise ValueError(ErrorMessages.INVALID_INPUT)
+            voice_id = voice_config.get("voiceId")
+            if voice_id is not None and not _is_opaque_voice_id(voice_id):
+                raise ValueError(ErrorMessages.INVALID_INPUT)
+        return value
 
 
 class RegenerateTTSRequest(BaseModel):

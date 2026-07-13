@@ -1,16 +1,16 @@
 """Credit pricing helpers for generation workflows."""
 
-from app.config import settings
+from app.credits import CREDIT_TARIFFS
 from app.templates import get_template
 
 
 def get_voice_credit_cost(voice_provider: str) -> int:
     costs = {
-        "edge": settings.CREDIT_COST_EDGE,
-        "elevenlabs": settings.CREDIT_COST_ELEVENLABS,
-        "custom": settings.CREDIT_COST_CUSTOM_AUDIO,
+        "edge": int(CREDIT_TARIFFS.standard_voice),
+        "elevenlabs": int(CREDIT_TARIFFS.dialogue),
+        "custom": int(CREDIT_TARIFFS.standard_voice),
     }
-    return costs.get(voice_provider, settings.CREDIT_COST_EDGE)
+    return costs.get(voice_provider, int(CREDIT_TARIFFS.standard_voice))
 
 
 def get_generation_credit_cost(template_id: str, voice_provider: str) -> int:
@@ -22,7 +22,7 @@ def get_generation_credit_cost(template_id: str, voice_provider: str) -> int:
     voice_cost = get_voice_credit_cost(voice_provider)
     template = get_template(template_id)
     if template.media.source == "ai_video":
-        return max(voice_cost, settings.CREDIT_COST_AI_VIDEO)
+        return max(voice_cost, int(CREDIT_TARIFFS.ai_video))
     if template.media.source == "ai_image":
-        return max(voice_cost, settings.CREDIT_COST_AI_IMAGE)
+        return max(voice_cost, int(CREDIT_TARIFFS.ai_image))
     return voice_cost

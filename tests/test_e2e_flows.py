@@ -11,7 +11,7 @@ from app.payments import routes as payments_routes
 async def test_register_verify_generate_status_and_download_flow(client, db_session, app, storage_dir):
     register = await client.post(
         "/api/v1/auth/register",
-        json={"email": "flow@example.com", "name": "Flow User", "password": "Supersecret1"},
+        json={"email": "flow@example.com", "name": "Flow User", "password": "Supersecret1", "consent": True},
     )
     assert register.status_code == 201
     token = register.json()["access_token"]

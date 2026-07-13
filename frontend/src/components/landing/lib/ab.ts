@@ -1,5 +1,11 @@
 "use client";
-import { useEffect, useState } from "react";
+import { createContext, createElement, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
+import {
+  ATTRIBUTION_KEYS,
+  getStoredAttribution,
+  type StoredAttribution,
+} from "@/hooks/useUTM";
+import type { SelectedPackage } from "@/lib/package-intent";
 import {
   AB_DEFAULTS,
   FREE_CLAIM,
@@ -22,9 +28,33 @@ interface AbFile {
 const VARIANTS: AbVariant[] = ["A", "B", "C"];
 const STORAGE_KEY = "clipia_ab";
 
-export function useAb() {
+interface AbContextValue {
+  variant: AbVariant;
+  headline: (section: AbSection) => string;
+  signup: (placement: string, selectedPackage?: SelectedPackage) => string;
+  showBonusBadge: boolean;
+  freeClaim: string;
+}
+
+const AbContext = createContext<AbContextValue | null>(null);
+
+function readAttribution(): StoredAttribution {
+  if (typeof window === "undefined") return {};
+  const current = new URLSearchParams(window.location.search);
+  const stored = getStoredAttribution();
+  const attribution: StoredAttribution = { ...stored };
+  for (const key of ATTRIBUTION_KEYS) {
+    const value = current.get(key) || stored[key];
+    if (value) attribution[key] = value;
+  }
+  attribution.referral_code = current.get("ref") || stored.referral_code;
+  return attribution;
+}
+
+export function AbProvider({ children }: { children: ReactNode }) {
   const [variant, setVariant] = useState<AbVariant>("A");
   const [file, setFile] = useState<AbFile | null>(null);
+  const [attribution, setAttribution] = useState<StoredAttribution>({});
 
   useEffect(() => {
     let v: AbVariant | null = null;
@@ -38,6 +68,7 @@ export function useAb() {
       v = "A";
     }
     setVariant(v);
+    setAttribution(readAttribution());
 
     fetch("/ab/headlines.json", { cache: "no-store" })
       .then((r) => (r.ok ? r.json() : null))
@@ -45,17 +76,36 @@ export function useAb() {
       .catch(() => {}); // sem o arquivo, os defaults embutidos valem
   }, []);
 
-  const headline = (section: AbSection): string =>
-    file?.sections?.[section]?.[variant] ?? AB_DEFAULTS[section][variant];
+  const value = useMemo<AbContextValue>(() => {
+    const headline = (section: AbSection): string =>
+      file?.sections?.[section]?.[variant] ?? AB_DEFAULTS[section][variant];
 
-  const signup = (content: string): string =>
-    `${SITE.signup}?utm_source=landing&utm_medium=organic&utm_campaign=landing-conversao&utm_content=${content}-${variant.toLowerCase()}`;
+    const signup = (placement: string, selectedPackage?: SelectedPackage): string => {
+      const params = new URLSearchParams();
+      if (selectedPackage) params.set("selected_package", selectedPackage);
+      for (const key of ATTRIBUTION_KEYS) {
+        if (attribution[key]) params.set(key, attribution[key]);
+      }
+      if (attribution.referral_code) params.set("ref", attribution.referral_code);
+      params.set("placement", placement);
+      params.set("ab_variant", variant.toLowerCase());
+      return `${SITE.signup}?${params.toString()}`;
+    };
 
-  return {
-    variant,
-    headline,
-    signup,
-    showBonusBadge: file?.knobs?.showBonusBadge ?? true,
-    freeClaim: file?.knobs?.freeClaim ?? FREE_CLAIM,
-  };
+    return {
+      variant,
+      headline,
+      signup,
+      showBonusBadge: file?.knobs?.showBonusBadge ?? true,
+      freeClaim: file?.knobs?.freeClaim ?? FREE_CLAIM,
+    };
+  }, [attribution, file, variant]);
+
+  return createElement(AbContext.Provider, { value }, children);
+}
+
+export function useAb(): AbContextValue {
+  const value = useContext(AbContext);
+  if (!value) throw new Error("useAb must be used within AbProvider");
+  return value;
 }

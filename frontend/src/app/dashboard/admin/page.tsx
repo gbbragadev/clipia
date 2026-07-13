@@ -99,7 +99,7 @@ export default function AdminDashboardPage() {
   ) : (
     <>
       <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        <StatCard title="Receita aprovada" value={formatCurrency(data.summary.approved_revenue_brl)} hint={`${data.summary.approved_orders} pedidos aprovados`} accent="#22c55e" />
+        <StatCard title="Receita liquida" value={formatCurrency(data.summary.net_revenue_brl)} hint={`${data.summary.approved_orders} pagamentos brutos / ${formatCurrency(data.summary.refunded_value_brl)} reembolsados`} accent="#22c55e" />
         <StatCard title="Receita pendente" value={formatCurrency(data.summary.pending_revenue_brl)} hint={`${data.summary.pending_orders} pagamentos em aberto`} accent="#f59e0b" />
         <StatCard title="Ticket médio" value={formatCurrency(data.summary.average_ticket_brl)} hint={`${data.summary.credits_sold} créditos vendidos`} accent="#38bdf8" />
         <StatCard title="Usuários novos" value={String(data.summary.new_users)} hint={`${data.summary.verified_users} verificados / ${data.summary.paying_users} pagantes`} accent="#3e9bff" />
@@ -114,18 +114,27 @@ export default function AdminDashboardPage() {
           <PanelHeader
             eyebrow="Receita"
             title="Faturamento por dia"
-            description="Compras aprovadas convertidas em receita realizada."
+            description="Pagamentos brutos por data de aprovacao; reembolsos aparecem separados no resumo."
           />
           <MiniBarChart data={data.timeseries.revenue_by_day} color="linear-gradient(180deg, #22c55e, #15803d)" formatter={(value) => formatCurrency(value)} />
         </div>
         <div className="card p-6">
           <PanelHeader
             eyebrow="Funil"
-            title="Cadastro ate pagamento"
-            description="Conversao dos novos usuarios dentro da janela selecionada."
+            title="Visita ate segundo video"
+            description="Funil autoritativo; o gate usa 14 dias corridos independentemente da janela selecionada."
           />
           <FunnelCard data={data.funnel} />
         </div>
+      </section>
+
+      <section className="card p-6">
+        <PanelHeader
+          eyebrow="Coortes"
+          title="Ativacao por semana, origem, nicho e dispositivo"
+          description="Segmentos sem PII, calculados sobre usuarios cadastrados na janela."
+        />
+        <CohortsCard cohorts={data.cohorts} />
       </section>
 
       <section className="grid gap-6 xl:grid-cols-[1.1fr_1.1fr_0.9fr]">
@@ -163,7 +172,7 @@ export default function AdminDashboardPage() {
                       <p className="text-xs" style={{ color: 'var(--text-secondary)' }}>{item.orders} pedidos</p>
                     </div>
                     <div className="text-right">
-                      <p className="font-semibold">{formatCurrency(item.approved_revenue_brl)}</p>
+                      <p className="font-semibold">{formatCurrency(item.net_revenue_brl)}</p>
                       <p className="text-xs" style={{ color: 'var(--text-secondary)' }}>{item.credits_sold} creditos</p>
                     </div>
                   </div>
@@ -355,14 +364,34 @@ function StatCard({ title, value, hint, accent }: { title: string; value: string
 
 function FunnelCard({ data }: { data: AdminDashboardResponse['funnel'] }) {
   const stages = [
+    { label: 'Visitas', value: data.visited, tone: '#a78bfa' },
+    { label: 'Cliques no CTA', value: data.cta_clicked, tone: '#818cf8' },
     { label: 'Cadastrados', value: data.registered, tone: '#60a5fa' },
     { label: 'Verificados', value: data.verified, tone: '#f59e0b' },
+    { label: 'Primeira geracao solicitada', value: data.first_generation, tone: '#fb923c' },
+    { label: 'Exportaram', value: data.exported, tone: '#f472b6' },
+    { label: 'Iniciaram checkout', value: data.checkout_started, tone: '#2dd4bf' },
     { label: 'Pagantes', value: data.paying, tone: '#22c55e' },
+    { label: 'Segundo video solicitado', value: data.second_generation, tone: '#10b981' },
   ]
   const max = Math.max(...stages.map((stage) => stage.value), 1)
 
   return (
     <div className="mt-6 space-y-4">
+      <div
+        className="rounded-2xl border p-3 text-xs leading-5"
+        style={{
+          borderColor: data.onboarding_gate_ready ? 'rgba(34,197,94,0.3)' : 'rgba(245,158,11,0.3)',
+          background: data.onboarding_gate_ready ? 'rgba(34,197,94,0.08)' : 'rgba(245,158,11,0.08)',
+          color: 'var(--text-secondary)',
+        }}
+      >
+        {!data.analytics_enabled
+          ? 'Analytics desativado: visitas e CTA nao formam baseline ate a aprovacao de Privacidade.'
+          : data.onboarding_gate_ready
+            ? `Baseline pronto (${data.baseline_days} dias). O onboarding pode seguir para decisao de release.`
+            : `Baseline em coleta: ${data.baseline_days}/14 dias. O onboarding novo permanece bloqueado.`}
+      </div>
       {stages.map((stage) => (
         <div key={stage.label}>
           <div className="mb-2 flex items-center justify-between text-sm">
@@ -376,8 +405,46 @@ function FunnelCard({ data }: { data: AdminDashboardResponse['funnel'] }) {
       ))}
       <div className="grid gap-3 pt-2 sm:grid-cols-2">
         <MetricRow label="Taxa de verificacao" value={`${data.verification_rate}%`} compact />
-        <MetricRow label="Conversao em pagante" value={`${data.payer_conversion_rate}%`} compact />
+        <MetricRow label="Verificado para 1o video" value={`${data.activation_rate}%`} compact />
+        <MetricRow label="Exportacao para pagamento" value={`${data.export_payment_rate}%`} compact />
+        <MetricRow label="1o para 2o video" value={`${data.second_generation_rate}%`} compact />
       </div>
+    </div>
+  )
+}
+
+function CohortsCard({ cohorts }: { cohorts: AdminDashboardResponse['cohorts'] }) {
+  const groups = [
+    { label: 'Semana', rows: cohorts.weekly },
+    { label: 'Origem', rows: cohorts.source },
+    { label: 'Nicho', rows: cohorts.niche },
+    { label: 'Dispositivo', rows: cohorts.device },
+  ]
+
+  return (
+    <div className="mt-6 grid gap-4 lg:grid-cols-2 xl:grid-cols-4">
+      {groups.map((group) => (
+        <div key={group.label} className="rounded-2xl border p-4" style={{ borderColor: 'var(--border-subtle)', background: 'rgba(255,255,255,0.02)' }}>
+          <p className="text-xs uppercase tracking-[0.16em]" style={{ color: 'var(--text-tertiary)' }}>{group.label}</p>
+          <div className="mt-3 space-y-3">
+            {group.rows.length === 0 ? (
+              <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>Sem coortes na janela.</p>
+            ) : (
+              group.rows.slice(0, 8).map((row) => (
+                <div key={row.key} className="border-t pt-3 first:border-t-0 first:pt-0" style={{ borderColor: 'var(--border-subtle)' }}>
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="truncate text-sm font-medium" title={row.key}>{row.key}</span>
+                    <span className="text-xs" style={{ color: 'var(--text-secondary)' }}>{row.registered} cad.</span>
+                  </div>
+                  <p className="mt-1 text-xs" style={{ color: 'var(--text-tertiary)' }}>
+                    Ativacao {row.activation_rate}% · Pagantes {row.payer_conversion_rate}%
+                  </p>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+      ))}
     </div>
   )
 }

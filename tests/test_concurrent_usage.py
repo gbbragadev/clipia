@@ -1,6 +1,7 @@
 import asyncio
 
 import pytest
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import CreditPurchase, Job, User
 
@@ -30,32 +31,74 @@ async def test_concurrent_generate_with_one_credit_allows_only_one_success(
 
 
 @pytest.mark.asyncio
-async def test_concurrent_verify_email_only_credits_once(client, db_session, unverified_user, monkeypatch):
+async def test_concurrent_verify_email_only_credits_once_without_process_lock(
+    client, db_session, unverified_user, monkeypatch
+):
     # Fixa o default publico (2): o .env local pode elevar WELCOME_CREDIT_BONUS no beta fechado.
     monkeypatch.setattr("app.auth.routes.settings.WELCOME_CREDIT_BONUS", 2)
+    db_user = await db_session.get(User, unverified_user.id)
+    db_user.credits = 7
+    await db_session.commit()
+
+    class _IndependentLock:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return None
+
+    monkeypatch.setattr("app.auth.routes.get_lock", lambda _key: _IndependentLock())
+
+    request_count = 5
+    reads_ready = asyncio.Event()
+    initial_reads = 0
+    original_execute = AsyncSession.execute
+
+    async def execute_after_shared_snapshot(self, statement, *args, **kwargs):
+        nonlocal initial_reads
+        result = await original_execute(self, statement, *args, **kwargs)
+        if getattr(statement, "is_select", False) and initial_reads < request_count:
+            initial_reads += 1
+            await self.commit()
+            if initial_reads == request_count:
+                reads_ready.set()
+            await reads_ready.wait()
+        return result
+
+    monkeypatch.setattr(AsyncSession, "execute", execute_after_shared_snapshot)
+
+    credit_metrics = []
+    monkeypatch.setattr(
+        "app.auth.routes.record_credit_metric",
+        lambda metric_type, amount: credit_metrics.append((metric_type, amount)),
+    )
+
     responses = await asyncio.gather(
         *[
             client.post(
                 "/api/v1/auth/verify-email",
                 json={"email": unverified_user.email, "code": unverified_user.verification_code},
             )
-            for _ in range(5)
+            for _ in range(request_count)
         ]
     )
 
-    statuses = {response.json()["status"] for response in responses}
+    assert all(response.status_code == 200 for response in responses)
+    statuses = [response.json()["status"] for response in responses]
+    db_session.expire_all()
     refreshed_user = await db_session.get(User, unverified_user.id)
 
-    assert "verified" in statuses, "One verification request should perform the OTP verification."
-    assert "already_verified" in statuses, "Subsequent concurrent verification requests should become idempotent."
-    assert refreshed_user.credits == 2, "Concurrent OTP verification should only grant credits once."
+    assert statuses.count("verified") == 1, "Only one request should perform the protected verification transition."
+    assert statuses.count("already_verified") == request_count - 1
+    assert refreshed_user.credits == 9, "Concurrent OTP verification should add the bonus exactly once."
+    assert credit_metrics.count(("credit", 2)) == 1
 
 
 @pytest.mark.asyncio
 async def test_concurrent_render_only_debits_pending_credits_once(
     client, db_session, job_factory, verified_user, auth_headers, storage_dir
 ):
-    job = await job_factory(pending_credits=2.0)
+    job = await job_factory(status="completed", pending_credits=2.0)
     job_dir = storage_dir / "jobs" / str(job.id)
     job_dir.mkdir(parents=True)
 
@@ -67,7 +110,9 @@ async def test_concurrent_render_only_debits_pending_credits_once(
     refreshed_user = await db_session.get(User, verified_user.id)
     refreshed_job = await db_session.get(Job, job.id)
 
-    assert success_count == 2, "Both render calls may return success once the first call clears pending credits."
+    conflict_count = sum(response.status_code == 409 for response in responses)
+    assert success_count == 1, "Only the request that creates the durable operation may succeed."
+    assert conflict_count == 1, "The competing render must be rejected while the first operation is active."
     assert refreshed_user.credits == 3, "Concurrent render should charge the pending amount only once."
     assert refreshed_job.pending_credits == 0.0, "Concurrent render should leave no pending credits behind."
 
@@ -82,7 +127,16 @@ async def test_webhook_replay_only_credits_purchase_once(
         class payment:
             @staticmethod
             def get(_payment_id):
-                return {"response": {"status": "approved", "external_reference": str(purchase.id)}}
+                return {
+                    "response": {
+                        "id": "999",
+                        "status": "approved",
+                        "external_reference": str(purchase.id),
+                        "transaction_amount": purchase.price_brl / 100,
+                        "currency_id": "BRL",
+                        "preference_id": purchase.mp_preference_id,
+                    }
+                }
 
     monkeypatch.setattr("app.payments.service._get_sdk", lambda: _Sdk())
 

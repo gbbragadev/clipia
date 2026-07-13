@@ -4,6 +4,7 @@ import logging
 import math
 import shutil
 import time
+import uuid
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -11,14 +12,26 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import FileResponse
 from slowapi import Limiter
-from sqlalchemy import func, select, update
+from sqlalchemy import func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.analytics.service import append_server_event_safely
 from app.api.security import get_owned_job
 from app.auth.dependencies import get_current_admin_user, get_current_user
 from app.config import settings
+from app.credits import CREDIT_TARIFFS
 from app.db.engine import get_db
-from app.db.models import CreditAdjustment, CreditPurchase, Feedback, Job, User, VoiceClone, WaitlistEntry
+from app.db.models import (
+    AnalyticsEvent,
+    CreditAdjustment,
+    CreditPurchase,
+    Feedback,
+    Job,
+    JobDispatch,
+    User,
+    VoiceClone,
+    WaitlistEntry,
+)
 from app.errors import ErrorMessages, not_found_error, validate_uuid
 from app.models import (
     AdminCreditAdjustRequest,
@@ -34,13 +47,40 @@ from app.models import (
     WaitlistRequest,
 )
 from app.observability import record_credit_metric
+from app.payments.states import (
+    canonical_payment_state_expression,
+    canonical_payment_state_or_invalid,
+)
 from app.pricing import get_generation_credit_cost
 from app.redis_pool import get_redis
+from app.services.audio_uploads import (
+    declared_audio_extension,
+    parse_limited_multipart,
+    read_limited_audio,
+    write_limited_audio,
+)
+from app.services.credit_ledger import set_credit_ledger_context
+from app.services.dispatch_outbox import DispatchPayload, create_dispatch, publish_dispatch
+from app.services.job_operations import (
+    InsufficientCredits,
+    InvalidJobOperation,
+    begin_rerender,
+    mark_generation_dispatched,
+    mark_rerender_dispatched,
+    refund_generation,
+    refund_rerender,
+    request_generation_cancel,
+)
 from app.services.llm import complete_text, strip_code_fences
+from app.services.refine_balance import (
+    adjust_refine_balance,
+    queue_refine_balance_projection,
+    sync_refine_balance_projection,
+)
 from app.services.remotion import scene_sort_key
 from app.services.trends import fetch_trends, get_example_topics
 from app.templates import get_template
-from app.utils.files import bytes_to_gb, get_job_dir, path_size_bytes
+from app.utils.files import bytes_to_gb, cleanup_job_dir, get_job_dir, path_size_bytes
 from app.utils.locks import get_lock
 from app.utils.media_url import sign_media_url
 from app.utils.ratelimit import client_ip
@@ -52,25 +92,14 @@ router = APIRouter(tags=["jobs"])
 _redis = get_redis()
 
 _ADMIN_DASHBOARD_RANGES = {"7d": 7, "30d": 30, "90d": 90}
-
-_ALLOWED_AUDIO_MIMES: dict[str, str] = {
-    "audio/wav": ".wav",
-    "audio/x-wav": ".wav",
-    "audio/mpeg": ".mp3",
-    "audio/mp3": ".mp3",
-    "audio/webm": ".webm",
-    "audio/ogg": ".ogg",
-}
+_ANALYTICS_NICHES = {"curiosidades", "religioso", "motivacional", "financas", "historias", "humor", "drama"}
 
 
 def _validate_audio_upload(content_type: str | None, filename: str | None, size: int, max_mb: int = 50) -> str:
     """Validate audio upload. Returns safe extension. Raises ValueError on failure."""
     if size > max_mb * 1024 * 1024:
         raise ValueError(f"Arquivo muito grande (max {max_mb}MB)")
-    ct = (content_type or "").lower().split(";")[0].strip()
-    if ct not in _ALLOWED_AUDIO_MIMES:
-        raise ValueError(f"Tipo de audio nao suportado: {ct}. Envie WAV, MP3, WebM ou OGG.")
-    return _ALLOWED_AUDIO_MIMES[ct]
+    return declared_audio_extension(content_type)
 
 
 def _coerce_utc(dt: datetime | None) -> datetime | None:
@@ -146,7 +175,16 @@ def _ensure_storage_ready() -> None:
         raise HTTPException(status_code=503, detail=ErrorMessages.DISK_FULL)
 
 
-async def _debit_credits(db: AsyncSession, user_id, cost: int, commit: bool = True) -> None:
+async def _debit_credits(
+    db: AsyncSession,
+    user_id,
+    cost: int,
+    commit: bool = True,
+    *,
+    action: str = "paid_operation",
+    operation_id: uuid.UUID | None = None,
+    job_id: uuid.UUID | None = None,
+) -> uuid.UUID | None:
     """Debito atomico de creditos (mesmo padrao da rota /generate).
 
     Faz UPDATE ... WHERE credits >= cost (sem read-modify-write) para evitar race/saldo negativo.
@@ -155,7 +193,16 @@ async def _debit_credits(db: AsyncSession, user_id, cost: int, commit: bool = Tr
     na MESMA transacao — um erro no meio nao deixa credito cobrado sem o efeito aplicado).
     """
     if cost <= 0:
-        return
+        return operation_id
+    ledger_operation_id = operation_id or uuid.uuid4()
+    await set_credit_ledger_context(
+        db,
+        origin=f"{action}_debit",
+        reason=f"{action} reserved",
+        idempotency_key=f"{action}:{ledger_operation_id}:debit",
+        job_id=job_id,
+        operation_id=ledger_operation_id,
+    )
     result = await db.execute(
         update(User)
         .where(User.id == user_id, User.email_verified.is_(True), User.credits >= cost)
@@ -171,29 +218,68 @@ async def _debit_credits(db: AsyncSession, user_id, cost: int, commit: bool = Tr
     if commit:
         await db.commit()
     record_credit_metric("debit", cost)
+    return ledger_operation_id
 
 
-async def _refund_credits(db: AsyncSession, user_id, cost: int) -> None:
+async def _refund_credits(
+    db: AsyncSession,
+    user_id,
+    cost: int,
+    *,
+    action: str,
+    operation_id: uuid.UUID,
+    job_id: uuid.UUID | None = None,
+) -> None:
     """Devolve creditos quando uma operacao paga falha depois do debito. No-op se cost <= 0."""
     if cost <= 0:
         return
+    await set_credit_ledger_context(
+        db,
+        origin=f"{action}_refund",
+        reason=f"failed {action} refunded",
+        idempotency_key=f"{action}:{operation_id}:refund",
+        job_id=job_id,
+        operation_id=operation_id,
+    )
     await db.execute(update(User).where(User.id == user_id).values(credits=User.credits + cost))
     await db.commit()
     record_credit_metric("credit", cost)
 
 
-async def _refund_credits_safe(db: AsyncSession, user_id, cost: int, action: str) -> bool:
+async def _refund_credits_safe(
+    db: AsyncSession,
+    user_id,
+    cost: int,
+    action: str,
+    operation_id: uuid.UUID,
+    *,
+    job_id: uuid.UUID | None = None,
+) -> bool:
     """Refund que NUNCA levanta: uma excecao aqui substituiria o erro ORIGINAL da acao
     paga (o cliente veria 500 generico em vez da causa real) e deixaria o estorno perdido
     em silencio. Sessao suja ganha um rollback+retry; falhou de vez -> CRITICAL + alerta
     admin com os dados do estorno manual (mesmo contrato do worker, d23c0ec)."""
     try:
-        await _refund_credits(db, user_id, cost)
+        await _refund_credits(
+            db,
+            user_id,
+            cost,
+            action=action,
+            operation_id=operation_id,
+            job_id=job_id,
+        )
         return True
     except Exception:  # noqa: BLE001
         try:
             await db.rollback()
-            await _refund_credits(db, user_id, cost)
+            await _refund_credits(
+                db,
+                user_id,
+                cost,
+                action=action,
+                operation_id=operation_id,
+                job_id=job_id,
+            )
             return True
         except Exception:  # noqa: BLE001
             logger.critical(
@@ -212,6 +298,267 @@ async def _refund_credits_safe(db: AsyncSession, user_id, cost: int, action: str
             except Exception:  # noqa: BLE001
                 logger.exception("Falha ao enviar alerta admin de refund")
             return False
+
+
+async def _lock_script_refine_balance(db: AsyncSession, user_id: uuid.UUID) -> tuple[User, uuid.UUID | None]:
+    """Lock the SQL refine balance and lazily import the legacy Redis value once."""
+    result = await db.execute(
+        select(User).where(User.id == user_id).with_for_update().execution_options(populate_existing=True)
+    )
+    locked_user = result.scalar_one_or_none()
+    if locked_user is None:
+        raise HTTPException(status_code=401, detail=ErrorMessages.UNAUTHORIZED)
+    if locked_user.script_refine_redis_migrated:
+        return locked_user, None
+
+    legacy_key = f"script_refine_pending:{user_id}"
+    legacy_version_key = f"script_refine_pending_version:{user_id}"
+    try:
+        raw_legacy = _redis.get(legacy_key)
+        raw_legacy_version = _redis.get(legacy_version_key)
+        legacy_pending = float(raw_legacy or 0.0)
+        legacy_version = int(raw_legacy_version or 0)
+        if not math.isfinite(legacy_pending) or legacy_pending < 0:
+            raise ValueError("invalid legacy refine balance")
+        if legacy_version < 0:
+            raise ValueError("invalid legacy refine version")
+    except Exception as exc:  # noqa: BLE001 - unknown legacy debt must never be discarded
+        logger.error("Falha ao importar saldo legado de refino user=%s: %s", user_id, exc)
+        raise HTTPException(status_code=503, detail="Nao foi possivel reservar o saldo de refinos agora.") from exc
+
+    locked_user.script_refine_pending = round(float(locked_user.script_refine_pending or 0.0) + legacy_pending, 2)
+    locked_user.script_refine_version = (
+        max(
+            int(locked_user.script_refine_version or 0),
+            legacy_version,
+        )
+        + 1
+    )
+    locked_user.script_refine_redis_migrated = True
+    projection = await queue_refine_balance_projection(
+        db,
+        user_id=user_id,
+        version=locked_user.script_refine_version,
+        balance_after=locked_user.script_refine_pending,
+    )
+    return locked_user, projection.id
+
+
+async def _sync_refine_projection_best_effort(db: AsyncSession, projection_id: uuid.UUID | None) -> None:
+    if projection_id is None:
+        return
+    try:
+        await sync_refine_balance_projection(db, projection_id, _redis)
+    except Exception:  # noqa: BLE001 - the committed outbox is drained independently
+        await db.rollback()
+        logger.exception("Falha ao projetar saldo de refino; outbox permanece para drain id=%s", projection_id)
+
+
+def _release_generation_quota(cap_key: str | None, reserved: bool) -> None:
+    if not cap_key or not reserved:
+        return
+    try:
+        _redis.decr(cap_key)
+    except Exception:  # noqa: BLE001 - SQL refund must not be hidden by Redis cleanup
+        logger.exception("Falha ao devolver quota de geracao key=%s", cap_key)
+
+
+async def _classify_dispatch_after_refund_cas(
+    db: AsyncSession,
+    *,
+    job_id: uuid.UUID,
+    dispatch_id: uuid.UUID,
+    kind: str,
+    operation_id: uuid.UUID,
+) -> str:
+    """Classify CAS=False without turning accepted work into a manual refund."""
+    try:
+        await db.rollback()
+        job_result = await db.execute(
+            select(Job).where(Job.id == job_id).with_for_update().execution_options(populate_existing=True)
+        )
+        job = job_result.scalar_one_or_none()
+        dispatch_result = await db.execute(
+            select(JobDispatch)
+            .where(
+                JobDispatch.id == dispatch_id,
+                JobDispatch.job_id == job_id,
+                JobDispatch.kind == kind,
+                JobDispatch.operation_id == operation_id,
+            )
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+        dispatch = dispatch_result.scalar_one_or_none()
+        financially_refunded = job is not None and (
+            (kind == "generation" and job.generation_refunded_at is not None)
+            or (kind == "rerender" and job.rerender_state == "refunded")
+        )
+        exact_dispatch_cancelled = dispatch is not None and dispatch.state == "cancelled"
+        delivered = (dispatch is not None and dispatch.state == "completed") or (
+            job is not None
+            and (
+                (
+                    kind == "generation"
+                    and (
+                        job.video_url is not None
+                        or job.completed_at is not None
+                        or job.status in {"editable", "completed"}
+                    )
+                )
+                or (kind == "rerender" and job.rerender_state == "completed")
+            )
+        )
+        active_dispatch = dispatch is not None and (
+            dispatch.claimed_at is not None or dispatch.state in {"published", "claimed"}
+        )
+        if financially_refunded or exact_dispatch_cancelled:
+            outcome = "already_refunded"
+        elif delivered or active_dispatch:
+            outcome = "accepted_or_completed"
+        else:
+            outcome = "refund_pending"
+        await db.rollback()
+        return outcome
+    except Exception:  # noqa: BLE001 - an unreadable DB means financial state is unresolved
+        await db.rollback()
+        logger.exception("Falha ao classificar compensation job=%s dispatch=%s", job_id, dispatch_id)
+        return "refund_pending"
+
+
+async def _compensate_generation_dispatch(
+    db: AsyncSession,
+    *,
+    job_id: uuid.UUID,
+    cap_key: str | None,
+    quota_reserved: bool,
+    credit_cost: int,
+    error: Exception,
+    dispatch_id: uuid.UUID,
+) -> str:
+    refunded = False
+    for attempt in range(2):
+        try:
+            refunded = await refund_generation(
+                db,
+                job_id,
+                status="failed",
+                error="Falha ao enfileirar a geracao. Credito estornado.",
+                outbox_dispatch_id=dispatch_id,
+            )
+            await db.commit()
+            break
+        except Exception:  # noqa: BLE001 - rollback and one retry before escalating
+            await db.rollback()
+            if attempt == 1:
+                logger.critical("Refund persistente falhou job=%s", job_id, exc_info=True)
+
+    if refunded:
+        outcome = "refunded"
+        record_credit_metric("credit", credit_cost)
+    else:
+        outcome = await _classify_dispatch_after_refund_cas(
+            db,
+            job_id=job_id,
+            dispatch_id=dispatch_id,
+            kind="generation",
+            operation_id=job_id,
+        )
+    if outcome == "accepted_or_completed":
+        logger.warning("Compensation ignorada: dispatch aceito job=%s dispatch=%s", job_id, dispatch_id)
+        return outcome
+    if outcome == "refund_pending":
+        try:
+            await asyncio.to_thread(
+                _send_admin_alert,
+                "ClipIA - compensation requer reconciliacao",
+                f"job_id={job_id} error={error!r}. Acompanhar outbox/reconciliador; "
+                "nao ajustar saldo manualmente sem confirmar o estado idempotente.",
+            )
+        except Exception:  # noqa: BLE001
+            logger.exception("Falha ao alertar compensation manual job=%s", job_id)
+        try:
+            _redis.hset(
+                f"job:{job_id}",
+                mapping={
+                    "status": "refund_pending",
+                    "error": "Falha ao enfileirar a geracao. Estorno persistente pendente.",
+                    "generation_broker_state": "failed",
+                },
+            )
+        except Exception:  # noqa: BLE001 - DB reconciliation remains authoritative
+            logger.exception("Falha ao publicar refund_pending job=%s", job_id)
+        return outcome
+
+    cleanup_job_dir(str(job_id))
+    if outcome == "refunded":
+        # Only the request that won the refund CAS owns this non-idempotent
+        # decrement. An already-refunded worker race is cleaned up, but its
+        # quota reservation is left to expire instead of risking a double DECR.
+        _release_generation_quota(cap_key, quota_reserved)
+    try:
+        message = "Falha ao enfileirar a geracao. Credito estornado."
+        _redis.hset(
+            f"job:{job_id}",
+            mapping={
+                "status": "failed",
+                "error": message,
+                "generation_broker_state": "failed",
+            },
+        )
+    except Exception:  # noqa: BLE001 - terminal Redis state is best-effort; DB is authoritative
+        logger.exception("Falha ao publicar estado Redis compensado job=%s", job_id)
+    return outcome
+
+
+async def _compensate_rerender_dispatch(
+    db: AsyncSession,
+    *,
+    job_id: uuid.UUID,
+    operation_id: uuid.UUID,
+    dispatch_id: uuid.UUID,
+) -> str:
+    refunded = False
+    for attempt in range(2):
+        try:
+            refunded = await refund_rerender(
+                db,
+                job_id,
+                operation_id,
+                outbox_dispatch_id=dispatch_id,
+            )
+            await db.commit()
+            break
+        except Exception:  # noqa: BLE001 - rollback and one retry before durable reconciliation
+            await db.rollback()
+            if attempt == 1:
+                logger.critical("Refund de rerender falhou job=%s op=%s", job_id, operation_id, exc_info=True)
+    if refunded:
+        return "refunded"
+    outcome = await _classify_dispatch_after_refund_cas(
+        db,
+        job_id=job_id,
+        dispatch_id=dispatch_id,
+        kind="rerender",
+        operation_id=operation_id,
+    )
+    if outcome == "accepted_or_completed":
+        logger.warning(
+            "Compensation de rerender ignorada: dispatch aceito job=%s op=%s",
+            job_id,
+            operation_id,
+        )
+        return outcome
+    if outcome == "refund_pending":
+        try:
+            await asyncio.to_thread(
+                _send_admin_alert,
+                "ClipIA - refund de rerender falhou",
+                f"job_id={job_id} operation_id={operation_id}. Verificar reconciliacao, sem duplicar credito.",
+            )
+        except Exception:  # noqa: BLE001
+            logger.exception("Falha ao alertar refund de rerender job=%s", job_id)
+    return outcome
 
 
 @router.post(
@@ -237,18 +584,12 @@ async def generate(
     cost_provider = (
         "elevenlabs" if (req.narration_mode == "dialogue" or template.script.is_dialogue) else req.voice_provider
     )
-    credit_cost = get_generation_credit_cost(req.template_id, cost_provider)
+    base_credit_cost = get_generation_credit_cost(req.template_id, cost_provider)
+    credit_cost = base_credit_cost
 
-    # Refinos de roteiro (0,5 cada) acumulados em Redis pelo /script-preview/refine:
-    # cobra a parte INTEIRA junto da geracao e carrega o resto (2 refinos = 1 credito;
-    # 1 refino sozinho fica anotado p/ a proxima — nunca cobra a mais).
-    refine_key = f"script_refine_pending:{user.id}"
-    try:
-        refine_owed = float(_redis.get(refine_key) or 0.0)
-    except (TypeError, ValueError):
-        refine_owed = 0.0
-    refine_extra = int(refine_owed)
-    credit_cost += refine_extra
+    # Refinos de roteiro (0,5 cada) ficam autoritativos no PostgreSQL. A parte
+    # inteira entra no debito desta geracao e a fracao restante segue para a proxima.
+    refine_extra = 0
 
     # Guardrail $: video IA (Seedance) e a operacao mais cara. Teto DIARIO por usuario, vale ate p/
     # conta admin/seed (foi o vetor do gasto de ~$6). O lock por usuario serializa get->incr (sem race).
@@ -259,119 +600,318 @@ async def generate(
         else None
     )
 
+    job_uuid = uuid.uuid4()
+    quota_reserved = False
+    legacy_projection_id: uuid.UUID | None = None
+    debit_projection_id: uuid.UUID | None = None
+
     async with get_lock(f"generate:{user.id}"):
         _ensure_storage_ready()
-        if cap_key and int(_redis.get(cap_key) or 0) >= settings.MAX_AI_VIDEO_PER_DAY:
-            raise HTTPException(
-                status_code=429,
-                detail=f"Limite diário de vídeos IA atingido ({settings.MAX_AI_VIDEO_PER_DAY}/dia). Tente novamente amanhã.",
-            )
-        debit = await db.execute(
-            update(User)
-            .where(User.id == user.id, User.email_verified.is_(True), User.credits >= credit_cost)
-            .values(credits=User.credits - credit_cost)
-        )
-        if debit.rowcount == 0:
-            fresh_user = await db.get(User, user.id)
-            if fresh_user is None:
-                raise HTTPException(status_code=401, detail=ErrorMessages.UNAUTHORIZED)
-            if not fresh_user.email_verified:
-                raise HTTPException(status_code=403, detail=ErrorMessages.EMAIL_NOT_VERIFIED)
-            raise HTTPException(status_code=402, detail=ErrorMessages.INSUFFICIENT_CREDITS)
+        if req.custom_script is not None:
+            try:
+                script_path = get_job_dir(str(job_uuid)) / "script.json"
+                script_path.write_text(
+                    json.dumps(req.custom_script, ensure_ascii=False, indent=2),
+                    encoding="utf-8",
+                )
+            except Exception as exc:  # noqa: BLE001 - prove filesystem before charging
+                cleanup_job_dir(str(job_uuid))
+                logger.error("Falha ao preparar custom script job=%s: %s", job_uuid, exc)
+                raise HTTPException(status_code=503, detail="Nao foi possivel preparar os arquivos da geracao.")
 
-        fresh_user = await db.get(User, user.id)
-        if fresh_user is None:
-            raise HTTPException(status_code=401, detail=ErrorMessages.UNAUTHORIZED)
-        record_credit_metric("debit", credit_cost)
-
-        # Debito ok: liquida a parte inteira dos refinos e carrega o resto (ex.: 0,5)
-        if refine_extra > 0:
-            remainder = round(refine_owed - refine_extra, 2)
-            if remainder > 0:
-                _redis.set(refine_key, str(remainder), ex=86400)
-            else:
-                _redis.delete(refine_key)
-
-        job = Job(
-            user_id=fresh_user.id,
-            topic=req.topic,
-            style=req.style,
-            duration_target=req.duration_target,
-            template_id=req.template_id,
-            voice_provider=req.voice_provider,
-            voice_config=req.voice_config,
-            credit_cost=credit_cost,
-            status="queued",
-        )
-        db.add(job)
-        await db.commit()
-        await db.refresh(job)
-        if cap_key:  # conta a geracao de video IA do dia (so apos debito + job criados com sucesso)
-            _redis.incr(cap_key)
-            _redis.expire(cap_key, 90000)  # ~25h: zera no dia seguinte
-
-    job_id = str(job.id)
-
-    job_meta = {
-        "status": "queued",
-        "progress": "0",
-        "current_step": "",
-        "error": "",
-        "detail": "",
-        "template_id": req.template_id,
-        "created_at": datetime.now(timezone.utc).isoformat(),
-    }
-    if req.sfx_enabled is not None:
-        job_meta["sfx_enabled"] = "1" if req.sfx_enabled else "0"
-    if req.music_enabled is not None:
-        job_meta["music_enabled"] = "1" if req.music_enabled else "0"
-    if req.narration_mode != "single":
-        job_meta["narration_mode"] = req.narration_mode
-    _redis.hset(f"job:{job_id}", mapping=job_meta)
-
-    # Roteiro pronto (preview editado): grava script.json ANTES do dispatch — a task
-    # generate_script detecta o arquivo e pula a chamada de LLM (1o rascunho incluso).
-    if req.custom_script is not None:
-        script_path = get_job_dir(job_id) / "script.json"
-        script_path.write_text(json.dumps(req.custom_script, ensure_ascii=False, indent=2), encoding="utf-8")
-        _redis.hset(f"job:{job_id}", mapping={"custom_script": "1"})
-
-    try:
-        dispatch_pipeline(
-            job_id,
-            req.topic,
-            req.style,
-            req.duration_target,
-            template_id=req.template_id,
-            voice_provider=req.voice_provider,
-            voice_config=req.voice_config,
-            trend_context=req.trend_context,
-            narration_mode=req.narration_mode,
-        )
-    except Exception as e:  # noqa: BLE001 — enfileirar falhou (Celery/Redis down): estorna p/ nao cobrar sem gerar
-        await _refund_credits_safe(db, user.id, credit_cost, "generate/enqueue")
         if cap_key:
-            _redis.decr(cap_key)  # devolve a cota diaria de ai_video consumida na linha ~243
-        _redis.hset(
-            f"job:{job_id}",
-            mapping={"status": "failed", "error": "Falha ao enfileirar a geracao. Credito estornado."},
-        )
-        logger.error("dispatch_pipeline falhou job=%s user=%s: %s — credito estornado", job_id, user.id, e)
-        raise HTTPException(
-            status_code=503,
-            detail="Nao foi possivel iniciar a geracao agora. Seu credito foi estornado, tente novamente em instantes.",
-        )
+            try:
+                quota_count = int(_redis.incr(cap_key))
+                quota_reserved = True
+                _redis.expire(cap_key, 90000)
+                if quota_count > settings.MAX_AI_VIDEO_PER_DAY:
+                    _release_generation_quota(cap_key, quota_reserved)
+                    quota_reserved = False
+                    cleanup_job_dir(str(job_uuid))
+                    raise HTTPException(
+                        status_code=429,
+                        detail=f"Limite diário de vídeos IA atingido ({settings.MAX_AI_VIDEO_PER_DAY}/dia). Tente novamente amanhã.",
+                    )
+            except HTTPException:
+                raise
+            except Exception as exc:  # noqa: BLE001 - quota reservation precedes debit
+                _release_generation_quota(cap_key, quota_reserved)
+                quota_reserved = False
+                cleanup_job_dir(str(job_uuid))
+                logger.error("Falha ao reservar quota de geracao key=%s: %s", cap_key, exc)
+                raise HTTPException(status_code=503, detail="Nao foi possivel reservar a geracao agora.")
 
-    if is_ai_video:
-        # Telemetria de custo p/ medir gasto real (dono pediu): Seedance ~R$0,67/s.
-        logger.warning(
-            "ai_video enfileirado: ~R$%.2f de API estimado (%ds @ R$0,67/s) user=%s job=%s",
-            req.duration_target * 0.67,
-            req.duration_target,
-            user.id,
-            job_id,
-        )
-    return {"job_id": job_id, "status": "queued", "credit_cost": credit_cost}
+        try:
+            locked_user, legacy_projection_id = await _lock_script_refine_balance(db, user.id)
+            if not locked_user.email_verified:
+                raise HTTPException(status_code=403, detail=ErrorMessages.EMAIL_NOT_VERIFIED)
+
+            refine_pending = float(locked_user.script_refine_pending or 0.0)
+            refine_extra = int(refine_pending)
+            credit_cost = base_credit_cost + refine_extra
+            debit_values = {"credits": User.credits - credit_cost}
+            await set_credit_ledger_context(
+                db,
+                origin="generation_debit",
+                reason="generation operation reserved",
+                idempotency_key=f"generation:{job_uuid}:debit",
+                job_id=job_uuid,
+                operation_id=job_uuid,
+            )
+            if refine_extra > 0:
+                debit_values.update(
+                    script_refine_pending=User.script_refine_pending - refine_extra,
+                    script_refine_version=User.script_refine_version + 1,
+                )
+                debit = await db.execute(
+                    update(User)
+                    .where(User.id == user.id, User.email_verified.is_(True), User.credits >= credit_cost)
+                    .values(**debit_values)
+                    .returning(User.script_refine_pending, User.script_refine_version)
+                )
+                debit_row = debit.one_or_none()
+                if debit_row is None:
+                    raise HTTPException(status_code=402, detail=ErrorMessages.INSUFFICIENT_CREDITS)
+                projection = await queue_refine_balance_projection(
+                    db,
+                    user_id=user.id,
+                    version=int(debit_row.script_refine_version),
+                    balance_after=float(debit_row.script_refine_pending),
+                )
+                debit_projection_id = projection.id
+            else:
+                debit = await db.execute(
+                    update(User)
+                    .where(User.id == user.id, User.email_verified.is_(True), User.credits >= credit_cost)
+                    .values(**debit_values)
+                )
+                if debit.rowcount == 0:
+                    raise HTTPException(status_code=402, detail=ErrorMessages.INSUFFICIENT_CREDITS)
+
+            prior_generations = int(await db.scalar(select(func.count(Job.id)).where(Job.user_id == user.id)) or 0)
+            generation_ordinal = "first" if prior_generations == 0 else "second" if prior_generations == 1 else "repeat"
+            requested_at = datetime.now(timezone.utc)
+            job = Job(
+                id=job_uuid,
+                user_id=user.id,
+                topic=req.topic,
+                style=req.style,
+                duration_target=req.duration_target,
+                template_id=req.template_id,
+                voice_provider=req.voice_provider,
+                voice_config=req.voice_config,
+                credit_cost=credit_cost,
+                refine_credit_cost=refine_extra,
+                status="queued",
+                created_at=requested_at,
+            )
+            db.add(job)
+            dispatch = await create_dispatch(
+                db,
+                job_id=job_uuid,
+                operation_id=job_uuid,
+                kind="generation",
+                payload=DispatchPayload(
+                    topic=req.topic,
+                    style=req.style,
+                    duration_target=req.duration_target,
+                    template_id=req.template_id,
+                    voice_provider=req.voice_provider,
+                    voice_config=req.voice_config,
+                    trend_context=req.trend_context,
+                    narration_mode=req.narration_mode,
+                    sfx_enabled=req.sfx_enabled,
+                    music_enabled=req.music_enabled,
+                    custom_script=req.custom_script is not None,
+                ),
+                debited_credits=credit_cost,
+                refine_debited=float(refine_extra),
+                pending_credits_snapshot=0.0,
+            )
+            dispatch_id = dispatch.id
+            event_properties = {
+                "operation_kind": "generation",
+                "credit_cost": credit_cost,
+                "generation_ordinal": generation_ordinal,
+            }
+            await append_server_event_safely(
+                db,
+                event_name="generation_requested",
+                user=locked_user,
+                properties=event_properties,
+                idempotency_key=f"job:{job_uuid}:requested",
+                occurred_at=requested_at,
+            )
+            if generation_ordinal == "second":
+                await append_server_event_safely(
+                    db,
+                    event_name="second_generation_requested",
+                    user=locked_user,
+                    properties={"credit_cost": credit_cost},
+                    idempotency_key=f"user:{user.id}:second-generation",
+                    occurred_at=requested_at,
+                )
+            if credit_cost > 0:
+                await append_server_event_safely(
+                    db,
+                    event_name="credit_balance_changed",
+                    user=locked_user,
+                    properties={"reason": "generation_debit", "delta": -credit_cost},
+                    idempotency_key=f"job:{job_uuid}:generation-debit",
+                    occurred_at=requested_at,
+                )
+            await db.commit()
+        except HTTPException:
+            await db.rollback()
+            _release_generation_quota(cap_key, quota_reserved)
+            cleanup_job_dir(str(job_uuid))
+            raise
+        except Exception as exc:  # noqa: BLE001 - debit and queued row share one transaction
+            await db.rollback()
+            _release_generation_quota(cap_key, quota_reserved)
+            cleanup_job_dir(str(job_uuid))
+            logger.exception("Falha na transacao de geracao job=%s", job_uuid)
+            raise HTTPException(status_code=503, detail="Nao foi possivel reservar a geracao agora.") from exc
+
+        for projection_id in (legacy_projection_id, debit_projection_id):
+            await _sync_refine_projection_best_effort(db, projection_id)
+
+        record_credit_metric("debit", credit_cost)
+        job_id = str(job_uuid)
+        job_meta = {
+            "status": "queued",
+            "progress": "0",
+            "current_step": "",
+            "error": "",
+            "detail": "",
+            "template_id": req.template_id,
+            "generation_broker_state": "attempting",
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        }
+        if req.sfx_enabled is not None:
+            job_meta["sfx_enabled"] = "1" if req.sfx_enabled else "0"
+        if req.music_enabled is not None:
+            job_meta["music_enabled"] = "1" if req.music_enabled else "0"
+        if req.narration_mode != "single":
+            job_meta["narration_mode"] = req.narration_mode
+
+        try:
+            _redis.hset(f"job:{job_id}", mapping=job_meta)
+            if req.custom_script is not None:
+                _redis.hset(f"job:{job_id}", mapping={"custom_script": "1"})
+        except Exception as exc:  # noqa: BLE001 - Redis failed before any broker call
+            compensation = await _compensate_generation_dispatch(
+                db,
+                job_id=job_uuid,
+                cap_key=cap_key,
+                quota_reserved=quota_reserved,
+                credit_cost=credit_cost,
+                error=exc,
+                dispatch_id=dispatch_id,
+            )
+            logger.error("Dispatch compensado job=%s user=%s: %s", job_id, user.id, exc)
+            if compensation == "accepted_or_completed":
+                return {"job_id": job_id, "status": "queued", "credit_cost": credit_cost}
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    "Nao foi possivel iniciar a geracao agora. Seu credito foi estornado, tente novamente em instantes."
+                    if compensation in {"refunded", "already_refunded"}
+                    else "Nao foi possivel iniciar a geracao agora. O estorno ficou pendente para reconciliacao."
+                ),
+            )
+
+        def _publish_generation(_dispatch, *, task_id: str) -> None:
+            payload = _dispatch.payload
+            dispatch_pipeline(
+                job_id,
+                payload["topic"],
+                payload["style"],
+                payload["duration_target"],
+                template_id=payload.get("template_id") or "stock_narration",
+                voice_provider=payload.get("voice_provider") or "edge",
+                voice_config=payload.get("voice_config"),
+                trend_context=payload.get("trend_context"),
+                narration_mode=payload.get("narration_mode") or "single",
+                sfx_enabled=payload.get("sfx_enabled"),
+                music_enabled=payload.get("music_enabled"),
+                custom_script=bool(payload.get("custom_script")),
+                dispatch_id=str(dispatch_id),
+                task_id=task_id,
+            )
+
+        try:
+            publish_outcome = await publish_dispatch(db, dispatch_id, send=_publish_generation)
+        except Exception:  # noqa: BLE001 - durable pending outbox is reconciled with the same operation claim
+            await db.rollback()
+            publish_outcome = "pending"
+            logger.critical("Falha apos preparar outbox de geracao job=%s", job_id, exc_info=True)
+
+        if publish_outcome == "send_failed":
+            compensation = await _compensate_generation_dispatch(
+                db,
+                job_id=job_uuid,
+                cap_key=cap_key,
+                quota_reserved=quota_reserved,
+                credit_cost=credit_cost,
+                error=RuntimeError("broker send failed"),
+                dispatch_id=dispatch_id,
+            )
+            if compensation == "accepted_or_completed":
+                return {"job_id": job_id, "status": "queued", "credit_cost": credit_cost}
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    "Nao foi possivel iniciar a geracao agora. Seu credito foi estornado, tente novamente em instantes."
+                    if compensation in {"refunded", "already_refunded"}
+                    else "Nao foi possivel iniciar a geracao agora. O estorno ficou pendente para reconciliacao."
+                ),
+            )
+
+        if publish_outcome == "published":
+            try:
+                _redis.hset(
+                    f"job:{job_id}",
+                    mapping={
+                        "generation_broker_accepted_at": datetime.now(timezone.utc).isoformat(),
+                        "generation_broker_state": "accepted",
+                    },
+                )
+            except Exception:  # noqa: BLE001 - the SQL outbox is the durable broker evidence
+                logger.critical("Falha ao espelhar aceite do broker no Redis job=%s", job_id, exc_info=True)
+        else:
+            logger.warning("Geracao aguardando replay do outbox job=%s outcome=%s", job_id, publish_outcome)
+
+        if publish_outcome in {"published", "claimed"}:
+            try:
+                await mark_generation_dispatched(db, job_uuid)
+                await db.commit()
+            except Exception as exc:  # noqa: BLE001 - accepted work must never be refunded
+                await db.rollback()
+                logger.critical(
+                    "Broker aceitou geracao mas marker falhou job=%s user=%s; worker deve autocurar",
+                    job_id,
+                    user.id,
+                    exc_info=True,
+                )
+                try:
+                    await asyncio.to_thread(
+                        _send_admin_alert,
+                        "ClipIA - marker de dispatch da geracao falhou",
+                        f"job_id={job_id} user_id={user.id} error={exc!r}. Broker aceitou; nao estornar.",
+                    )
+                except Exception:  # noqa: BLE001
+                    logger.exception("Falha ao enviar alerta de marker job=%s", job_id)
+
+        if is_ai_video:
+            logger.warning(
+                "ai_video enfileirado: ~R$%.2f de API estimado (%ds @ R$0,67/s) user=%s job=%s",
+                req.duration_target * 0.67,
+                req.duration_target,
+                user.id,
+                job_id,
+            )
+        return {"job_id": job_id, "status": "queued", "credit_cost": credit_cost}
 
 
 # ── Rascunho de roteiro (preview gratis + refino 0,5) ────────────────────────
@@ -400,12 +940,17 @@ def _script_preview_rate_limit(user_id) -> None:
 async def script_preview(
     req: GenerateRequest,
     user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
 ):
     """Preview do roteiro sem debitar (incluso). Anti-farming: exige saldo suficiente
     para gerar o video deste template + cap horario."""
     cost_provider = "elevenlabs" if req.narration_mode == "dialogue" else req.voice_provider
     template_cost = get_generation_credit_cost(req.template_id, cost_provider)
-    if user.credits < template_cost:
+    locked_user, legacy_projection_id = await _lock_script_refine_balance(db, user.id)
+    available_credits = int(locked_user.credits)
+    await db.commit()
+    await _sync_refine_projection_best_effort(db, legacy_projection_id)
+    if available_credits < template_cost:
         raise HTTPException(status_code=402, detail=ErrorMessages.INSUFFICIENT_CREDITS)
     _script_preview_rate_limit(user.id)
 
@@ -426,8 +971,13 @@ async def script_preview(
         logger.warning("script-preview falhou user=%s: %s", user.id, e)
         raise HTTPException(status_code=502, detail="Não foi possível gerar o rascunho agora. Tente novamente.")
 
-    refine_owed = float(_redis.get(f"script_refine_pending:{user.id}") or 0.0)
-    return {"script": script, "refine_cost": 0.5, "refine_pending": refine_owed}
+    await db.refresh(locked_user, attribute_names=["script_refine_pending"])
+    refine_owed = float(locked_user.script_refine_pending or 0.0)
+    return {
+        "script": script,
+        "refine_cost": float(CREDIT_TARIFFS.script_refinement),
+        "refine_pending": refine_owed,
+    }
 
 
 @router.post(
@@ -439,9 +989,13 @@ async def script_preview(
 async def script_preview_refine(
     req: ScriptRefineRequest,
     user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
 ):
-    """Refino = 0,5 credito ACUMULADO server-side (Redis) e liquidado no proximo
+    """Refino = 0,5 credito acumulado no PostgreSQL e liquidado no proximo
     /generate (parte inteira; o resto carrega). Nunca um campo de custo do cliente."""
+    _, legacy_projection_id = await _lock_script_refine_balance(db, user.id)
+    await db.commit()
+    await _sync_refine_projection_best_effort(db, legacy_projection_id)
     _script_preview_rate_limit(user.id)
 
     from app.services.scriptwriter import refine_script
@@ -454,10 +1008,12 @@ async def script_preview_refine(
         logger.warning("script-refine falhou user=%s: %s", user.id, e)
         raise HTTPException(status_code=502, detail="Não foi possível refinar o rascunho agora. Tente novamente.")
 
-    # Debita os 0,5 SOMENTE com refino entregue
-    refine_key = f"script_refine_pending:{user.id}"
-    pending = float(_redis.get(refine_key) or 0.0) + 0.5
-    _redis.set(refine_key, str(pending), ex=86400)
+    # Debita os 0,5 SOMENTE com refino entregue. O incremento SQL aritmetico
+    # serializa com a reserva da geracao e preserva refinamentos concorrentes.
+    projection = await adjust_refine_balance(db, user.id, float(CREDIT_TARIFFS.script_refinement))
+    pending = float(projection.balance_after)
+    await db.commit()
+    await _sync_refine_projection_best_effort(db, projection.id)
     return {"script": refined, "refine_cost": 0.5, "refine_pending": pending}
 
 
@@ -477,11 +1033,18 @@ async def design_voice(
     from app.services.elevenlabs_provider import ElevenLabsProvider
 
     cost = settings.CREDIT_COST_VOICE_DESIGN
-    await _debit_credits(db, user.id, cost)
+    operation_id = uuid.uuid4()
+    await _debit_credits(
+        db,
+        user.id,
+        cost,
+        action="design_voice",
+        operation_id=operation_id,
+    )
     try:
         voice_id = await ElevenLabsProvider().design_voice(req.name, req.description, req.text)
     except Exception as e:  # noqa: BLE001
-        await _refund_credits_safe(db, user.id, cost, "design_voice")
+        await _refund_credits_safe(db, user.id, cost, "design_voice", operation_id)
         logger.warning("Voice Design falhou: %s", e)
         raise HTTPException(status_code=502, detail=f"Não foi possível criar a voz: {e}")
     return {"voice_id": voice_id, "name": req.name}
@@ -571,6 +1134,18 @@ async def download_job(
     file_path = Path(settings.STORAGE_DIR) / "output" / f"{job.id}.mp4"
     if not file_path.exists():
         raise not_found_error()
+    if job.exported_at is None:
+        exported_at = datetime.now(timezone.utc)
+        job.exported_at = exported_at
+        await append_server_event_safely(
+            db,
+            event_name="video_exported",
+            user=user,
+            properties={"export_ordinal": "first"},
+            idempotency_key=f"job:{job.id}:first-export",
+            occurred_at=exported_at,
+        )
+        await db.commit()
     return FileResponse(str(file_path), media_type="video/mp4", filename=f"clipia-{str(job.id)[:8]}.mp4")
 
 
@@ -751,7 +1326,14 @@ async def clone_voice(
         raise HTTPException(status_code=400, detail="Máximo de 5 vozes clonadas por usuário")
 
     # Get uploaded files + metadata from multipart
-    form = await request.form()
+    max_file_bytes = 10 * 1024 * 1024
+    form = await parse_limited_multipart(
+        request,
+        max_file_bytes=max_file_bytes,
+        max_total_bytes=5 * max_file_bytes + 64 * 1024,
+        max_files=5,
+        max_fields=2,
+    )
     files = form.getlist("files")
     if not files:
         raise HTTPException(status_code=400, detail="Envie pelo menos 1 arquivo de áudio")
@@ -767,9 +1349,13 @@ async def clone_voice(
 
     audio_bytes = []
     for f in files:
-        content = await f.read()
         try:
-            _validate_audio_upload(content_type=f.content_type, filename=f.filename, size=len(content), max_mb=10)
+            extension = declared_audio_extension(f.content_type)
+            content = await read_limited_audio(
+                f,
+                max_bytes=max_file_bytes,
+                extension=extension,
+            )
         except ValueError as e:
             raise HTTPException(status_code=400, detail=str(e))
         audio_bytes.append(content)
@@ -777,12 +1363,19 @@ async def clone_voice(
     from app.services.elevenlabs_provider import ElevenLabsProvider
 
     cost = settings.CREDIT_COST_VOICE_CLONE
-    await _debit_credits(db, user.id, cost)
+    operation_id = uuid.uuid4()
+    await _debit_credits(
+        db,
+        user.id,
+        cost,
+        action="clone_voice",
+        operation_id=operation_id,
+    )
     provider = ElevenLabsProvider()
     try:
         voice_id = await provider.clone_voice(name, audio_bytes, description)
     except Exception as e:  # noqa: BLE001
-        await _refund_credits_safe(db, user.id, cost, "clone_voice")
+        await _refund_credits_safe(db, user.id, cost, "clone_voice", operation_id)
         logger.warning("Voice clone falhou: %s", e)
         raise HTTPException(status_code=502, detail=f"Não foi possível clonar a voz: {e}")
 
@@ -854,39 +1447,54 @@ async def upload_audio(
     job = await get_owned_job(db, user, job_id)
     job_id = str(job.id)
 
-    form = await request.form()
+    max_file_bytes = 50 * 1024 * 1024
+    form = await parse_limited_multipart(
+        request,
+        max_file_bytes=max_file_bytes,
+        max_total_bytes=max_file_bytes + 64 * 1024,
+        max_files=1,
+        max_fields=1,
+    )
     file = form.get("file")
     if file is None:
         raise HTTPException(status_code=400, detail="Envie um arquivo de áudio")
 
-    content = await file.read()
     try:
-        ext = _validate_audio_upload(content_type=file.content_type, filename=file.filename, size=len(content))
+        ext = declared_audio_extension(file.content_type)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
     job_dir = Path(settings.STORAGE_DIR) / "jobs" / job_id
     job_dir.mkdir(parents=True, exist_ok=True)
 
-    # Save uploaded file
-    upload_path = str(job_dir / f"upload{ext}")
-    with open(upload_path, "wb") as f:
-        f.write(content)
+    # Stream to a temporary server-owned path, validate the signature, then publish atomically.
+    upload_path = job_dir / f"upload{ext}"
+    upload_temp_path = job_dir / f".upload{ext}.part"
+    try:
+        await write_limited_audio(
+            file,
+            upload_temp_path,
+            max_bytes=max_file_bytes,
+            extension=ext,
+        )
+        upload_temp_path.replace(upload_path)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
     # Validate
     from app.services.custom_audio_provider import validate_audio_file
 
     try:
-        meta = validate_audio_file(upload_path)
+        meta = validate_audio_file(str(upload_path))
     except ValueError as e:
-        Path(upload_path).unlink(missing_ok=True)
+        upload_path.unlink(missing_ok=True)
         raise HTTPException(status_code=400, detail=str(e))
 
     # Normalize to WAV
     output_path = str(job_dir / "narration.wav")
     from app.services.custom_audio_provider import normalize_audio
 
-    await asyncio.to_thread(normalize_audio, upload_path, output_path)
+    await asyncio.to_thread(normalize_audio, str(upload_path), output_path)
 
     # Transcribe with Whisper for word timestamps
     words = []
@@ -962,8 +1570,10 @@ async def get_composition(
 
     audio_url = sign_media_url(f"/storage/jobs/{job_id}/narration.wav") if (job_dir / "narration.wav").exists() else ""
 
-    # Load editor state from DB if exists
-    editor_state = job.editor_state
+    # Load editor state from DB if exists and migrate public paths to opaque IDs.
+    from app.services.music import sanitize_editor_state_assets
+
+    editor_state = sanitize_editor_state_assets(job.editor_state)
 
     # Get template info
     from app.templates import get_template
@@ -971,10 +1581,10 @@ async def get_composition(
     job_template_id = getattr(job, "template_id", "stock_narration")
     tmpl = get_template(job_template_id)
     from app.job_config import resolve_job_flag
-    from app.services.music import auto_music_url
+    from app.services.music import auto_music_asset_id
 
     music_on = resolve_job_flag(_redis, job_id, "music_enabled", settings.AUTO_MUSIC_ENABLED)
-    default_music_url = auto_music_url(job_template_id) if music_on else None
+    default_music_asset_id = auto_music_asset_id(job_template_id) if music_on else None
 
     return CompositionResponse(
         job_id=job_id,
@@ -996,7 +1606,7 @@ async def get_composition(
         template_id=job_template_id,
         layout_type=tmpl.layout.type,
         pending_credits=job.pending_credits if job else 0.0,
-        music_url=default_music_url,
+        music_asset_id=default_music_asset_id,
         music_volume=settings.AUTO_MUSIC_VOLUME,
     )
 
@@ -1088,8 +1698,16 @@ async def regenerate_tts(
             raise HTTPException(status_code=503, detail="ELEVENLABS_API_KEY not configured")
         from app.services.elevenlabs_provider import ElevenLabsProvider
 
-        cost = settings.CREDIT_COST_ELEVENLABS
-        await _debit_credits(db, user.id, cost)
+        cost = int(CREDIT_TARIFFS.dialogue)
+        operation_id = uuid.uuid4()
+        await _debit_credits(
+            db,
+            user.id,
+            cost,
+            action="regenerate_tts",
+            operation_id=operation_id,
+            job_id=job.id,
+        )
         provider = ElevenLabsProvider()
         try:
             await provider.synthesize(
@@ -1098,7 +1716,14 @@ async def regenerate_tts(
                 voice_id=req.voice_id or "",
             )
         except Exception as e:  # noqa: BLE001
-            await _refund_credits_safe(db, user.id, cost, "regenerate_tts")
+            await _refund_credits_safe(
+                db,
+                user.id,
+                cost,
+                "regenerate_tts",
+                operation_id,
+                job_id=job.id,
+            )
             logger.warning("Regenerate TTS (ElevenLabs) falhou: %s", e)
             raise HTTPException(status_code=502, detail=f"Não foi possível regenerar a narração: {e}")
     else:
@@ -1221,10 +1846,14 @@ Regras:
         result = {"suggestions": [], "general_feedback": raw}
 
     async with get_lock(f"job:{job.id}:pending_credits"):
-        refreshed_job = await db.get(Job, job.id)
-        refreshed_job.pending_credits = (refreshed_job.pending_credits or 0.0) + 0.5
+        pending_result = await db.execute(
+            update(Job)
+            .where(Job.id == job.id)
+            .values(pending_credits=func.coalesce(Job.pending_credits, 0.0) + float(CREDIT_TARIFFS.script_refinement))
+            .returning(Job.pending_credits)
+        )
+        pending_credits = float(pending_result.scalar_one())
         await db.commit()
-        pending_credits = refreshed_job.pending_credits
 
     result["pending_credits"] = pending_credits
     return result
@@ -1234,7 +1863,7 @@ Regras:
     "/jobs/{job_id}/render",
     summary="Render video",
     description="Starts render job.",
-    responses={200: {"description": "Render queued"}},
+    responses={200: {"description": "Render queued"}, 409: {"description": "Job cannot be rendered"}},
 )
 async def render_video(
     job_id: str,
@@ -1243,62 +1872,194 @@ async def render_video(
 ):
     """Re-render video with current editor state via FFmpeg+NVENC."""
     job = await get_owned_job(db, user, job_id)
-    job_id = str(job.id)
-    async with get_lock(f"render:{job_id}"):
-        # Re-le o estado fresco DENTRO do lock: cada request concorrente carregou seu proprio
-        # job ANTES do lock, entao um render paralelo ja pode ter zerado o pending. commit encerra
-        # a transacao de leitura -> refresh enxerga o que o concorrente commitou (cobra so 1x).
-        await db.commit()
-        await db.refresh(job)
-        cost = math.ceil(job.pending_credits or 0.0)
-        if cost > 0:
-            # commit=False: debito e pending_credits=0 na MESMA transacao (erro no meio nao
-            # deixa credito cobrado com pending ainda acumulado, nem o inverso).
-            await _debit_credits(db, user.id, cost, commit=False)
-            job.pending_credits = 0.0
-            await db.commit()
-
+    if job.status not in {"editable", "completed"}:
+        raise HTTPException(status_code=409, detail="Only a delivered job can be rendered")
+    if job.rerender_state in {"debited", "dispatched", "running"}:
+        raise HTTPException(status_code=409, detail="A rerender is already active")
+    job_uuid = job.id
+    job_id = str(job_uuid)
     job_dir = Path(settings.STORAGE_DIR) / "jobs" / job_id
     if not job_dir.exists():
         raise not_found_error()
 
-    from app.worker.tasks import task_rerender_video
-
-    # Marca "rendering" ANTES de enfileirar: entre o POST e o worker (--pool=solo, fila
-    # pode estar ocupada) o Redis ainda diria "completed" do pipeline original e o poll
-    # do editor declararia o re-render concluido sem ele ter comecado (baixava a versao
-    # pre-edicao). Setar antes do .delay evita sobrescrever o progresso real do worker.
-    _redis.hset(
-        f"job:{job_id}",
-        mapping={
-            "status": "rendering",
-            "progress": 0.0,
-            "current_step": "queued",
-            "detail": "Re-render enfileirado...",
-            # o worker le isto p/ devolver o valor EXATO se o re-render falhar
-            # (credit_cost do job e o custo da geracao, nao do export)
-            "rerender_cost": cost,
-        },
-    )
-    try:
-        task_rerender_video.delay(job_id)
-    except Exception as e:  # noqa: BLE001 — enfileirar falhou (Celery/Redis down): estorna e reverte
-        if cost > 0 and await _refund_credits_safe(db, user.id, cost, "render/enqueue"):
-            job.pending_credits = float(cost)  # restaura p/ a re-tentativa cobrar de novo
+    async with get_lock(f"render:{job_id}"):
+        operation_id = uuid.uuid4()
+        try:
+            operation = await begin_rerender(
+                db,
+                job_uuid,
+                user.id,
+                operation_id=operation_id,
+            )
+            dispatch = await create_dispatch(
+                db,
+                job_id=job_uuid,
+                operation_id=operation_id,
+                kind="rerender",
+                payload=DispatchPayload(rerender_cost=operation.cost),
+                debited_credits=operation.cost,
+                refine_debited=0.0,
+                pending_credits_snapshot=operation.pending_credits,
+            )
+            dispatch_id = dispatch.id
             await db.commit()
-        _redis.hset(
-            f"job:{job_id}",
-            mapping={
-                "status": "completed",
-                "detail": "Re-render nao pode ser enfileirado; credito estornado.",
-                "rerender_cost": 0,
-            },
-        )
-        logger.error("task_rerender_video.delay falhou job=%s: %s — credito estornado", job_id, e)
-        raise HTTPException(
-            status_code=503,
-            detail="Nao foi possivel iniciar o re-render agora. Seu credito foi estornado, tente novamente.",
-        )
+        except InsufficientCredits as exc:
+            await db.rollback()
+            raise HTTPException(status_code=402, detail=ErrorMessages.INSUFFICIENT_CREDITS) from exc
+        except InvalidJobOperation as exc:
+            await db.rollback()
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+        from app.worker.tasks import _update_rerender_terminal, task_rerender_video
+
+        try:
+            # Generation cancellation is a separate operation. Only a valid,
+            # persisted rerender may clear a stale legacy generation flag. This
+            # Redis mutation is still pre-broker, so a failure must compensate
+            # the already-persisted rerender debit below.
+            _redis.delete(f"job:{job_id}:cancelled")
+            _redis.hset(
+                f"job:{job_id}",
+                mapping={
+                    "status": "rendering",
+                    "progress": 0.0,
+                    "current_step": "queued",
+                    "detail": "Re-render enfileirado...",
+                    "rerender_cost": operation.cost,
+                    "rerender_operation_id": str(operation_id),
+                    "rerender_broker_state": "attempting",
+                },
+            )
+        except Exception as exc:  # noqa: BLE001 - Redis failed before any broker call
+            compensation = await _compensate_rerender_dispatch(
+                db,
+                job_id=job_uuid,
+                operation_id=operation_id,
+                dispatch_id=dispatch_id,
+            )
+            if compensation == "accepted_or_completed":
+                return {"status": "rendering", "message": "Re-render iniciado com edicoes atuais."}
+            if compensation in {"refunded", "already_refunded", "refund_pending"}:
+                try:
+                    _update_rerender_terminal(
+                        job_id,
+                        str(operation_id),
+                        status="completed" if compensation != "refund_pending" else "refund_pending",
+                        error="" if compensation != "refund_pending" else "Estorno persistente pendente.",
+                        detail=(
+                            "Re-render nao pode ser enfileirado; credito estornado."
+                            if compensation != "refund_pending"
+                            else "Re-render nao foi enfileirado; estorno pendente para reconciliacao."
+                        ),
+                        broker_state="failed",
+                    )
+                except Exception:  # noqa: BLE001 - DB is authoritative
+                    logger.exception("Falha ao publicar compensation Redis rerender job=%s", job_id)
+            logger.error("Dispatch de rerender compensado job=%s op=%s: %s", job_id, operation_id, exc)
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    "Nao foi possivel iniciar o re-render agora. Seu credito foi estornado, tente novamente."
+                    if compensation in {"refunded", "already_refunded"}
+                    else "Nao foi possivel iniciar o re-render agora. O estorno ficou pendente para reconciliacao."
+                ),
+            )
+
+        def _publish_rerender(_dispatch, *, task_id: str) -> None:
+            if hasattr(task_rerender_video, "apply_async"):
+                task_rerender_video.apply_async(
+                    args=(job_id, str(operation_id), str(_dispatch.id), task_id),
+                    task_id=task_id,
+                )
+            else:  # compatibility for pre-outbox queued-task adapters during rolling tests
+                task_rerender_video.delay(job_id, str(operation_id))
+
+        try:
+            publish_outcome = await publish_dispatch(db, dispatch_id, send=_publish_rerender)
+        except Exception:  # noqa: BLE001 - durable pending outbox will be replayed
+            await db.rollback()
+            publish_outcome = "pending"
+            logger.critical("Falha apos preparar outbox do rerender job=%s op=%s", job_id, operation_id, exc_info=True)
+
+        if publish_outcome == "send_failed":
+            compensation = await _compensate_rerender_dispatch(
+                db,
+                job_id=job_uuid,
+                operation_id=operation_id,
+                dispatch_id=dispatch_id,
+            )
+            if compensation == "accepted_or_completed":
+                return {"status": "rendering", "message": "Re-render iniciado com edicoes atuais."}
+            if compensation in {"refunded", "already_refunded", "refund_pending"}:
+                try:
+                    _update_rerender_terminal(
+                        job_id,
+                        str(operation_id),
+                        status="completed" if compensation != "refund_pending" else "refund_pending",
+                        error="" if compensation != "refund_pending" else "Estorno persistente pendente.",
+                        detail=(
+                            "Re-render nao pode ser enfileirado; credito estornado."
+                            if compensation != "refund_pending"
+                            else "Re-render nao foi enfileirado; estorno pendente para reconciliacao."
+                        ),
+                        broker_state="failed",
+                    )
+                except Exception:  # noqa: BLE001 - DB remains authoritative
+                    logger.exception("Falha ao publicar compensation Redis rerender job=%s", job_id)
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    "Nao foi possivel iniciar o re-render agora. Seu credito foi estornado, tente novamente."
+                    if compensation in {"refunded", "already_refunded"}
+                    else "Nao foi possivel iniciar o re-render agora. O estorno ficou pendente para reconciliacao."
+                ),
+            )
+
+        if publish_outcome == "published":
+            try:
+                _redis.hset(
+                    f"job:{job_id}",
+                    mapping={
+                        "rerender_broker_accepted_at": datetime.now(timezone.utc).isoformat(),
+                        "rerender_broker_accepted_operation_id": str(operation_id),
+                        "rerender_broker_state": "accepted",
+                    },
+                )
+            except Exception:  # noqa: BLE001 - SQL outbox is authoritative
+                logger.critical(
+                    "Falha ao espelhar aceite Redis job=%s op=%s",
+                    job_id,
+                    operation_id,
+                    exc_info=True,
+                )
+        else:
+            logger.warning(
+                "Rerender aguardando replay do outbox job=%s op=%s outcome=%s",
+                job_id,
+                operation_id,
+                publish_outcome,
+            )
+
+        if publish_outcome in {"published", "claimed"}:
+            try:
+                if await mark_rerender_dispatched(db, job_uuid, operation_id):
+                    await db.commit()
+            except Exception as exc:  # noqa: BLE001 - broker accepted; worker claim self-heals marker
+                await db.rollback()
+                logger.critical(
+                    "Broker aceitou rerender mas marker falhou job=%s op=%s; worker deve autocurar",
+                    job_id,
+                    operation_id,
+                    exc_info=True,
+                )
+                try:
+                    await asyncio.to_thread(
+                        _send_admin_alert,
+                        "ClipIA - marker de dispatch do rerender falhou",
+                        f"job_id={job_id} operation_id={operation_id} error={exc!r}. Nao estornar.",
+                    )
+                except Exception:  # noqa: BLE001
+                    logger.exception("Falha ao enviar alerta de marker do rerender job=%s", job_id)
 
     return {
         "status": "rendering",
@@ -1322,7 +2083,15 @@ async def reset_job(
     async with get_lock(f"reset:{job_id}"):
         # commit=False: debito + reset do job na MESMA transacao (erro entre eles nao
         # deixa o credito cobrado com o editor_state intacto).
-        await _debit_credits(db, user.id, 1, commit=False)
+        await _debit_credits(
+            db,
+            user.id,
+            1,
+            commit=False,
+            action="job_reset",
+            operation_id=uuid.uuid4(),
+            job_id=job.id,
+        )
         job.pending_credits = 0.0
         job.editor_state = None
         await db.commit()
@@ -1364,18 +2133,24 @@ async def job_status(
     "/jobs/{job_id}/cancel",
     summary="Cancel job",
     description="Cancels an ongoing job.",
-    responses={200: {"description": "Cancel initiated"}},
+    responses={200: {"description": "Cancel initiated"}, 409: {"description": "Job cannot be cancelled"}},
 )
 async def cancel_job(
     job_id: str,
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Retrieve job details."""
+    """Persist cancellation before signalling workers through Redis."""
     job = await get_owned_job(db, user, job_id)
     job_id = str(job.id)
 
-    _redis.set(f"job:{job_id}:cancelled", "true")
+    try:
+        await request_generation_cancel(db, job.id, user.id)
+    except InvalidJobOperation as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    await db.commit()
+
+    _redis.set(f"job:{job_id}:cancelled", "true", ex=24 * 60 * 60)
     _redis.hset(
         f"job:{job_id}",
         mapping={"status": "cancelling", "detail": "Cancelamento solicitado pelo usuario."},
@@ -1490,8 +2265,11 @@ async def admin_economy(
     _admin_user: User = Depends(get_current_admin_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Margem real da operação: telemetria consolidada no finalize de cada job.
-    Jobs antigos (sem telemetry) ficam de fora — a visão cresce com o uso."""
+    """Estimativa operacional baseada na telemetria disponível no finalize.
+
+    Jobs sem telemetry ficam de fora e ``api_cost_usd_est`` não substitui
+    faturas, câmbio, impostos, storage, tráfego ou suporte.
+    """
     result = await db.execute(select(Job).where(Job.telemetry.isnot(None)).order_by(Job.created_at.desc()).limit(100))
     jobs = result.scalars().all()
 
@@ -1528,7 +2306,13 @@ async def admin_economy(
         agg["avg_cost_usd"] = round(agg["api_cost_usd_est"] / n, 4)
         agg["avg_seconds"] = round(agg["total_seconds"] / n, 1)
 
-    return {"jobs": items, "by_template": by_template}
+    return {
+        "basis": "estimate",
+        "telemetry_jobs": len(items),
+        "limitations": "Exclui jobs sem telemetria e nao representa COGS real reconciliado com faturas.",
+        "jobs": items,
+        "by_template": by_template,
+    }
 
 
 @router.get(
@@ -1553,18 +2337,70 @@ async def admin_dashboard(
     users_result = await db.execute(select(User).where(User.created_at >= window_start))
     users_in_range = list(users_result.scalars().all())
 
-    purchases_result = await db.execute(select(CreditPurchase).where(CreditPurchase.created_at >= window_start))
-    purchases_in_range = list(purchases_result.scalars().all())
+    canonical_state_sql = canonical_payment_state_expression(
+        CreditPurchase.status,
+        CreditPurchase.payment_state,
+    )
+    purchases_result = await db.execute(
+        select(CreditPurchase, canonical_state_sql.label("canonical_state")).where(
+            or_(
+                CreditPurchase.created_at >= window_start,
+                CreditPurchase.paid_at >= window_start,
+                CreditPurchase.refunded_at >= window_start,
+            )
+        )
+    )
+    purchase_rows = list(purchases_result.all())
+    purchases_in_range = [row[0] for row in purchase_rows]
+    purchase_states = {row[0].id: row[1] for row in purchase_rows}
 
     jobs_result = await db.execute(select(Job).where(Job.created_at >= window_start))
     jobs_in_range = list(jobs_result.scalars().all())
 
-    # Aggregate totals via SQL — no need to load all rows
-    approved_purchases = [purchase for purchase in purchases_in_range if purchase.status == "approved"]
-    pending_purchases = [purchase for purchase in purchases_in_range if purchase.status != "approved"]
+    dispatches_result = await db.execute(select(JobDispatch).where(JobDispatch.created_at >= window_start))
+    dispatches_in_range = list(dispatches_result.scalars().all())
+
+    analytics_result = await db.execute(select(AnalyticsEvent).where(AnalyticsEvent.occurred_at >= window_start))
+    analytics_events = list(analytics_result.scalars().all())
+
+    coverage_window_start = now.replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=13)
+    coverage_window_end = now.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1)
+    coverage_result = await db.execute(
+        select(AnalyticsEvent.occurred_at).where(
+            AnalyticsEvent.authority == "client",
+            AnalyticsEvent.event_name == "landing_viewed",
+            AnalyticsEvent.occurred_at >= coverage_window_start,
+            AnalyticsEvent.occurred_at < coverage_window_end,
+        )
+    )
+    coverage_occurred_at = list(coverage_result.scalars().all())
+
+    def in_window(value: datetime | None) -> bool:
+        utc_value = _coerce_utc(value)
+        return utc_value is not None and utc_value >= window_start
+
+    created_purchases = [purchase for purchase in purchases_in_range if in_window(purchase.created_at)]
+    gross_paid_purchases = [
+        purchase
+        for purchase in purchases_in_range
+        if purchase_states[purchase.id] in {"paid", "refunded"} and in_window(purchase.paid_at)
+    ]
+    pending_purchases = [purchase for purchase in created_purchases if purchase_states[purchase.id] == "pending"]
+    refunded_purchases = [
+        purchase
+        for purchase in purchases_in_range
+        if purchase_states[purchase.id] == "refunded" and in_window(purchase.refunded_at)
+    ]
+    invalid_purchases = [
+        purchase
+        for purchase in purchases_in_range
+        if purchase_states[purchase.id] == "__invalid__"
+        or (purchase_states[purchase.id] == "paid" and purchase.paid_at is None)
+        or (purchase_states[purchase.id] == "refunded" and purchase.refunded_at is None)
+    ]
 
     approved_user_ids_result = await db.execute(
-        select(CreditPurchase.user_id).where(CreditPurchase.status == "approved").distinct()
+        select(CreditPurchase.user_id).where(canonical_state_sql == "paid").distinct()
     )
     approved_user_ids = {str(uid) for uid in approved_user_ids_result.scalars().all()}
 
@@ -1602,36 +2438,70 @@ async def admin_dashboard(
         if bucket:
             users_by_day[bucket] += 1
 
-    for purchase in purchases_in_range:
-        bucket = _bucket_key(purchase.created_at)
+    for purchase in gross_paid_purchases:
+        bucket = _bucket_key(purchase.paid_at)
         if bucket:
-            if purchase.status == "approved":
-                revenue_by_day[bucket] += purchase.price_brl / 100
-                approved_orders_by_day[bucket] += 1
+            revenue_by_day[bucket] += purchase.price_brl / 100
+            approved_orders_by_day[bucket] += 1
 
+    relevant_purchase_ids = {
+        purchase.id for purchase in [*created_purchases, *gross_paid_purchases, *refunded_purchases]
+    }
+    for purchase in purchases_in_range:
+        if purchase.id not in relevant_purchase_ids:
+            continue
         mix = package_mix.setdefault(
             purchase.package_name,
             {
                 "package_name": purchase.package_name,
                 "orders": 0,
+                "checkouts": 0,
+                "pending_orders": 0,
+                "paid_orders": 0,
+                "refunded_orders": 0,
+                "pending_checkout_value_brl": 0.0,
+                "paid_gross_revenue_brl": 0.0,
+                "refunded_value_brl": 0.0,
+                "net_revenue_brl": 0.0,
                 "approved_revenue_brl": 0.0,
                 "credits_sold": 0,
             },
         )
-        mix["orders"] += 1
-        if purchase.status == "approved":
-            mix["approved_revenue_brl"] = _round2(float(mix["approved_revenue_brl"]) + (purchase.price_brl / 100))
-            mix["credits_sold"] = int(mix["credits_sold"]) + purchase.credits_amount
+        if purchase in created_purchases:
+            mix["orders"] = int(mix["orders"]) + 1
+            mix["checkouts"] = int(mix["checkouts"]) + 1
+        if purchase in pending_purchases:
+            mix["pending_orders"] = int(mix["pending_orders"]) + 1
+            mix["pending_checkout_value_brl"] = _round2(
+                float(mix["pending_checkout_value_brl"]) + (purchase.price_brl / 100)
+            )
+        if purchase in gross_paid_purchases:
+            paid_value = _round2(float(mix["paid_gross_revenue_brl"]) + (purchase.price_brl / 100))
+            mix["paid_orders"] = int(mix["paid_orders"]) + 1
+            mix["paid_gross_revenue_brl"] = paid_value
+            mix["approved_revenue_brl"] = paid_value
+            mix["credits_sold"] = int(mix["credits_sold"]) + purchase.credits_amount + purchase.bonus_credits
+        if purchase in refunded_purchases:
+            mix["refunded_orders"] = int(mix["refunded_orders"]) + 1
+            mix["refunded_value_brl"] = _round2(float(mix["refunded_value_brl"]) + (purchase.price_brl / 100))
+
+    for mix in package_mix.values():
+        mix["net_revenue_brl"] = _round2(float(mix["paid_gross_revenue_brl"]) - float(mix["refunded_value_brl"]))
 
     for job in jobs_in_range:
         bucket = _bucket_key(job.created_at)
         if bucket:
             jobs_by_day[bucket] += 1
 
-    settled_jobs = [job for job in jobs_in_range if job.status in {"completed", "failed"}]
-    success_rate = 0.0
-    if settled_jobs:
-        success_rate = _round2((sum(1 for job in settled_jobs if job.status == "completed") / len(settled_jobs)) * 100)
+    delivered_dispatches = [dispatch for dispatch in dispatches_in_range if dispatch.state == "completed"]
+    cancelled_dispatches = [dispatch for dispatch in dispatches_in_range if dispatch.state == "cancelled"]
+    active_dispatches = [
+        dispatch for dispatch in dispatches_in_range if dispatch.state in {"pending", "published", "claimed"}
+    ]
+    terminal_dispatches = [*delivered_dispatches, *cancelled_dispatches]
+    operation_success_rate = (
+        _round2((len(delivered_dispatches) / len(terminal_dispatches)) * 100) if terminal_dispatches else 0.0
+    )
 
     avg_pending_credits = (
         _round2(sum(pending_credits_jobs) / len(pending_credits_jobs)) if pending_credits_jobs else 0.0
@@ -1639,32 +2509,220 @@ async def admin_dashboard(
 
     storage_stats = await _build_storage_stats(db)
 
-    approved_revenue_brl = _round2(sum(purchase.price_brl for purchase in approved_purchases) / 100)
+    paid_gross_revenue_brl = _round2(sum(purchase.price_brl for purchase in gross_paid_purchases) / 100)
     pending_revenue_brl = _round2(sum(purchase.price_brl for purchase in pending_purchases) / 100)
-    approved_orders = len(approved_purchases)
-    average_ticket_brl = _round2(approved_revenue_brl / approved_orders) if approved_orders else 0.0
+    refunded_value_brl = _round2(sum(purchase.price_brl for purchase in refunded_purchases) / 100)
+    net_revenue_brl = _round2(paid_gross_revenue_brl - refunded_value_brl)
+    approved_orders = len(gross_paid_purchases)
+    average_ticket_brl = _round2(paid_gross_revenue_brl / approved_orders) if approved_orders else 0.0
     verified_users = sum(1 for user in users_in_range if user.email_verified)
-    paying_users = len({str(purchase.user_id) for purchase in approved_purchases})
     registered = len(users_in_range)
-    verification_rate = _round2((verified_users / registered) * 100) if registered else 0.0
-    payer_conversion_rate = _round2((paying_users / registered) * 100) if registered else 0.0
+    cohort_user_ids = {str(user.id) for user in users_in_range}
+    paying_users = len(cohort_user_ids & approved_user_ids)
+
+    session_user_candidates: dict[str, set[str]] = defaultdict(set)
+    for event in analytics_events:
+        if event.anonymous_session_id is not None and event.user_id is not None:
+            session_user_candidates[str(event.anonymous_session_id)].add(str(event.user_id))
+    session_user_ids = {
+        session_id: next(iter(user_ids))
+        for session_id, user_ids in session_user_candidates.items()
+        if len(user_ids) == 1
+    }
+
+    def analytics_identity(event: AnalyticsEvent) -> str | None:
+        if event.user_id is not None:
+            return f"user:{event.user_id}"
+        if event.anonymous_session_id is None:
+            return None
+        session_id = str(event.anonymous_session_id)
+        linked_user_id = session_user_ids.get(session_id)
+        return f"user:{linked_user_id}" if linked_user_id else f"session:{session_id}"
+
+    events_by_identity: dict[str, list[tuple[datetime, datetime, str]]] = defaultdict(list)
+    for event in analytics_events:
+        identity = analytics_identity(event)
+        occurred_at = _coerce_utc(event.occurred_at)
+        if identity is None or occurred_at is None:
+            continue
+        received_at = _coerce_utc(event.received_at) or occurred_at
+        events_by_identity[identity].append((occurred_at, received_at, event.event_name))
+
+    StageCursor = tuple[datetime, datetime]
+    StageIdentities = dict[str, StageCursor]
+
+    def next_stage_identities(
+        prior_stage: StageIdentities | None,
+        event_name: str,
+    ) -> StageIdentities:
+        reached: StageIdentities = {}
+        candidates = prior_stage.keys() if prior_stage is not None else events_by_identity.keys()
+        for identity in candidates:
+            prior_cursor = prior_stage.get(identity) if prior_stage is not None else None
+            for occurred_at, received_at, candidate_name in sorted(events_by_identity[identity]):
+                cursor = (occurred_at, received_at)
+                if candidate_name == event_name and (prior_cursor is None or cursor >= prior_cursor):
+                    reached[identity] = cursor
+                    break
+        return reached
+
+    def ordered_stage_identities(sequence: tuple[str, ...]) -> dict[str, StageIdentities]:
+        reached: dict[str, StageIdentities] = {}
+        prior_stage: StageIdentities | None = None
+        for stage in sequence:
+            prior_stage = next_stage_identities(prior_stage, stage)
+            reached[stage] = prior_stage
+        return reached
+
+    acquisition_sequence = (
+        "landing_viewed",
+        "hero_cta_clicked",
+        "user_registered",
+        "email_verified",
+    )
+    funnel_stages = ordered_stage_identities(acquisition_sequence)
+    verified_identities = funnel_stages["email_verified"]
+    first_generation_identities = next_stage_identities(verified_identities, "generation_requested")
+    exported_identities = next_stage_identities(first_generation_identities, "video_exported")
+    checkout_identities = next_stage_identities(verified_identities, "checkout_started")
+    paying_identities = next_stage_identities(checkout_identities, "payment_completed")
+    second_generation_identities = next_stage_identities(
+        first_generation_identities,
+        "second_generation_requested",
+    )
+    post_export_checkout_identities = next_stage_identities(exported_identities, "checkout_started")
+    post_export_paying_identities = next_stage_identities(
+        post_export_checkout_identities,
+        "payment_completed",
+    )
+
+    signup_stages = ordered_stage_identities(("user_registered", "email_verified"))
+    signup_verified_identities = signup_stages["email_verified"]
+    signup_first_generation_identities = next_stage_identities(
+        signup_verified_identities,
+        "generation_requested",
+    )
+    signup_exported_identities = next_stage_identities(
+        signup_first_generation_identities,
+        "video_exported",
+    )
+    signup_checkout_identities = next_stage_identities(signup_verified_identities, "checkout_started")
+    signup_paying_identities = next_stage_identities(signup_checkout_identities, "payment_completed")
+    signup_second_generation_identities = next_stage_identities(
+        signup_first_generation_identities,
+        "second_generation_requested",
+    )
+
+    def user_ids_at(stage_identities: StageIdentities) -> set[str]:
+        return {identity.removeprefix("user:") for identity in stage_identities if identity.startswith("user:")}
+
+    signup_verified_user_ids = user_ids_at(signup_verified_identities)
+    signup_first_generation_user_ids = user_ids_at(signup_first_generation_identities)
+    signup_exported_user_ids = user_ids_at(signup_exported_identities)
+    signup_checkout_user_ids = user_ids_at(signup_checkout_identities)
+    signup_paying_user_ids = user_ids_at(signup_paying_identities)
+    signup_second_generation_user_ids = user_ids_at(signup_second_generation_identities)
+
+    device_by_user: dict[str, tuple[datetime, str]] = {}
+    for event in analytics_events:
+        identity = analytics_identity(event)
+        if not identity or not identity.startswith("user:") or event.device_class == "unknown":
+            continue
+        user_id = identity.removeprefix("user:")
+        if user_id not in cohort_user_ids:
+            continue
+        occurred_at = _coerce_utc(event.occurred_at) or now
+        current = device_by_user.get(user_id)
+        if current is None or occurred_at < current[0]:
+            device_by_user[user_id] = (occurred_at, event.device_class)
+
+    def safe_cohort_token(value: str | None, fallback: str) -> str:
+        normalized = value.strip().lower() if value else ""
+        if normalized and len(normalized) <= 100 and all(char.isalnum() or char in "._-" for char in normalized):
+            return normalized
+        return fallback
+
+    def user_niche(user: User) -> str:
+        campaign = safe_cohort_token(user.utm_campaign, "")
+        if campaign.startswith("nicho-"):
+            niche = campaign.removeprefix("nicho-")
+            if niche in _ANALYTICS_NICHES:
+                return niche
+        return "unknown"
+
+    def weekly_key(user: User) -> str:
+        created_at = _coerce_utc(user.created_at) or now
+        return (created_at.date() - timedelta(days=created_at.weekday())).isoformat()
+
+    def cohort_metrics(key: str, user_ids: set[str]) -> dict[str, int | float | str]:
+        cohort_registered = len(user_ids)
+        cohort_verified = len(user_ids & signup_verified_user_ids)
+        cohort_first = len(user_ids & signup_first_generation_user_ids)
+        cohort_exported = len(user_ids & signup_exported_user_ids)
+        cohort_checkout = len(user_ids & signup_checkout_user_ids)
+        cohort_paying = len(user_ids & signup_paying_user_ids)
+        cohort_second = len(user_ids & signup_second_generation_user_ids)
+        return {
+            "key": key,
+            "registered": cohort_registered,
+            "verified": cohort_verified,
+            "first_generation": cohort_first,
+            "exported": cohort_exported,
+            "checkout_started": cohort_checkout,
+            "paying": cohort_paying,
+            "second_generation": cohort_second,
+            "verification_rate": _round2((cohort_verified / cohort_registered) * 100) if cohort_registered else 0.0,
+            "activation_rate": _round2((cohort_first / cohort_verified) * 100) if cohort_verified else 0.0,
+            "payer_conversion_rate": _round2((cohort_paying / cohort_registered) * 100) if cohort_registered else 0.0,
+        }
+
+    def grouped_cohorts(group_key) -> list[dict[str, int | float | str]]:
+        groups: dict[str, set[str]] = defaultdict(set)
+        for user in users_in_range:
+            groups[group_key(user)].add(str(user.id))
+        return [cohort_metrics(key, groups[key]) for key in sorted(groups)]
+
+    collection_flags_aligned = settings.ANALYTICS_ENABLED and settings.ANALYTICS_FRONTEND_ENABLED
+    client_collection_dates = {
+        occurred_at.date() for value in coverage_occurred_at if (occurred_at := _coerce_utc(value)) is not None
+    }
+    baseline_days = 0
+    if collection_flags_aligned:
+        cursor = now.date()
+        while cursor in client_collection_dates:
+            baseline_days += 1
+            cursor -= timedelta(days=1)
+    baseline_start = now.date() - timedelta(days=baseline_days - 1) if baseline_days else None
+
+    visited_identities = funnel_stages["landing_viewed"]
+    cta_identities = funnel_stages["hero_cta_clicked"]
+    registered_identities = funnel_stages["user_registered"]
 
     return {
         "range": range,
         "window_start": window_start.date().isoformat(),
         "window_end": now.date().isoformat(),
         "summary": {
-            "approved_revenue_brl": approved_revenue_brl,
+            "paid_gross_revenue_brl": paid_gross_revenue_brl,
+            "pending_checkout_value_brl": pending_revenue_brl,
+            "refunded_value_brl": refunded_value_brl,
+            "refund_adjustment_brl": -refunded_value_brl,
+            "net_revenue_brl": net_revenue_brl,
+            "approved_revenue_brl": paid_gross_revenue_brl,
             "pending_revenue_brl": pending_revenue_brl,
             "approved_orders": approved_orders,
             "pending_orders": len(pending_purchases),
+            "refunded_orders": len(refunded_purchases),
+            "invalid_purchase_rows": len(invalid_purchases),
             "average_ticket_brl": average_ticket_brl,
             "new_users": registered,
             "verified_users": verified_users,
             "paying_users": paying_users,
             "active_jobs": int(current_job_statuses["queued"] + current_job_statuses["processing"]),
-            "credits_sold": int(sum(purchase.credits_amount for purchase in approved_purchases)),
-            "credits_consumed": int(len(jobs_in_range)),
+            "credits_sold": int(
+                sum(purchase.credits_amount + purchase.bonus_credits for purchase in gross_paid_purchases)
+            ),
+            "credits_consumed": int(sum(dispatch.debited_credits for dispatch in delivered_dispatches)),
         },
         "timeseries": {
             "revenue_by_day": [{"date": date, "value": _round2(value)} for date, value in revenue_by_day.items()],
@@ -1675,24 +2733,72 @@ async def admin_dashboard(
             ],
         },
         "funnel": {
-            "registered": registered,
-            "verified": verified_users,
-            "paying": paying_users,
-            "verification_rate": verification_rate,
-            "payer_conversion_rate": payer_conversion_rate,
+            "visited": len(visited_identities),
+            "cta_clicked": len(cta_identities),
+            "registered": len(registered_identities),
+            "verified": len(verified_identities),
+            "first_generation": len(first_generation_identities),
+            "exported": len(exported_identities),
+            "checkout_started": len(checkout_identities),
+            "paying": len(paying_identities),
+            "second_generation": len(second_generation_identities),
+            "verification_rate": _round2((len(verified_identities) / len(registered_identities)) * 100)
+            if registered_identities
+            else 0.0,
+            "payer_conversion_rate": _round2((len(paying_identities) / len(registered_identities)) * 100)
+            if registered_identities
+            else 0.0,
+            "cta_registration_rate": _round2((len(registered_identities) / len(cta_identities)) * 100)
+            if cta_identities
+            else 0.0,
+            "activation_rate": _round2((len(first_generation_identities) / len(verified_identities)) * 100)
+            if verified_identities
+            else 0.0,
+            "export_payment_rate": _round2((len(post_export_paying_identities) / len(exported_identities)) * 100)
+            if exported_identities
+            else 0.0,
+            "second_generation_rate": _round2(
+                (len(second_generation_identities) / len(first_generation_identities)) * 100
+            )
+            if first_generation_identities
+            else 0.0,
+            "analytics_enabled": settings.ANALYTICS_ENABLED,
+            "analytics_frontend_enabled": settings.ANALYTICS_FRONTEND_ENABLED,
+            "collection_flags_aligned": collection_flags_aligned,
+            "baseline_started_at": baseline_start.isoformat() if baseline_start else None,
+            "baseline_days": baseline_days,
+            "onboarding_gate_ready": collection_flags_aligned and baseline_days >= 14,
+        },
+        "cohorts": {
+            "weekly": grouped_cohorts(weekly_key),
+            "source": grouped_cohorts(lambda user: safe_cohort_token(user.utm_source, "direct")),
+            "niche": grouped_cohorts(user_niche),
+            "device": grouped_cohorts(lambda user: device_by_user.get(str(user.id), (now, "unknown"))[1]),
         },
         "operations": {
             "queued_jobs": int(current_job_statuses["queued"]),
             "processing_jobs": int(current_job_statuses["processing"]),
             "completed_jobs": int(current_job_statuses["completed"]),
             "failed_jobs": int(current_job_statuses["failed"]),
-            "success_rate": success_rate,
+            "success_rate": operation_success_rate,
+            "operation_success_rate": operation_success_rate,
+            "delivered_operations": len(delivered_dispatches),
+            "delivered_generation_operations": sum(
+                1 for dispatch in delivered_dispatches if dispatch.kind == "generation"
+            ),
+            "delivered_rerender_operations": sum(1 for dispatch in delivered_dispatches if dispatch.kind == "rerender"),
+            "cancelled_generation_operations": sum(
+                1 for dispatch in cancelled_dispatches if dispatch.kind == "generation"
+            ),
+            "cancelled_rerender_operations": sum(1 for dispatch in cancelled_dispatches if dispatch.kind == "rerender"),
+            "active_generation_operations": sum(1 for dispatch in active_dispatches if dispatch.kind == "generation"),
+            "active_rerender_operations": sum(1 for dispatch in active_dispatches if dispatch.kind == "rerender"),
             "avg_pending_credits": avg_pending_credits,
             **storage_stats,
         },
         "package_mix": sorted(
             package_mix.values(),
-            key=lambda item: (float(item["approved_revenue_brl"]), int(item["orders"])),
+            key=lambda item: (float(item["net_revenue_brl"]), int(item["orders"])),
             reverse=True,
         ),
         "recent_activity": {
@@ -1715,9 +2821,10 @@ async def admin_dashboard(
                     "package_name": purchase.package_name,
                     "price_brl": purchase.price_brl,
                     "credits_amount": purchase.credits_amount,
-                    "status": purchase.status,
+                    "status": canonical_payment_state_or_invalid(purchase.status, purchase.payment_state),
                     "created_at": purchase.created_at.isoformat() if purchase.created_at else None,
                     "paid_at": purchase.paid_at.isoformat() if purchase.paid_at else None,
+                    "refunded_at": purchase.refunded_at.isoformat() if purchase.refunded_at else None,
                 }
                 for purchase in recent_purchases
             ],
@@ -1784,7 +2891,14 @@ async def admin_list_users(
     if users:
         paying_rows = await db.execute(
             select(CreditPurchase.user_id)
-            .where(CreditPurchase.user_id.in_([u.id for u in users]), CreditPurchase.status == "approved")
+            .where(
+                CreditPurchase.user_id.in_([u.id for u in users]),
+                canonical_payment_state_expression(
+                    CreditPurchase.status,
+                    CreditPurchase.payment_state,
+                )
+                == "paid",
+            )
             .distinct()
         )
         paying = {str(uid) for uid in paying_rows.scalars().all()}
@@ -1826,8 +2940,12 @@ async def admin_list_purchases(
     stmt = select(CreditPurchase, User.email).join(User, CreditPurchase.user_id == User.id)
     count_stmt = select(func.count()).select_from(CreditPurchase)
     if status.strip():
-        stmt = stmt.where(CreditPurchase.status == status.strip())
-        count_stmt = count_stmt.where(CreditPurchase.status == status.strip())
+        requested_status = "paid" if status.strip().lower() == "approved" else status.strip().lower()
+        state_filter = (
+            canonical_payment_state_expression(CreditPurchase.status, CreditPurchase.payment_state) == requested_status
+        )
+        stmt = stmt.where(state_filter)
+        count_stmt = count_stmt.where(state_filter)
 
     total = (await db.execute(count_stmt)).scalar() or 0
     rows = await db.execute(
@@ -1847,9 +2965,10 @@ async def admin_list_purchases(
                 "bonus_credits": p.bonus_credits,
                 "price_brl": p.price_brl,
                 "provider": p.provider,
-                "status": p.status,
+                "status": canonical_payment_state_or_invalid(p.status, p.payment_state),
                 "created_at": p.created_at.isoformat() if p.created_at else None,
                 "paid_at": p.paid_at.isoformat() if p.paid_at else None,
+                "refunded_at": p.refunded_at.isoformat() if p.refunded_at else None,
             }
             for p, email in rows.all()
         ],
@@ -1994,15 +3113,30 @@ async def admin_adjust_credits(
     admin_user: User = Depends(get_current_admin_user),
     db: AsyncSession = Depends(get_db),
 ):
-    target = await db.get(User, validate_uuid(user_id))
+    target = await db.scalar(select(User).where(User.id == validate_uuid(user_id)).with_for_update())
     if not target:
         raise not_found_error()
 
     previous = target.credits
-    new_balance = max(0, previous + req.delta)  # clamp: saldo nunca fica negativo
-    target.credits = new_balance
+    if previous + req.delta < 0:
+        await db.rollback()
+        raise HTTPException(status_code=409, detail="insufficient_credits")
+
+    adjustment_id = uuid.uuid4()
+    await set_credit_ledger_context(
+        db,
+        origin="admin_adjustment",
+        reason=req.reason.strip(),
+        idempotency_key=f"admin-adjustment:{adjustment_id}",
+        operation_id=adjustment_id,
+    )
+    balance_result = await db.execute(
+        update(User).where(User.id == target.id).values(credits=User.credits + req.delta).returning(User.credits)
+    )
+    new_balance = int(balance_result.scalar_one())
     db.add(
         CreditAdjustment(
+            id=adjustment_id,
             admin_user_id=admin_user.id,
             target_user_id=target.id,
             delta=req.delta,
@@ -2011,9 +3145,18 @@ async def admin_adjust_credits(
             new_balance=new_balance,
         )
     )
+    applied = new_balance - previous
+    if applied:
+        await append_server_event_safely(
+            db,
+            event_name="credit_balance_changed",
+            user=target,
+            properties={"reason": "admin", "delta": applied},
+            idempotency_key=f"admin-adjustment:{adjustment_id}:credit",
+            occurred_at=datetime.now(timezone.utc),
+        )
     await db.commit()
 
-    applied = new_balance - previous
     if applied:
         record_credit_metric("credit" if applied > 0 else "debit", abs(applied))
     logger.warning(

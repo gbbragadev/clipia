@@ -4,7 +4,7 @@ from datetime import datetime, timedelta, timezone
 
 from jose import jwt
 
-from app.auth.service import hash_password, verify_password, create_access_token, decode_access_token
+from app.auth.service import create_access_token, decode_access_token, hash_password, verify_password
 from app.config import settings
 
 
@@ -38,6 +38,19 @@ def test_jwt_wrong_secret_returns_none():
 def test_jwt_without_subject_returns_none():
     token = jwt.encode(
         {"exp": datetime.now(timezone.utc) + timedelta(minutes=5)},
+        settings.JWT_SECRET,
+        algorithm=settings.JWT_ALGORITHM,
+    )
+    assert decode_access_token(token) is None
+
+
+def test_jwt_with_non_uuid_subject_returns_none():
+    token = jwt.encode(
+        {
+            "sub": "not-a-user-id",
+            "purpose": "access",
+            "exp": datetime.now(timezone.utc) + timedelta(minutes=5),
+        },
         settings.JWT_SECRET,
         algorithm=settings.JWT_ALGORITHM,
     )

@@ -18,9 +18,12 @@ def _patch_retrieve(monkeypatch, session_obj):
 
 def _paid_session(purchase, payment_intent="pi_bonus_1"):
     return {
-        "id": "cs_bonus_1",
+        "id": purchase.mp_preference_id,
         "payment_status": "paid",
         "client_reference_id": str(purchase.id),
+        "metadata": {"purchase_id": str(purchase.id)},
+        "amount_total": purchase.price_brl,
+        "currency": "brl",
         "payment_intent": payment_intent,
     }
 
@@ -31,12 +34,12 @@ _WEBHOOK_BODY = {"type": "checkout.session.completed", "data": {"object": {"id":
 @pytest.mark.asyncio
 async def test_purchase_bonus_credited_with_flag_on(client, db_session, purchase_factory, verified_user, monkeypatch):
     monkeypatch.setattr("app.payments.service.settings.PURCHASE_BONUS_PERCENT", 20)
-    purchase = await purchase_factory(package_name="popular", provider="stripe")
+    purchase = await purchase_factory(package_name="popular", provider="stripe", mp_preference_id="cs_bonus_1")
     _patch_retrieve(monkeypatch, _paid_session(purchase))
 
     response = await client.post("/api/v1/webhooks/stripe", json=_WEBHOOK_BODY)
 
-    assert response.json()["status"] == "credited"
+    assert response.json()["status"] == "processed"
     db_session.expire_all()
     refreshed_purchase = await db_session.get(CreditPurchase, purchase.id)
     refreshed_user = await db_session.get(User, verified_user.id)
@@ -47,14 +50,14 @@ async def test_purchase_bonus_credited_with_flag_on(client, db_session, purchase
 @pytest.mark.asyncio
 async def test_purchase_bonus_replay_is_idempotent(client, db_session, purchase_factory, verified_user, monkeypatch):
     monkeypatch.setattr("app.payments.service.settings.PURCHASE_BONUS_PERCENT", 20)
-    purchase = await purchase_factory(package_name="popular", provider="stripe")
+    purchase = await purchase_factory(package_name="popular", provider="stripe", mp_preference_id="cs_bonus_1")
     _patch_retrieve(monkeypatch, _paid_session(purchase))
 
     first = await client.post("/api/v1/webhooks/stripe", json=_WEBHOOK_BODY)
     second = await client.post("/api/v1/webhooks/stripe", json=_WEBHOOK_BODY)
 
-    assert first.json()["status"] == "credited"
-    assert second.json()["status"] == "not_credited", "Replay nao pode re-creditar base nem bonus."
+    assert first.json()["status"] == "processed"
+    assert second.json()["status"] == "not_processed", "Replay nao pode re-creditar base nem bonus."
     db_session.expire_all()
     assert (await db_session.get(User, verified_user.id)).credits == 41
 
@@ -64,14 +67,30 @@ async def test_refund_reverts_base_and_bonus_even_after_promo_ends(
     client, db_session, purchase_factory, verified_user, monkeypatch
 ):
     monkeypatch.setattr("app.payments.service.settings.PURCHASE_BONUS_PERCENT", 20)
-    purchase = await purchase_factory(package_name="popular", provider="stripe")
+    purchase = await purchase_factory(package_name="popular", provider="stripe", mp_preference_id="cs_bonus_1")
     _patch_retrieve(monkeypatch, _paid_session(purchase))
     await client.post("/api/v1/webhooks/stripe", json=_WEBHOOK_BODY)  # credita 30+6
 
     # Promo acabou entre a compra e o estorno — o snapshot em bonus_credits garante a reversao total.
     monkeypatch.setattr("app.payments.service.settings.PURCHASE_BONUS_PERCENT", 0)
     monkeypatch.setattr(
-        stripe.Charge, "retrieve", staticmethod(lambda _id: {"id": "ch_1", "payment_intent": "pi_bonus_1"})
+        stripe.Charge,
+        "retrieve",
+        staticmethod(
+            lambda _id: {
+                "id": "ch_1",
+                "payment_intent": "pi_bonus_1",
+                "amount": purchase.price_brl,
+                "amount_refunded": purchase.price_brl,
+                "currency": "brl",
+                "refunded": True,
+            }
+        ),
+    )
+    monkeypatch.setattr(
+        stripe.PaymentIntent,
+        "retrieve",
+        staticmethod(lambda _id: {"id": "pi_bonus_1", "metadata": {"purchase_id": str(purchase.id)}}),
     )
 
     response = await client.post(
@@ -87,12 +106,12 @@ async def test_refund_reverts_base_and_bonus_even_after_promo_ends(
 
 @pytest.mark.asyncio
 async def test_bonus_zero_when_flag_off(client, db_session, purchase_factory, verified_user, monkeypatch):
-    purchase = await purchase_factory(package_name="popular", provider="stripe")
+    purchase = await purchase_factory(package_name="popular", provider="stripe", mp_preference_id="cs_bonus_1")
     _patch_retrieve(monkeypatch, _paid_session(purchase))
 
     response = await client.post("/api/v1/webhooks/stripe", json=_WEBHOOK_BODY)
 
-    assert response.json()["status"] == "credited"
+    assert response.json()["status"] == "processed"
     db_session.expire_all()
     assert (await db_session.get(CreditPurchase, purchase.id)).bonus_credits == 0
     assert (await db_session.get(User, verified_user.id)).credits == 35, "Sem promo: comportamento atual."
@@ -108,7 +127,7 @@ async def test_packages_endpoint_exposes_bonus(client, verified_user, auth_heade
     pkgs = {p["id"]: p for p in response.json()}
     assert pkgs["starter"]["bonus_credits"] == 2
     assert pkgs["popular"]["bonus_credits"] == 6
-    assert pkgs["pro"]["bonus_credits"] == 20
+    assert pkgs["professional"]["bonus_credits"] == 20
     assert pkgs["popular"]["bonus_percent"] == 20
 
 

@@ -110,7 +110,7 @@ export function EditorMockup() {
       {/* ambient glow */}
       <div
         aria-hidden
-        className="pointer-events-none absolute -inset-6 -z-10 opacity-70 blur-2xl"
+        className="pointer-events-none absolute inset-0 -z-10 opacity-70 blur-2xl"
         style={{
           background:
             "radial-gradient(60% 50% at 70% 20%, rgba(255,86,56,0.18), transparent 70%), radial-gradient(50% 50% at 20% 80%, rgba(62,155,255,0.14), transparent 70%)",

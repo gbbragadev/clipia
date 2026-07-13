@@ -7,6 +7,7 @@ import { verifyEmail, resendCode } from "@/lib/auth";
 import { useAuth } from "@/contexts/AuthContext";
 import Logo from "@/components/brand/Logo";
 import { useToast } from "@/components/ui/feedback";
+import { parseSelectedPackage } from "@/lib/package-intent";
 
 function VerifyForm() {
   const [code, setCode] = useState(["", "", "", "", "", ""]);
@@ -17,6 +18,7 @@ function VerifyForm() {
   const inputs = useRef<(HTMLInputElement | null)[]>([]);
   const params = useSearchParams();
   const email = params.get("email") || "";
+  const selectedPackage = parseSelectedPackage(params.get("selected_package"));
   const router = useRouter();
   const { refreshUser } = useAuth();
   const { success, error: toastError } = useToast();
@@ -65,9 +67,14 @@ function VerifyForm() {
     setLoading(true);
     try {
       await verifyEmail(email, fullCode);
-      await refreshUser();
+      const refreshedUser = await refreshUser();
+      const resumePackage = selectedPackage ?? parseSelectedPackage(refreshedUser?.selected_package);
       success("Email verificado", "Sua conta ja esta liberada para uso.");
-      router.push("/dashboard");
+      router.push(
+        resumePackage
+          ? `/dashboard/credits?selected_package=${encodeURIComponent(resumePackage)}`
+          : "/dashboard",
+      );
     } catch (err) {
       setError(err instanceof Error ? err.message : "Erro ao verificar");
       toastError("Não foi possível verificar o e-mail", err instanceof Error ? err.message : "Tente novamente.");
@@ -93,7 +100,11 @@ function VerifyForm() {
   }
 
   if (!email) {
-    router.replace("/auth/register");
+    router.replace(
+      selectedPackage
+        ? `/auth/register?selected_package=${encodeURIComponent(selectedPackage)}`
+        : "/auth/register",
+    );
     return null;
   }
 

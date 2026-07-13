@@ -5,7 +5,7 @@ import logging
 import subprocess
 from pathlib import Path
 
-from app.config import settings
+from app.credits import CREDIT_TARIFFS
 from app.services.voice_provider import VoiceInfo, VoiceProvider
 
 logger = logging.getLogger(__name__)
@@ -23,15 +23,11 @@ class CustomAudioProvider(VoiceProvider):
         self,
         text: str,
         output_path: str,
-        voice_id: str,  # unused — audio already exists
-        source_path: str = "",
+        voice_id: str,
         **kwargs,
     ) -> Path:
-        """'Synthesize' by normalizing the uploaded audio to standard WAV."""
-        if not source_path or not Path(source_path).exists():
-            raise FileNotFoundError(f"Source audio not found: {source_path}")
-        normalize_audio(source_path, output_path)
-        return Path(output_path)
+        """Reject arbitrary local sources; uploads belong to an authenticated job route."""
+        raise RuntimeError("Custom synthesis paths are disabled; upload audio to an owned job")
 
     async def list_voices(self) -> list[VoiceInfo]:
         return [
@@ -44,7 +40,7 @@ class CustomAudioProvider(VoiceProvider):
         ]
 
     def estimate_cost(self, text: str) -> int:
-        return settings.CREDIT_COST_CUSTOM_AUDIO
+        return int(CREDIT_TARIFFS.standard_voice)
 
 
 def validate_audio_file(file_path: str) -> dict:

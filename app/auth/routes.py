@@ -1,13 +1,14 @@
 import asyncio
 import secrets
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, Response, status
 from slowapi import Limiter
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.analytics.service import append_server_event_safely
 from app.auth.dependencies import get_current_user
 from app.auth.disposable import is_disposable_email
 from app.auth.email import (
@@ -18,6 +19,8 @@ from app.auth.email import (
     send_verification_email,
     send_welcome_email,
 )
+from app.auth.referrals import award_verified_referral
+from app.auth.reset_tokens import consume_password_reset_token, invalidate_password_reset_tokens
 from app.auth.schemas import (
     ChangePasswordRequest,
     DeleteAccountRequest,
@@ -33,22 +36,33 @@ from app.auth.schemas import (
     VerifyResetCodeRequest,
 )
 from app.auth.service import create_access_token, create_reset_token, decode_reset_token, hash_password, verify_password
+from app.auth.session import clear_auth_cookies, new_csrf_token, set_auth_cookies
 from app.auth.turnstile import verify_turnstile
 from app.config import settings
 from app.db.engine import get_db
-from app.db.models import CreditPurchase, Job, User
+from app.db.models import CreditPurchase, Job, PasswordResetToken, User
 from app.observability import record_credit_metric
+from app.payments.states import canonical_payment_state
+from app.services.credit_ledger import set_credit_ledger_context
 from app.utils.locks import get_lock
 from app.utils.ratelimit import client_ip
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 limiter = Limiter(key_func=client_ip)
+_ANALYTICS_NICHES = {"curiosidades", "religioso", "motivacional", "financas", "historias", "humor", "drama"}
 
 
 def _ensure_utc(dt: datetime) -> datetime:
     if dt.tzinfo is None:
         return dt.replace(tzinfo=timezone.utc)
     return dt.astimezone(timezone.utc)
+
+
+def _analytics_niche(utm_campaign: str | None) -> str | None:
+    if not utm_campaign or not utm_campaign.startswith("nicho-"):
+        return None
+    niche = utm_campaign.removeprefix("nicho-")
+    return niche if niche in _ANALYTICS_NICHES else None
 
 
 @router.post(
@@ -60,7 +74,7 @@ def _ensure_utc(dt: datetime) -> datetime:
     responses={201: {"description": "User created"}, 409: {"description": "Email already exists"}},
 )
 @limiter.limit(settings.RATE_LIMIT_AUTH)
-async def register(request: Request, body: RegisterRequest, db: AsyncSession = Depends(get_db)):
+async def register(request: Request, response: Response, body: RegisterRequest, db: AsyncSession = Depends(get_db)):
     """Register a new user and return an access token."""
     if not await verify_turnstile(body.turnstile_token, client_ip(request), request.headers.get("x-readiness-bypass")):
         raise HTTPException(
@@ -86,11 +100,10 @@ async def register(request: Request, body: RegisterRequest, db: AsyncSession = D
                 referrer_id = referrer.id
 
         code = generate_otp()
-        # LGPD: registra comprovante de consentimento expresso (timestamp + IP) para auditoria.
-        # A obrigatoriedade do aceite e enforcecida no frontend (checkbox); o backend registra
-        # o comprovante quando o consentimento e declarado.
-        consented_at = datetime.now(timezone.utc) if body.consent else None
-        consent_ip = client_ip(request) if body.consent else None
+        # O backend exige o aceite e congela as versoes legais vigentes para auditoria.
+        consented_at = datetime.now(timezone.utc)
+        consent_ip = client_ip(request)
+        registered_at = datetime.now(timezone.utc)
         user = User(
             email=body.email,
             name=body.name,
@@ -102,19 +115,37 @@ async def register(request: Request, body: RegisterRequest, db: AsyncSession = D
             utm_source=body.utm_source,
             utm_medium=body.utm_medium,
             utm_campaign=body.utm_campaign,
+            selected_package=body.selected_package,
             referral_code=uuid.uuid4().hex[:8],
             referred_by=referrer_id,
             consented_at=consented_at,
             consent_ip=consent_ip,
+            consent_terms_version=settings.TERMS_VERSION,
+            consent_privacy_version=settings.PRIVACY_VERSION,
+            created_at=registered_at,
         )
         db.add(user)
+        await db.flush()
+        await append_server_event_safely(
+            db,
+            event_name="user_registered",
+            user=user,
+            properties={
+                "selected_package": body.selected_package,
+                "niche": _analytics_niche(body.utm_campaign),
+            },
+            idempotency_key=f"user:{user.id}:registered",
+            occurred_at=registered_at,
+        )
         await db.commit()
         await db.refresh(user)
 
         await asyncio.to_thread(send_verification_email, body.email, code, body.name)
 
-        token = create_access_token(str(user.id))
-        return TokenResponse(access_token=token)
+        csrf_token = new_csrf_token()
+        token = create_access_token(str(user.id), csrf_token=csrf_token)
+        set_auth_cookies(response, access_token=token, csrf_token=csrf_token)
+        return TokenResponse(access_token=token, csrf_token=csrf_token)
 
 
 @router.post(
@@ -125,7 +156,7 @@ async def register(request: Request, body: RegisterRequest, db: AsyncSession = D
     responses={200: {"description": "Login successful"}, 401: {"description": "Invalid credentials"}},
 )
 @limiter.limit(settings.RATE_LIMIT_AUTH)
-async def login(request: Request, body: LoginRequest, db: AsyncSession = Depends(get_db)):
+async def login(request: Request, response: Response, body: LoginRequest, db: AsyncSession = Depends(get_db)):
     """Authenticate user."""
     result = await db.execute(select(User).where(User.email == body.email))
     user = result.scalar_one_or_none()
@@ -133,8 +164,16 @@ async def login(request: Request, body: LoginRequest, db: AsyncSession = Depends
     if user is None or not verify_password(body.password, user.password_hash):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Email ou senha incorretos")
 
-    token = create_access_token(str(user.id))
-    return TokenResponse(access_token=token)
+    csrf_token = new_csrf_token()
+    token = create_access_token(str(user.id), csrf_token=csrf_token)
+    set_auth_cookies(response, access_token=token, csrf_token=csrf_token)
+    return TokenResponse(access_token=token, csrf_token=csrf_token)
+
+
+@router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
+async def logout(response: Response, _user: User = Depends(get_current_user)) -> None:
+    """End the browser session; Bearer clients remain compatible."""
+    clear_auth_cookies(response)
 
 
 @router.post(
@@ -184,38 +223,58 @@ async def verify_email(
                 raise HTTPException(status_code=429, detail="Muitas tentativas. Solicite um novo codigo.")
             raise HTTPException(status_code=400, detail=f"Codigo incorreto. {remaining} tentativa(s) restante(s).")
 
-        user.email_verified = True
-        user.otp_attempts = 0
-        user.verification_code = None
-        user.verification_expires = None
-        user.credits = settings.WELCOME_CREDIT_BONUS
+        await set_credit_ledger_context(
+            db,
+            origin="welcome_bonus",
+            reason="verified email welcome bonus",
+            idempotency_key=f"welcome:{user.id}",
+        )
+        verified_at = datetime.now(timezone.utc)
+        transition = (
+            update(User)
+            .where(User.id == user.id, User.email_verified.is_(False))
+            .values(
+                email_verified=True,
+                otp_attempts=0,
+                verification_code=None,
+                verification_expires=None,
+                credits=User.credits + settings.WELCOME_CREDIT_BONUS,
+            )
+            .execution_options(synchronize_session=False)
+        )
+        transition_result = await db.execute(transition)
+        if transition_result.rowcount != 1:
+            await db.rollback()
+            return {"status": "already_verified"}
+
+        await append_server_event_safely(
+            db,
+            event_name="email_verified",
+            user=user,
+            properties={"welcome_credits": settings.WELCOME_CREDIT_BONUS},
+            idempotency_key=f"user:{user.id}:verified",
+            occurred_at=verified_at,
+        )
+        if settings.WELCOME_CREDIT_BONUS > 0:
+            await append_server_event_safely(
+                db,
+                event_name="credit_balance_changed",
+                user=user,
+                properties={"reason": "welcome", "delta": settings.WELCOME_CREDIT_BONUS},
+                idempotency_key=f"user:{user.id}:welcome-credit",
+                occurred_at=verified_at,
+            )
+        referral_bonus = await award_verified_referral(db, user)
         await db.commit()
-        record_credit_metric("credit", settings.WELCOME_CREDIT_BONUS)
+        await db.refresh(user)
+        if settings.WELCOME_CREDIT_BONUS > 0:
+            record_credit_metric("credit", settings.WELCOME_CREDIT_BONUS)
+        if referral_bonus > 0:
+            record_credit_metric("referral_bonus", referral_bonus)
 
         # Boas-vindas fire-and-forget: roda APOS a resposta (threadpool); falha de SMTP
         # e engolida dentro de send_welcome_email e nunca quebra a verificacao.
         background_tasks.add_task(send_welcome_email, user.email, user.name, user.credits)
-
-        # Credit referrer with 2 bonus credits (max 10 referrals per user)
-        MAX_REFERRAL_BONUS_COUNT = 10
-
-        if user.referred_by:
-            from sqlalchemy import func as sqla_func
-            from sqlalchemy import update as sql_update
-
-            # Count how many verified referrals already credited
-            referral_count = (
-                await db.execute(
-                    select(sqla_func.count(User.id)).where(
-                        User.referred_by == user.referred_by, User.email_verified.is_(True)
-                    )
-                )
-            ).scalar() or 0
-
-            if referral_count <= MAX_REFERRAL_BONUS_COUNT:
-                await db.execute(sql_update(User).where(User.id == user.referred_by).values(credits=User.credits + 2))
-                await db.commit()
-                record_credit_metric("referral_bonus", 2)
 
         return {"status": "verified", "credits": settings.WELCOME_CREDIT_BONUS}
 
@@ -264,6 +323,8 @@ async def forgot_password(request: Request, body: ForgotPasswordRequest, db: Asy
         user = result.scalar_one_or_none()
 
         if user is not None:
+            now = datetime.now(timezone.utc)
+            await invalidate_password_reset_tokens(db, user_id=user.id, used_at=now)
             code = generate_otp()
             user.verification_code = code
             user.verification_expires = otp_expiry()
@@ -307,10 +368,23 @@ async def verify_reset_code(request: Request, body: VerifyResetCodeRequest, db: 
                 raise HTTPException(status_code=429, detail="Muitas tentativas. Solicite um novo codigo.")
             raise HTTPException(status_code=400, detail=f"Codigo incorreto. {remaining} tentativa(s) restante(s).")
 
+        now = datetime.now(timezone.utc)
+        jti = uuid.uuid4()
+        expires_at = now + timedelta(minutes=10)
+        db.add(
+            PasswordResetToken(
+                jti=jti,
+                user_id=user.id,
+                issued_at=now,
+                expires_at=expires_at,
+            )
+        )
+        user.verification_code = None
+        user.verification_expires = None
         user.otp_attempts = 0
         await db.commit()
 
-        return {"status": "verified", "reset_token": create_reset_token(str(user.id))}
+        return {"status": "verified", "reset_token": create_reset_token(str(user.id), jti, now)}
 
 
 @router.post(
@@ -326,26 +400,33 @@ async def reset_password(request: Request, body: ResetPasswordRequest, db: Async
     if not payload:
         raise HTTPException(status_code=400, detail="Token de redefinicao invalido ou expirado")
 
-    user_id = payload.get("sub")
-    if not user_id:
+    try:
+        user_id = uuid.UUID(str(payload.get("sub")))
+        jti = uuid.UUID(str(payload.get("jti")))
+    except (TypeError, ValueError):
         raise HTTPException(status_code=400, detail="Token de redefinicao invalido ou expirado")
 
-    result = await db.execute(select(User).where(User.id == user_id))
+    result = await db.execute(select(User).where(User.id == user_id).with_for_update())
     user = result.scalar_one_or_none()
     if not user:
         raise HTTPException(status_code=400, detail="Token de redefinicao invalido ou expirado")
 
-    # Invalidate token if already used
-    token_iat = payload.get("iat")
-    if token_iat and user.password_reset_at:
-        token_time = datetime.fromtimestamp(token_iat, tz=timezone.utc)
-        if token_time < user.password_reset_at:
-            raise HTTPException(status_code=400, detail="Token de redefinicao invalido ou expirado")
+    now = datetime.now(timezone.utc)
+    consumed = await consume_password_reset_token(
+        db,
+        user_id=user.id,
+        jti=jti,
+        used_at=now,
+    )
+    if not consumed:
+        await db.rollback()
+        raise HTTPException(status_code=400, detail="Token de redefinicao invalido ou expirado")
 
     user.password_hash = hash_password(body.new_password)
     user.verification_code = None
     user.verification_expires = None
-    user.password_reset_at = datetime.now(timezone.utc)
+    user.password_reset_at = now
+    await invalidate_password_reset_tokens(db, user_id=user.id, used_at=now)
     await db.commit()
 
     return {"status": "password_reset"}
@@ -368,6 +449,7 @@ async def get_me(user: User = Depends(get_current_user)):
         plan=user.plan,
         email_verified=user.email_verified,
         referral_code=user.referral_code,
+        selected_package=user.selected_package,
     )
 
 
@@ -395,6 +477,7 @@ async def update_me(
         plan=user.plan,
         email_verified=user.email_verified,
         referral_code=user.referral_code,
+        selected_package=user.selected_package,
     )
 
 
@@ -414,6 +497,9 @@ async def change_password(
         raise HTTPException(status_code=400, detail="Senha atual incorreta")
 
     user.password_hash = hash_password(body.new_password)
+    now = datetime.now(timezone.utc)
+    user.password_reset_at = now
+    await invalidate_password_reset_tokens(db, user_id=user.id, used_at=now)
     await db.commit()
     return {"status": "password_changed"}
 
@@ -426,6 +512,7 @@ async def change_password(
 )
 async def delete_account(
     body: DeleteAccountRequest,
+    response: Response,
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -436,6 +523,12 @@ async def delete_account(
     original_email = user.email
     original_name = user.name
 
+    await set_credit_ledger_context(
+        db,
+        origin="account_closure",
+        reason="anonymized account forfeited remaining credits",
+        idempotency_key=f"account-closure:{user.id}",
+    )
     user.name = "Deleted User"
     user.email = f"deleted_{user.id.hex}@removed.clipia.com.br"
     user.plan = "deleted"
@@ -444,8 +537,12 @@ async def delete_account(
     user.verification_code = None
     user.verification_expires = None
     user.password_hash = hash_password(secrets.token_urlsafe(32))
+    now = datetime.now(timezone.utc)
+    user.password_reset_at = now
+    await invalidate_password_reset_tokens(db, user_id=user.id, used_at=now)
     await db.commit()
 
+    clear_auth_cookies(response)
     await asyncio.to_thread(send_account_deleted_email, original_email, original_name)
     return {"status": "account_deleted"}
 
@@ -476,6 +573,7 @@ async def export_data(
             "credits": user.credits,
             "plan": user.plan,
             "email_verified": user.email_verified,
+            "selected_package": user.selected_package,
             "created_at": user.created_at.isoformat() if user.created_at else None,
         },
         "jobs": [
@@ -500,7 +598,7 @@ async def export_data(
                 "package_name": purchase.package_name,
                 "credits_amount": purchase.credits_amount,
                 "price_brl": purchase.price_brl,
-                "status": purchase.status,
+                "status": canonical_payment_state(purchase.status, purchase.payment_state),
                 "mp_payment_id": purchase.mp_payment_id,
                 "mp_preference_id": purchase.mp_preference_id,
                 "created_at": purchase.created_at.isoformat() if purchase.created_at else None,

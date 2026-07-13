@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { Gift, Copy, Check } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
+import { trackProductEvent } from "@/lib/analytics";
 
 export default function ReferralCard() {
   const { user } = useAuth();
@@ -14,6 +15,7 @@ export default function ReferralCard() {
 
   async function handleCopy() {
     await navigator.clipboard.writeText(referralLink);
+    trackProductEvent("referral_shared", { channel: "copy_link", placement: "dashboard" });
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   }

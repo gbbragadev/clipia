@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "test:release-b": "playwright test tests/release-b-public.spec.js --config=playwright.config.mjs --project=chromium"
   },
   "dependencies": {
     "@chenglou/pretext": "^0.0.4",
@@ -20,12 +21,13 @@
     "@remotion/shapes": "^4.0.444",
     "@remotion/transitions": "^4.0.444",
     "geist": "^1.7.0",
-    "isomorphic-dompurify": "^3.7.1",
     "lucide-react": "^1.18.0",
     "motion": "^12.40.0",
     "next": "16.2.2",
     "react": "19.2.4",
     "react-dom": "19.2.4",
+    "react-markdown": "^10.1.0",
+    "remark-gfm": "^4.0.1",
     "remotion": "^4.0.444"
   },
   "devDependencies": {

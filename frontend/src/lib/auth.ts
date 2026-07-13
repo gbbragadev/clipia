@@ -1,5 +1,21 @@
 import { strings } from '@/lib/strings';
 import { notifySessionExpired } from "./http";
+import type { SelectedPackage } from "./package-intent";
+import {
+  buildAuthHeaders,
+  clearAuthSession,
+  getToken,
+  hasSessionCandidate,
+} from "./session";
+
+export {
+  clearAuthSession,
+  getCsrfToken,
+  getToken,
+  hasSessionCandidate,
+  setCsrfToken,
+  setToken,
+} from "./session";
 
 const API_BASE = "";
 
@@ -33,7 +49,7 @@ async function fetchWithTimeout(
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    return await fetch(input, { ...init, signal: controller.signal });
+    return await fetch(input, { credentials: "include", ...init, signal: controller.signal });
   } catch (err) {
     if (err instanceof DOMException && err.name === "AbortError") {
       throw new NetworkError("Tempo limite excedido. Tente novamente em instantes.");
@@ -52,11 +68,13 @@ export interface User {
   plan: string;
   email_verified: boolean;
   referral_code: string;
+  selected_package?: SelectedPackage | null;
 }
 
 export interface AuthResponse {
   access_token: string;
   token_type: string;
+  csrf_token: string;
 }
 
 export interface ExportedAccountData {
@@ -65,19 +83,8 @@ export interface ExportedAccountData {
   purchases: Array<Record<string, unknown>>;
 }
 
-export function getToken(): string | null {
-  if (typeof window === "undefined") return null;
-  return localStorage.getItem("clipia_token");
-}
-
-export function setToken(token: string): void {
-  if (typeof window === "undefined") return;
-  localStorage.setItem("clipia_token", token);
-}
-
 export function clearToken(): void {
-  if (typeof window === "undefined") return;
-  localStorage.removeItem("clipia_token");
+  clearAuthSession();
 }
 
 export interface RegisterPayload {
@@ -90,6 +97,7 @@ export interface RegisterPayload {
   utm_campaign?: string;
   turnstile_token?: string;
   consent?: boolean;
+  selected_package?: SelectedPackage;
 }
 
 export async function register(email: string, name: string, password: string, extra?: Omit<RegisterPayload, "email" | "name" | "password">): Promise<AuthResponse> {
@@ -114,13 +122,14 @@ export async function login(email: string, password: string): Promise<AuthRespon
 
 export async function getMe(): Promise<User> {
   const token = getToken();
-  if (!token) throw new Error("Não autenticado");
+  if (!hasSessionCandidate()) throw new Error("Não autenticado");
   const controller = new AbortController();
   const timer = window.setTimeout(() => controller.abort(), AUTH_REQUEST_TIMEOUT_MS);
   let res: Response;
   try {
     res = await fetch(`${API_BASE}/api/v1/auth/me`, {
-      headers: { Authorization: `Bearer ${token}` },
+      credentials: "include",
+      headers: token ? { Authorization: `Bearer ${token}` } : undefined,
       signal: controller.signal,
     });
   } catch (err) {
@@ -196,14 +205,10 @@ export async function resetPassword(resetToken: string, password: string): Promi
 }
 
 export async function updateProfile(name: string): Promise<User> {
-  const token = getToken();
-  if (!token) throw new Error("Não autenticado");
+  if (!hasSessionCandidate()) throw new Error("Não autenticado");
   const res = await fetchWithTimeout(`${API_BASE}/api/v1/auth/me`, {
     method: "PATCH",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${token}`,
-    },
+    headers: buildAuthHeaders("PATCH", { "Content-Type": "application/json" }),
     body: JSON.stringify({ name }),
   });
   if (res.status === 401) notifySessionExpired();
@@ -212,14 +217,10 @@ export async function updateProfile(name: string): Promise<User> {
 }
 
 export async function changePassword(currentPassword: string, newPassword: string): Promise<{ status: string }> {
-  const token = getToken();
-  if (!token) throw new Error("Não autenticado");
+  if (!hasSessionCandidate()) throw new Error("Não autenticado");
   const res = await fetchWithTimeout(`${API_BASE}/api/v1/auth/change-password`, {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${token}`,
-    },
+    headers: buildAuthHeaders("POST", { "Content-Type": "application/json" }),
     body: JSON.stringify({ current_password: currentPassword, new_password: newPassword }),
   });
   if (res.status === 401) notifySessionExpired();
@@ -228,14 +229,10 @@ export async function changePassword(currentPassword: string, newPassword: strin
 }
 
 export async function deleteAccount(password: string): Promise<{ status: string }> {
-  const token = getToken();
-  if (!token) throw new Error("Não autenticado");
+  if (!hasSessionCandidate()) throw new Error("Não autenticado");
   const res = await fetchWithTimeout(`${API_BASE}/api/v1/auth/delete-account`, {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${token}`,
-    },
+    headers: buildAuthHeaders("POST", { "Content-Type": "application/json" }),
     body: JSON.stringify({ password }),
   });
   if (res.status === 401) notifySessionExpired();
@@ -244,14 +241,24 @@ export async function deleteAccount(password: string): Promise<{ status: string 
 }
 
 export async function exportAccountData(): Promise<ExportedAccountData> {
-  const token = getToken();
-  if (!token) throw new Error("Não autenticado");
+  if (!hasSessionCandidate()) throw new Error("Não autenticado");
   const res = await fetchWithTimeout(`${API_BASE}/api/v1/auth/export-data`, {
-    headers: { Authorization: `Bearer ${token}` },
+    headers: buildAuthHeaders("GET"),
   });
   if (res.status === 401) notifySessionExpired();
   if (!res.ok) throw new Error(await readError(res, "Erro ao exportar dados"));
   return res.json();
+}
+
+export async function logout(): Promise<void> {
+  if (!hasSessionCandidate()) return;
+  const res = await fetchWithTimeout(`${API_BASE}/api/v1/auth/logout`, {
+    method: "POST",
+    headers: buildAuthHeaders("POST"),
+  });
+  if (!res.ok && res.status !== 401) {
+    throw new Error(await readError(res, "Erro ao encerrar sessão"));
+  }
 }
 
 async function readError(res: Response, fallback: string): Promise<string> {

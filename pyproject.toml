@@ -31,6 +31,7 @@ dependencies = [
 dev = [
     "pytest>=8.0.0",
     "pytest-asyncio>=0.24.0",
+    "pytest-timeout>=2.3.1",
     "aiosqlite>=0.22.0",
     "httpx",
 ]
@@ -45,6 +46,10 @@ line-length = 120
 [tool.ruff.lint]
 select = ["E", "F", "I", "W"]
 ignore = ["E501"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["app"]
+known-third-party = ["alembic"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests", "app/services"]

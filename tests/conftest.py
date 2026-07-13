@@ -1,4 +1,5 @@
 import os
+import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
 from types import SimpleNamespace
@@ -6,6 +7,7 @@ from unittest.mock import MagicMock
 
 import pytest
 import pytest_asyncio
+import stripe
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import event
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
@@ -22,6 +24,7 @@ from app.db.engine import get_db
 from app.db.models import CreditPurchase, Job, User
 from app.main import create_app
 from app.payments.schemas import CREDIT_PACKAGES
+from app.payments.snapshot import freeze_purchase_snapshot
 from app.worker import tasks as worker_tasks
 
 
@@ -29,6 +32,7 @@ class FakeRedis:
     def __init__(self):
         self.data: dict[str, dict[str, str]] = {}
         self.values: dict[str, str] = {}
+        self.expirations: dict[str, int] = {}
 
     def hset(self, key: str, mapping: dict[str, str]):
         self.data.setdefault(key, {}).update({k: str(v) for k, v in mapping.items()})
@@ -43,6 +47,8 @@ class FakeRedis:
         if nx and key in self.values:
             return None  # redis-py: SET NX em chave existente retorna None
         self.values[key] = str(value)
+        if ex is not None:
+            self.expirations[key] = ex
         return True
 
     def get(self, key: str) -> str | None:
@@ -53,12 +59,23 @@ class FakeRedis:
         self.values[key] = str(n)
         return n
 
+    def decr(self, key: str) -> int:
+        n = int(self.values.get(key, "0")) - 1
+        self.values[key] = str(n)
+        return n
+
     def expire(self, key: str, seconds: int):
-        pass  # fake: sem expiracao real em teste
+        self.expirations[key] = seconds
+
+    def ttl(self, key: str) -> int:
+        if key not in self.values and key not in self.data:
+            return -2
+        return self.expirations.get(key, -1)
 
     def delete(self, key: str):
         self.data.pop(key, None)
         self.values.pop(key, None)
+        self.expirations.pop(key, None)
 
     def scan_iter(self, match: str = "*", count: int = 100):
         import fnmatch
@@ -70,6 +87,7 @@ class FakeRedis:
     def clear(self):
         self.data.clear()
         self.values.clear()
+        self.expirations.clear()
 
 
 @pytest.fixture(autouse=True)
@@ -80,6 +98,37 @@ def _isolate_worker_redis(monkeypatch):
     # teste; a fixture `app` re-patcha depois com a instancia compartilhada dela.
     monkeypatch.setattr(worker_tasks, "_redis", FakeRedis())
     monkeypatch.setattr(api_routes, "_redis", FakeRedis())
+
+
+@pytest.fixture(autouse=True)
+def _block_checkout_stripe_network(monkeypatch):
+    """Keep checkout tests offline while preserving legacy Session.create test doubles."""
+    from app.payments import checkout_outbox
+
+    def blocked_create(**_kwargs):
+        raise AssertionError("Stripe network is blocked in tests; install an explicit checkout double")
+
+    monkeypatch.setattr(stripe.checkout.Session, "create", staticmethod(blocked_create))
+
+    class NoNetworkRequestsClient:
+        def __init__(self, *, timeout):
+            self.timeout = timeout
+
+    class Sessions:
+        @staticmethod
+        def create(params, options=None):
+            return stripe.checkout.Session.create(**params, **(options or {}))
+
+        @staticmethod
+        def list(_params, _options=None):
+            raise AssertionError("Stripe list network is blocked in tests; install an explicit checkout double")
+
+    class NoNetworkStripeClient:
+        def __init__(self, _api_key, **_kwargs):
+            self.v1 = SimpleNamespace(checkout=SimpleNamespace(sessions=Sessions()))
+
+    monkeypatch.setattr(checkout_outbox.stripe, "RequestsClient", NoNetworkRequestsClient)
+    monkeypatch.setattr(checkout_outbox.stripe, "StripeClient", NoNetworkStripeClient)
 
 
 @pytest.fixture(autouse=True)
@@ -324,6 +373,8 @@ async def job_factory(test_db, verified_user):
 
 @pytest_asyncio.fixture
 async def purchase_factory(test_db, verified_user):
+    purchase_number = 0
+
     async def _create_purchase(
         *,
         user_id=None,
@@ -332,10 +383,23 @@ async def purchase_factory(test_db, verified_user):
         provider: str = "mercadopago",
         mp_preference_id: str = "pref_123",
         mp_payment_id: str | None = None,
+        bonus_credits: int | None = None,
+        payment_state: str | None = None,
+        snapshot: bool = False,
     ) -> CreditPurchase:
+        nonlocal purchase_number
+        purchase_number += 1
         pkg = CREDIT_PACKAGES[package_name]
+        if mp_preference_id == "pref_123":
+            if provider == "stripe":
+                mp_preference_id = f"cs_test_{purchase_number}"
+            elif purchase_number > 1:
+                mp_preference_id = f"pref_{purchase_number}"
+        if bonus_credits is None:
+            bonus_credits = pkg["credits"] * settings.PURCHASE_BONUS_PERCENT // 100
         async with test_db["session_factory"]() as session:
             purchase = CreditPurchase(
+                id=uuid.uuid4(),
                 user_id=user_id or verified_user.id,
                 package_name=package_name,
                 credits_amount=pkg["credits"],
@@ -343,8 +407,13 @@ async def purchase_factory(test_db, verified_user):
                 provider=provider,
                 mp_preference_id=mp_preference_id,
                 mp_payment_id=mp_payment_id,
+                bonus_credits=bonus_credits,
                 status=status,
+                payment_state=payment_state,
+                currency="BRL",
             )
+            if snapshot:
+                freeze_purchase_snapshot(purchase)
             session.add(purchase)
             await session.commit()
             await session.refresh(purchase)

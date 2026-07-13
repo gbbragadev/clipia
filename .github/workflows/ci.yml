@@ -30,8 +30,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - run: pip install -r requirements.txt
-      - run: pip install pytest pytest-asyncio httpx
+      - run: python -m pip install -e ".[dev]"
       - run: python -m pytest tests/ -v --timeout=60
         env:
           DATABASE_URL: "postgresql+asyncpg://clipia:clipia_dev@localhost:5435/clipia"
@@ -48,4 +47,5 @@ jobs:
         with:
           node-version: "22"
       - run: cd frontend && npm ci
+      - run: cd frontend && npx next typegen
       - run: cd frontend && npx tsc --noEmit

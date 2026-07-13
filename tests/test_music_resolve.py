@@ -16,10 +16,10 @@ def test_resolve_music_path_none_when_missing(tmp_path, monkeypatch):
     assert music.resolve_music_path("stock_narration") is None
 
 
-def test_auto_music_url_uses_mood(tmp_path, monkeypatch):
+def test_auto_music_asset_id_uses_mood(tmp_path, monkeypatch):
     (tmp_path / "lofi-chill.mp3").write_bytes(b"x")
     monkeypatch.setattr(music, "_MUSIC_DIR", tmp_path)
-    assert music.auto_music_url("dialogue_duo") == "/music/lofi-chill.mp3"
+    assert music.auto_music_asset_id("dialogue_duo") == "lofi-chill"
 
 
 def test_resolve_auto_music_respects_global_flag(tmp_path, monkeypatch):
@@ -32,7 +32,7 @@ def test_resolve_auto_music_respects_global_flag(tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_composition_returns_mood_music_url(
+async def test_composition_returns_mood_music_asset_id(
     client, app, db_session, verified_user, auth_headers, tmp_path, monkeypatch
 ):
     from app.config import settings as app_settings
@@ -45,6 +45,16 @@ async def test_composition_returns_mood_music_url(
         duration_target=30,
         template_id="dialogue_duo",
         status="editable",
+        editor_state={
+            "composition": {
+                "musicUrl": "/music/happy-pop.mp3",
+                "voiceConfig": {
+                    "voiceId": "pt-BR-AntonioNeural",
+                    "voiceProvider": "edge",
+                    "source_path": "C:/should-not-leak.wav",
+                },
+            }
+        },
     )
     db_session.add(job)
     await db_session.commit()
@@ -59,4 +69,8 @@ async def test_composition_returns_mood_music_url(
     resp = await client.get(f"/api/v1/jobs/{job.id}/composition", headers=auth_headers(verified_user))
     assert resp.status_code == 200
     body = resp.json()
-    assert body["music_url"] == "/music/lofi-chill.mp3"  # mood do dialogue_duo
+    assert body["music_asset_id"] == "lofi-chill"  # mood do dialogue_duo
+    saved_composition = body["editor_state"]["composition"]
+    assert saved_composition["musicAssetId"] == "happy-pop"
+    assert "musicUrl" not in saved_composition
+    assert "source_path" not in saved_composition["voiceConfig"]

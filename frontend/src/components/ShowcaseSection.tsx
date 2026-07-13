@@ -9,10 +9,25 @@ import { SkeletonBlock } from './ui/skeletons'
 import Link from 'next/link'
 import { loadShowcase, type ShowcaseManifest, type ShowcaseVideo } from '@/lib/showcase'
 import { fadeUp, staggerContainer, useReducedMotionState } from '@/lib/motion'
+import {
+  isAnalyticsExampleId,
+  isAnalyticsNiche,
+  trackProductEvent,
+} from '@/lib/analytics'
 
-export function ShowcaseCard({ item, featured = false }: { item: ShowcaseVideo; featured?: boolean }) {
+export function ShowcaseCard({
+  item,
+  featured = false,
+  placement = 'examples',
+}: {
+  item: ShowcaseVideo
+  featured?: boolean
+  placement?: 'landing' | 'examples' | 'niche'
+}) {
   const videoRef = useRef<HTMLVideoElement>(null)
   const cardRef = useRef<HTMLDivElement>(null)
+  const interactedRef = useRef(false)
+  const completionBucketsRef = useRef(new Set<number>())
 
   useEffect(() => {
     const card = cardRef.current
@@ -29,11 +44,37 @@ export function ShowcaseCard({ item, featured = false }: { item: ShowcaseVideo; 
     return () => observer.disconnect()
   }, [])
 
+  const trackInteraction = useCallback(() => {
+    if (interactedRef.current || !isAnalyticsExampleId(item.id) || !isAnalyticsNiche(item.niche)) return
+    interactedRef.current = true
+    trackProductEvent(
+      'example_played',
+      { example_id: item.id, niche: item.niche, placement },
+      { once: `example-played:${item.id}:${placement}` },
+    )
+  }, [item.id, item.niche, placement])
+
   const handleEnter = useCallback(() => {
+    trackInteraction()
     const v = videoRef.current
     if (v) { v.muted = false; v.volume = 0.6; v.play().catch(() => {}) }
-  }, [])
+  }, [trackInteraction])
   const handleLeave = useCallback(() => { const v = videoRef.current; if (v) v.muted = true }, [])
+
+  const handleProgress = useCallback(() => {
+    const video = videoRef.current
+    if (!interactedRef.current || !video || !video.duration || !isAnalyticsExampleId(item.id)) return
+    const percent = (video.currentTime / video.duration) * 100
+    for (const bucket of [25, 50, 75, 100] as const) {
+      if (percent < bucket - (bucket === 100 ? 1 : 0) || completionBucketsRef.current.has(bucket)) continue
+      completionBucketsRef.current.add(bucket)
+      trackProductEvent(
+        'example_completed',
+        { example_id: item.id, completion_bucket: bucket },
+        { once: `example-completed:${item.id}:${bucket}` },
+      )
+    }
+  }, [item.id])
 
   return (
     <GlowCard className="h-full">
@@ -52,6 +93,7 @@ export function ShowcaseCard({ item, featured = false }: { item: ShowcaseVideo; 
             poster={item.poster}
             className="w-full h-full object-cover"
             src={item.video}
+            onTimeUpdate={handleProgress}
           />
           {/* Badge: estilo de legenda */}
           <div className="absolute top-4 left-4 z-10">
@@ -153,7 +195,7 @@ export default function ShowcaseSection() {
           const featured = i === 0 && niche === 'all'
           return (
             <motion.div key={item.id} variants={fadeUp} className={featured ? 'md:col-span-2' : ''}>
-              <ShowcaseCard item={item} featured={featured} />
+              <ShowcaseCard item={item} featured={featured} placement="examples" />
             </motion.div>
           )
         })}

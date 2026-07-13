@@ -6,6 +6,7 @@ import { slide } from '@remotion/transitions/slide'
 import { wipe } from '@remotion/transitions/wipe'
 import type { CompositionData, LayoutType } from '../types'
 import type { TransitionType } from '../types'
+import { musicAssetUrl } from '../music-assets'
 import { SceneClip } from './SceneClip'
 import { SubtitleOverlay } from './SubtitleOverlay'
 import { QuestionBox } from '@/components/editor/overlays/QuestionBox'
@@ -47,7 +48,7 @@ export const ShortVideoComposition: React.FC<CompositionData> = ({
   mediaUrls,
   subtitleStyle,
   overlays,
-  musicUrl,
+  musicAssetId,
   musicVolume,
   isRendering,
   layoutType,
@@ -55,6 +56,7 @@ export const ShortVideoComposition: React.FC<CompositionData> = ({
 }) => {
   const { fps, width, height, durationInFrames } = useVideoConfig()
   const layout = (layoutType || 'fullscreen') as LayoutType
+  const musicUrl = musicAssetUrl(musicAssetId)
 
   // Overlays do usuário: um único bloco usado nos 3 layouts — antes, os early
   // returns de split_horizontal/character_overlay descartavam overlays no export.

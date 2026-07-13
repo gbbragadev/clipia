@@ -6,11 +6,12 @@ import smtplib
 import subprocess
 import threading
 import time
+import uuid
 from datetime import datetime, timedelta, timezone
 from email.mime.text import MIMEText
 from pathlib import Path
 
-from celery.exceptions import SoftTimeLimitExceeded
+from celery.exceptions import Ignore, SoftTimeLimitExceeded
 
 from app.auth.email import send_video_ready_email
 from app.config import settings
@@ -29,6 +30,40 @@ from app.worker.celery_app import celery_app
 logger = logging.getLogger(__name__)
 
 _redis = get_redis()
+_rerender_terminal_fallback_lock = threading.Lock()
+
+_RERENDER_TERMINAL_LUA = """
+local current = redis.call('HGET', KEYS[1], 'rerender_operation_id')
+if (current or '') ~= ARGV[1] then
+    return 0
+end
+for index = 2, #ARGV, 2 do
+    redis.call('HSET', KEYS[1], ARGV[index], ARGV[index + 1])
+end
+return 1
+"""
+
+_GENERATION_COMPLETED_LUA = """
+local current = redis.call('HGET', KEYS[1], 'rerender_operation_id')
+if (current or '') ~= '' then
+    return 0
+end
+for index = 1, #ARGV, 2 do
+    redis.call('HSET', KEYS[1], ARGV[index], ARGV[index + 1])
+end
+return 1
+"""
+
+_WATCHDOG_CLAIM_LUA = """
+local status = redis.call('HGET', KEYS[1], 'status') or ''
+local updated_at = redis.call('HGET', KEYS[1], 'updated_at') or ''
+local operation_id = redis.call('HGET', KEYS[1], 'rerender_operation_id') or ''
+if status ~= ARGV[1] or updated_at ~= ARGV[2] or operation_id ~= ARGV[3] then
+    return 0
+end
+redis.call('SET', KEYS[2], 'true', 'EX', ARGV[4])
+return 1
+"""
 
 
 def _write_thumbnail(video_path: str, thumb_path: str) -> None:
@@ -97,6 +132,146 @@ def _update_job(
     if step and not _redis_hget(key, f"t:{step}"):
         data[f"t:{step}"] = now_iso
     _redis.hset(key, mapping=data)
+    _persist_dispatch_worker_heartbeat(job_id, status)
+
+
+def _persist_dispatch_worker_heartbeat(job_id: str, status: str) -> None:
+    """Best-effort SQL heartbeat for claimed work, independent of Redis retention."""
+    try:
+        parsed_job_id = uuid.UUID(job_id)
+    except (TypeError, ValueError):
+        return
+    kind = "rerender" if status == "rendering" else "generation"
+
+    async def _persist() -> None:
+        from sqlalchemy import update
+
+        from app.db.engine import worker_session as async_session
+        from app.db.models import JobDispatch
+
+        async with async_session() as session:
+            await session.execute(
+                update(JobDispatch)
+                .where(
+                    JobDispatch.job_id == parsed_job_id,
+                    JobDispatch.kind == kind,
+                    JobDispatch.state == "claimed",
+                    JobDispatch.claimed_at.is_not(None),
+                )
+                .values(worker_heartbeat_at=datetime.now(timezone.utc))
+            )
+            await session.commit()
+
+    try:
+        asyncio.run(_persist())
+    except Exception:  # noqa: BLE001 - Redis heartbeat remains the compatibility fallback
+        logger.exception("Falha ao persistir heartbeat do outbox job=%s kind=%s", job_id, kind)
+
+
+def _update_rerender_terminal(
+    job_id: str,
+    operation_id: str | None,
+    *,
+    status: str,
+    error: str = "",
+    detail: str = "",
+    broker_state: str | None = None,
+) -> bool:
+    """Atomically publish a rerender terminal state only for the current operation."""
+    key = f"job:{job_id}"
+    expected_operation_id = operation_id or ""
+    mapping = {
+        "status": status,
+        "current_step": "",
+        "progress": "1.0" if status == "completed" else "0.0",
+        "error": error,
+        "detail": detail,
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+    if status != "refund_pending":
+        mapping["rerender_cost"] = "0"
+    if broker_state is not None:
+        mapping["rerender_broker_state"] = broker_state
+    arguments = [expected_operation_id]
+    for field, value in mapping.items():
+        arguments.extend((field, str(value)))
+
+    evaluator = getattr(_redis, "eval", None)
+    if evaluator is not None:
+        return bool(evaluator(_RERENDER_TERMINAL_LUA, 1, key, *arguments))
+
+    # Unit-test/legacy fake fallback. Production redis-py always uses the Lua path.
+    with _rerender_terminal_fallback_lock:
+        if (_redis_hget(key, "rerender_operation_id") or "") != expected_operation_id:
+            return False
+        _redis.hset(key, mapping=mapping)
+        return True
+
+
+def _update_generation_completed(job_id: str, *, detail: str) -> bool:
+    """Atomically publish generation completion only before any rerender starts."""
+    key = f"job:{job_id}"
+    mapping = {
+        "status": "completed",
+        "current_step": "",
+        "progress": "1.0",
+        "error": "",
+        "detail": detail,
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+    arguments: list[str] = []
+    for field, value in mapping.items():
+        arguments.extend((field, str(value)))
+
+    evaluator = getattr(_redis, "eval", None)
+    if evaluator is not None:
+        return bool(evaluator(_GENERATION_COMPLETED_LUA, 1, key, *arguments))
+
+    with _rerender_terminal_fallback_lock:
+        if _redis_hget(key, "rerender_operation_id") not in {None, ""}:
+            return False
+        _redis.hset(key, mapping=mapping)
+        return True
+
+
+def _claim_stuck_watchdog_snapshot(
+    job_id: str,
+    *,
+    status: str,
+    updated_at: str,
+    operation_id: str | None,
+) -> bool:
+    """Atomically claim the exact Redis heartbeat inspected by the watchdog."""
+    key = f"job:{job_id}"
+    cancel_key = f"job:{job_id}:cancelled"
+    expected_operation_id = operation_id or ""
+    evaluator = getattr(_redis, "eval", None)
+    if evaluator is not None:
+        return bool(
+            evaluator(
+                _WATCHDOG_CLAIM_LUA,
+                2,
+                key,
+                cancel_key,
+                status,
+                updated_at,
+                expected_operation_id,
+                str(_CANCEL_FLAG_TTL_SECONDS),
+            )
+        )
+
+    # Unit-test/legacy fake fallback. Production redis-py uses the Lua path so
+    # heartbeat revalidation and cancel-flag publication remain one operation.
+    with _rerender_terminal_fallback_lock:
+        current = _redis.hgetall(key)
+        if (
+            current.get("status") != status
+            or current.get("updated_at") != updated_at
+            or (current.get("rerender_operation_id") or "") != expected_operation_id
+        ):
+            return False
+        _redis_set(cancel_key, "true", ex=_CANCEL_FLAG_TTL_SECONDS)
+        return True
 
 
 def _redis_get(key: str) -> str | None:
@@ -104,10 +279,10 @@ def _redis_get(key: str) -> str | None:
     return getter(key) if getter else None
 
 
-def _redis_set(key: str, value: str) -> None:
+def _redis_set(key: str, value: str, *, ex: int | None = None) -> None:
     setter = getattr(_redis, "set", None)
     if setter:
-        setter(key, value)
+        setter(key, value, ex=ex)
 
 
 def _redis_hget(key: str, field: str) -> str | None:
@@ -146,45 +321,37 @@ def _enqueue_dead_letter(job_id: str, error: str) -> None:
 
 def _refund_job_credit(job_id: str, status_value: str, error: str, cleanup_files: bool = False):
     """Persist final state and refund the original generation credit once."""
-    _update_job(job_id, status_value, error=error, detail=error)
-
     try:
-        from sqlalchemy import select, update
-
         from app.db.engine import worker_session as async_session  # NullPool: seguro com asyncio.run() por task
-        from app.db.models import Job, User
+        from app.services.job_operations import refund_generation
 
         async def _refund():
             async with async_session() as session:
-                result = await session.execute(select(Job).where(Job.id == job_id))
-                job = result.scalar_one_or_none()
-                if job:
-                    if cleanup_files:
-                        cleanup_job_dir(job_id)
-                        remove_path(get_output_dir() / f"{job_id}.mp4")
-                    if job.status in {"failed", "cancelled"}:
-                        job.status = status_value
-                        job.error = error
-                        await session.commit()
-                        return
-                    job.status = status_value
-                    job.error = error
-                    refund_amount = job.credit_cost or 1
-                    await session.execute(
-                        update(User).where(User.id == job.user_id).values(credits=User.credits + refund_amount)
-                    )
+                applied = await refund_generation(session, job_id, status=status_value, error=error)
+                if applied:
                     await session.commit()
-                    logger.info("Refunded %d credit(s) for %s job %s", refund_amount, status_value, job_id)
+                return applied
 
-        asyncio.run(_refund())
+        applied = asyncio.run(_refund())
+        if not applied:
+            return False
+        if cleanup_files:
+            cleanup_job_dir(job_id)
+            remove_path(get_output_dir() / f"{job_id}.mp4")
+            remove_path(get_output_dir() / f"{job_id}.jpg")
+        _update_job(job_id, status_value, error=error, detail=error)
+        logger.info("Refunded generation credit for %s job %s", status_value, job_id)
+        return True
     except Exception as e:
         logger.error("Failed to refund credit for job %s: %s", job_id, e)
         # Sem isto a falha era 100% silenciosa: o job ja esta "failed" no Redis, o
         # watchdog pula jobs nao-ativos e o refund nunca seria re-tentado.
         _send_admin_alert(
-            "ClipIA - refund FALHOU",
-            f"Job {job_id}: credito da geracao nao foi devolvido ({e}). Reembolsar manualmente.",
+            "ClipIA - refund requer reconciliacao",
+            f"Job {job_id}: refund da geracao falhou ({e}). Investigar job/outbox; "
+            "nao ajustar saldo manualmente sem confirmar o estado idempotente.",
         )
+        return False
 
 
 def _fail_job(job_id: str, error: str):
@@ -196,49 +363,253 @@ def _fail_job(job_id: str, error: str):
     _enqueue_dead_letter(job_id, error)
 
 
-def _refund_rerender_cost(job_id: str) -> None:
-    """Devolve o custo exato do export (POST /render) e restaura pending_credits.
-
-    O rerender debita ceil(pending_credits) na rota e zera o pending. Em falha,
-    _refund_job_credit devolveria credit_cost (custo da GERACAO, valor errado) e
-    marcaria "failed" (bloqueando o editor). Aqui devolvemos o valor gravado em
-    rerender_cost no Redis e restauramos o pending p/ a re-tentativa cobrar de novo.
-    """
-    raw = _redis_hget(f"job:{job_id}", "rerender_cost")
+def _refund_rerender_cost(job_id: str) -> bool:
+    """Refund a claimed legacy rerender and clear Redis only after the DB commit."""
     try:
-        cost = int(float(raw)) if raw else 0
-    except (TypeError, ValueError):
-        cost = 0
-    if cost <= 0:
-        return
-    # zera ANTES de devolver: uma segunda passada pelo mesmo job nao refunda em dobro
-    _redis.hset(f"job:{job_id}", mapping={"rerender_cost": 0})
-    try:
-        from sqlalchemy import select, update
-
         from app.db.engine import worker_session as async_session
-        from app.db.models import Job, User
+        from app.services.job_operations import refund_legacy_rerender
 
-        async def _refund():
+        async def _refund() -> int:
             async with async_session() as session:
-                result = await session.execute(select(Job).where(Job.id == job_id))
-                job = result.scalar_one_or_none()
-                if not job:
-                    return
-                await session.execute(update(User).where(User.id == job.user_id).values(credits=User.credits + cost))
-                job.pending_credits = float(cost)
-                await session.commit()
-                logger.info("Refunded %d rerender credit(s) for job %s", cost, job_id)
+                refunded_cost = await refund_legacy_rerender(session, job_id)
+                if refunded_cost:
+                    await session.commit()
+                return refunded_cost
 
-        asyncio.run(_refund())
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            pass
+        else:
+            raise RuntimeError("legacy rerender refund cannot run inside an active event loop")
+        refunded_cost = asyncio.run(_refund())
+        if refunded_cost:
+            _redis.hset(f"job:{job_id}", mapping={"rerender_cost": 0})
+            logger.info("Refunded %d legacy rerender credit(s) for job %s", refunded_cost, job_id)
+        return True
     except Exception as e:  # noqa: BLE001
-        logger.error("Failed to refund rerender cost for job %s: %s", job_id, e)
-        # devolve o marcador p/ revisao manual nao perder o valor devido
-        _redis.hset(f"job:{job_id}", mapping={"rerender_cost": cost})
+        logger.error("Failed to refund legacy rerender cost for job %s: %s", job_id, e)
         _send_admin_alert(
-            "ClipIA - refund de re-render FALHOU",
-            f"Job {job_id}: {cost} credito(s) do export nao foram devolvidos ({e}). Reembolsar manualmente.",
+            "ClipIA - refund de re-render requer reconciliacao",
+            f"Job {job_id}: refund legado falhou ({e}). Reconciliar DB e marcador Redis; "
+            "nao ajustar saldo manualmente sem confirmar o estado idempotente.",
         )
+        return False
+
+
+def _claim_rerender_operation(
+    job_id: str,
+    operation_id: str | None,
+    dispatch_id: str | None = None,
+    task_id: str | None = None,
+) -> bool:
+    from app.db.engine import worker_session as async_session
+    from app.services.dispatch_outbox import claim_rerender_dispatch
+    from app.services.job_operations import claim_legacy_rerender, claim_rerender
+
+    try:
+        parsed_operation_id = uuid.UUID(operation_id) if operation_id is not None else None
+        parsed_dispatch_id = uuid.UUID(dispatch_id) if dispatch_id is not None else None
+    except (TypeError, ValueError):
+        return False
+
+    async def _claim() -> bool:
+        async with async_session() as session:
+            if parsed_operation_id is None:
+                raw_cost = _redis_hget(f"job:{job_id}", "rerender_cost")
+                try:
+                    legacy_cost = int(float(raw_cost)) if raw_cost else 0
+                except (TypeError, ValueError):
+                    legacy_cost = 0
+                claimed = await claim_legacy_rerender(
+                    session,
+                    job_id,
+                    cost=legacy_cost,
+                    task_id=task_id or "",
+                )
+            elif parsed_dispatch_id is not None and task_id is not None:
+                claimed = await claim_rerender_dispatch(
+                    session,
+                    job_id,
+                    parsed_operation_id,
+                    parsed_dispatch_id,
+                    task_id=task_id,
+                )
+            else:
+                claimed = await claim_rerender(session, job_id, parsed_operation_id)
+            if claimed:
+                await session.commit()
+            return claimed
+
+    return asyncio.run(_claim())
+
+
+def _mark_generation_worker_started(
+    job_id: str,
+    dispatch_id: str | None = None,
+    task_id: str | None = None,
+) -> bool:
+    """Backfill the dispatch marker once the broker message is demonstrably executing."""
+    from app.db.engine import worker_session as async_session
+    from app.services.dispatch_outbox import claim_generation_dispatch
+    from app.services.job_operations import claim_generation_worker_start
+
+    try:
+        parsed_dispatch_id = uuid.UUID(dispatch_id) if dispatch_id is not None else None
+    except (TypeError, ValueError):
+        return False
+
+    async def _mark() -> bool:
+        async with async_session() as session:
+            if parsed_dispatch_id is not None and task_id is not None:
+                allowed = await claim_generation_dispatch(
+                    session,
+                    job_id,
+                    parsed_dispatch_id,
+                    task_id=task_id,
+                )
+            else:
+                allowed = await claim_generation_worker_start(session, job_id)
+            if allowed:
+                await session.commit()
+            return allowed
+
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        pass
+    else:
+        # Celery executes this sync task without an event loop. Tests and
+        # embedders can invoke it from one, where asyncio.run is unavailable;
+        # that is a marker-write failure, not proof that the accepted broker
+        # message was refunded. Continue and let reconciliation backfill it.
+        logger.warning("Self-heal sync adiado dentro de event loop ativo job=%s", job_id)
+        return parsed_dispatch_id is None
+
+    try:
+        return asyncio.run(_mark())
+    except Exception:  # noqa: BLE001 - accepted work must continue; reconciler is the fallback
+        logger.critical("Falha ao autocurar generation_dispatched_at job=%s", job_id, exc_info=True)
+        return parsed_dispatch_id is None
+
+
+def _publish_rerender_operation(
+    job_id: str,
+    operation_id: str | None,
+    output_path: str,
+    *,
+    engine: str,
+    duration: float,
+) -> str | None:
+    from app.db.engine import worker_session as async_session
+    from app.services.job_operations import complete_locked_rerender, lock_rerender_for_publication
+
+    try:
+        parsed_operation_id = uuid.UUID(operation_id) if operation_id is not None else None
+    except (TypeError, ValueError):
+        return None
+
+    output_dir = get_output_dir()
+    operation_suffix = operation_id or "legacy"
+    prepared_video = output_dir / f".{job_id}.{operation_suffix}.prepared.mp4"
+    prepared_thumbnail = output_dir / f".{job_id}.{operation_suffix}.prepared.jpg"
+    canonical_video = output_dir / f"{job_id}.mp4"
+    canonical_thumbnail = output_dir / f"{job_id}.jpg"
+    backup_video = output_dir / f".{job_id}.{operation_suffix}.backup.mp4"
+    backup_thumbnail = output_dir / f".{job_id}.{operation_suffix}.backup.jpg"
+    final_src: str | None = None
+
+    async def _publish() -> str | None:
+        async with async_session() as session:
+            job = await lock_rerender_for_publication(session, job_id, parsed_operation_id)
+            if job is None:
+                return None
+
+            telemetry = dict(job.telemetry or {})
+            rerenders = list(telemetry.get("rerenders") or [])[-9:]
+            rerenders.append(
+                {
+                    "engine": engine,
+                    "duration_seconds": duration,
+                    "at": datetime.now(timezone.utc).isoformat(),
+                }
+            )
+            telemetry["rerenders"] = rerenders
+            job.telemetry = telemetry
+            if not await complete_locked_rerender(session, job, parsed_operation_id):
+                return None
+
+            video_published = False
+            thumbnail_published = False
+            try:
+                if canonical_video.exists():
+                    canonical_video.replace(backup_video)
+                prepared_video.replace(canonical_video)
+                video_published = True
+                if prepared_thumbnail.exists():
+                    if canonical_thumbnail.exists():
+                        canonical_thumbnail.replace(backup_thumbnail)
+                    prepared_thumbnail.replace(canonical_thumbnail)
+                    thumbnail_published = True
+                await session.commit()
+            except Exception:
+                await session.rollback()
+                if video_published:
+                    canonical_video.unlink(missing_ok=True)
+                if backup_video.exists():
+                    backup_video.replace(canonical_video)
+                if thumbnail_published:
+                    canonical_thumbnail.unlink(missing_ok=True)
+                if backup_thumbnail.exists():
+                    backup_thumbnail.replace(canonical_thumbnail)
+                raise
+            backup_video.unlink(missing_ok=True)
+            backup_thumbnail.unlink(missing_ok=True)
+            return str(canonical_video)
+
+    try:
+        final_src = append_outro(output_path)
+        shutil.copy2(final_src, prepared_video)
+        _write_thumbnail(str(prepared_video), str(prepared_thumbnail))
+        return asyncio.run(_publish())
+    finally:
+        if final_src is not None and final_src != output_path:
+            Path(final_src).unlink(missing_ok=True)
+        prepared_video.unlink(missing_ok=True)
+        prepared_thumbnail.unlink(missing_ok=True)
+        backup_video.unlink(missing_ok=True)
+        backup_thumbnail.unlink(missing_ok=True)
+
+
+def _refund_rerender_operation(job_id: str, operation_id: str | None) -> bool:
+    if operation_id is None:
+        return _refund_rerender_cost(job_id)
+
+    from app.db.engine import worker_session as async_session
+    from app.services.job_operations import refund_rerender
+
+    try:
+        parsed_operation_id = uuid.UUID(operation_id)
+    except (TypeError, ValueError):
+        return False
+
+    async def _refund() -> bool:
+        async with async_session() as session:
+            refunded = await refund_rerender(session, job_id, parsed_operation_id)
+            if refunded:
+                await session.commit()
+            return refunded
+
+    try:
+        return asyncio.run(_refund())
+    except Exception as exc:  # noqa: BLE001
+        logger.error("Failed to refund rerender operation for job %s: %s", job_id, exc)
+        _send_admin_alert(
+            "ClipIA - refund de re-render requer reconciliacao",
+            f"Job {job_id}, operacao {operation_id}: refund DB falhou ({exc}). Investigar outbox/operacao; "
+            "nao ajustar saldo manualmente sem confirmar o estado idempotente.",
+        )
+        return False
 
 
 def _is_cancelled(job_id: str) -> bool:
@@ -404,6 +775,11 @@ def dispatch_pipeline(
     voice_config: dict | None = None,
     trend_context: str | None = None,
     narration_mode: str = "single",
+    sfx_enabled: bool | None = None,
+    music_enabled: bool | None = None,
+    custom_script: bool = False,
+    dispatch_id: str | None = None,
+    task_id: str | None = None,
 ):
     from celery import chain
 
@@ -424,9 +800,30 @@ def dispatch_pipeline(
     # Store voice config in Redis for the worker to pick up
     if voice_config:
         _redis.hset(f"job:{job_id}", mapping={"voice_config": json.dumps(voice_config)})
+    flags: dict[str, str] = {}
+    if sfx_enabled is not None:
+        flags["sfx_enabled"] = "1" if sfx_enabled else "0"
+    if music_enabled is not None:
+        flags["music_enabled"] = "1" if music_enabled else "0"
+    if custom_script:
+        flags["custom_script"] = "1"
+    if flags:
+        _redis.hset(f"job:{job_id}", mapping=flags)
 
+    first_task = task_generate_script.s(
+        job_id,
+        topic,
+        style,
+        duration_target,
+        template_id,
+        trend_context,
+        dispatch_id,
+        task_id,
+    )
+    if task_id is not None:
+        first_task = first_task.set(task_id=task_id)
     pipeline = chain(
-        task_generate_script.s(job_id, topic, style, duration_target, template_id, trend_context),
+        first_task,
         task_generate_images.s(job_id, template_id),
         task_generate_videos.s(job_id, template_id),
         task_synthesize_audio.s(job_id, template_id),
@@ -436,6 +833,55 @@ def dispatch_pipeline(
         task_finalize.s(job_id),
     )
     pipeline.apply_async()
+
+
+def _send_job_dispatch_message(dispatch, *, task_id: str) -> None:
+    """Publish one outbox row using only its frozen payload and identifiers."""
+    payload = dict(dispatch.payload or {})
+    job_id = str(dispatch.job_id)
+    if dispatch.kind == "generation":
+        topic = payload.get("topic")
+        style = payload.get("style")
+        duration_target = payload.get("duration_target")
+        if not isinstance(topic, str) or not isinstance(style, str) or not isinstance(duration_target, int):
+            raise ValueError("invalid frozen generation dispatch payload")
+        dispatch_pipeline(
+            job_id,
+            topic,
+            style,
+            duration_target,
+            template_id=payload.get("template_id") or "stock_narration",
+            voice_provider=payload.get("voice_provider") or "edge",
+            voice_config=payload.get("voice_config"),
+            trend_context=payload.get("trend_context"),
+            narration_mode=payload.get("narration_mode") or "single",
+            sfx_enabled=payload.get("sfx_enabled"),
+            music_enabled=payload.get("music_enabled"),
+            custom_script=bool(payload.get("custom_script")),
+            dispatch_id=str(dispatch.id),
+            task_id=task_id,
+        )
+        return
+    if dispatch.kind == "rerender":
+        _redis.delete(f"job:{job_id}:cancelled")
+        _redis.hset(
+            f"job:{job_id}",
+            mapping={
+                "status": "rendering",
+                "progress": "0",
+                "current_step": "queued",
+                "detail": "Re-render enfileirado...",
+                "rerender_cost": str(dispatch.debited_credits),
+                "rerender_operation_id": str(dispatch.operation_id),
+                "rerender_broker_state": "attempting",
+            },
+        )
+        task_rerender_video.apply_async(
+            args=(job_id, str(dispatch.operation_id), str(dispatch.id), task_id),
+            task_id=task_id,
+        )
+        return
+    raise ValueError(f"unsupported dispatch kind: {dispatch.kind}")
 
 
 async def _cleanup_old_jobs_async() -> dict[str, int]:
@@ -523,6 +969,551 @@ async def _cleanup_orphan_files_async() -> dict[str, int]:
 
 ORPHAN_QUEUED_CUTOFF_HOURS = 6
 ORPHAN_QUEUED_ERROR = f"Job órfão: chain aparentemente abandonada (sem progresso há >{ORPHAN_QUEUED_CUTOFF_HOURS}h)"
+UNDISPATCHED_OPERATION_ERROR = "Operacao antiga sem evidencia de dispatch; credito estornado pelo reconciliador."
+_CANCEL_FLAG_TTL_SECONDS = 24 * 60 * 60
+
+
+def _redis_has_dispatch_evidence(
+    data: dict[str, str],
+    *,
+    operation_id: uuid.UUID | None,
+    operation_started_at: datetime | None,
+) -> bool:
+    """Accept only explicit broker acknowledgement or a fresh compatible worker heartbeat."""
+    accepted_at_key = "generation_broker_accepted_at" if operation_id is None else "rerender_broker_accepted_at"
+    accepted_at = data.get(accepted_at_key)
+    accepted_operation_id = data.get("rerender_broker_accepted_operation_id") or None
+    if accepted_at and (operation_id is None or accepted_operation_id == str(operation_id)):
+        try:
+            accepted_at_dt = datetime.fromisoformat(accepted_at)
+        except (TypeError, ValueError):
+            pass
+        else:
+            if accepted_at_dt.tzinfo is None:
+                accepted_at_dt = accepted_at_dt.replace(tzinfo=timezone.utc)
+            accepted_after_start = operation_started_at is None
+            if operation_started_at is not None:
+                accepted_start = operation_started_at
+                if accepted_start.tzinfo is None:
+                    accepted_start = accepted_start.replace(tzinfo=timezone.utc)
+                accepted_after_start = accepted_at_dt >= accepted_start
+            if accepted_after_start:
+                return True
+
+    heartbeat = data.get("updated_at")
+    if not heartbeat:
+        return False
+    try:
+        heartbeat_at = datetime.fromisoformat(heartbeat)
+    except (TypeError, ValueError):
+        return False
+    if heartbeat_at.tzinfo is None:
+        heartbeat_at = heartbeat_at.replace(tzinfo=timezone.utc)
+    if operation_started_at is not None:
+        if operation_started_at.tzinfo is None:
+            operation_started_at = operation_started_at.replace(tzinfo=timezone.utc)
+        if heartbeat_at < operation_started_at:
+            return False
+    redis_operation_id = data.get("rerender_operation_id") or None
+    if operation_id is None:
+        return redis_operation_id is None and data.get("status") in {"processing", "completed"}
+    return redis_operation_id == str(operation_id) and data.get("status") in {"rendering", "completed"}
+
+
+def _redis_has_ambiguous_dispatch_attempt(data: dict[str, str], *, operation_id: uuid.UUID | None) -> bool:
+    """A pre-broker intent without acceptance/rejection is unsafe to auto-refund."""
+    if operation_id is None:
+        return data.get("generation_broker_state") == "attempting"
+    return data.get("rerender_broker_state") == "attempting" and data.get("rerender_operation_id") == str(operation_id)
+
+
+def _has_live_post_claim_worker_heartbeat(data: dict[str, str], dispatch, *, now: datetime) -> bool:
+    """Accept a recent Redis or SQL heartbeat newer than this exact claim."""
+    stale_cutoff = now - timedelta(minutes=35)
+    durable_heartbeat = dispatch.worker_heartbeat_at
+    claimed_at = dispatch.claimed_at
+    if durable_heartbeat is not None and claimed_at is not None:
+        if durable_heartbeat.tzinfo is None:
+            durable_heartbeat = durable_heartbeat.replace(tzinfo=timezone.utc)
+        if claimed_at.tzinfo is None:
+            claimed_at = claimed_at.replace(tzinfo=timezone.utc)
+        if durable_heartbeat >= claimed_at and durable_heartbeat >= stale_cutoff:
+            return True
+
+    heartbeat = data.get("updated_at")
+    if not heartbeat or claimed_at is None:
+        return False
+    try:
+        heartbeat_at = datetime.fromisoformat(heartbeat)
+    except (TypeError, ValueError):
+        return False
+    if heartbeat_at.tzinfo is None:
+        heartbeat_at = heartbeat_at.replace(tzinfo=timezone.utc)
+    if claimed_at.tzinfo is None:
+        claimed_at = claimed_at.replace(tzinfo=timezone.utc)
+    if heartbeat_at < claimed_at or heartbeat_at < stale_cutoff:
+        return False
+    if dispatch.kind == "generation":
+        return not data.get("rerender_operation_id") and data.get("status") in {"processing", "completed"}
+    return data.get("rerender_operation_id") == str(dispatch.operation_id) and data.get("status") in {
+        "rendering",
+        "completed",
+    }
+
+
+async def _reconcile_payment_checkout_dispatches_async() -> dict[str, int]:
+    from app.db.engine import worker_session
+    from app.payments.checkout_outbox import reconcile_checkout_dispatches
+
+    return await reconcile_checkout_dispatches(worker_session)
+
+
+async def _reconcile_undispatched_job_operations_async() -> dict[str, int]:
+    """Replay durable outbox rows, then close legacy pre-outbox operations."""
+    from sqlalchemy import or_, select
+
+    from app.db.engine import worker_session as async_session
+    from app.db.models import Job, JobDispatch
+    from app.services.dispatch_outbox import publish_dispatch
+    from app.services.job_operations import (
+        mark_generation_dispatched,
+        mark_rerender_dispatched,
+        refund_generation,
+        refund_rerender,
+    )
+
+    counts = {
+        "generation_backfilled": 0,
+        "generation_refunded": 0,
+        "generation_ambiguous": 0,
+        "rerender_backfilled": 0,
+        "rerender_refunded": 0,
+        "rerender_ambiguous": 0,
+        "cancel_flags_removed": 0,
+        "cancel_flags_ttl_applied": 0,
+        "dispatch_generation_published": 0,
+        "dispatch_generation_refunded": 0,
+        "dispatch_rerender_published": 0,
+        "dispatch_rerender_refunded": 0,
+    }
+    now = datetime.now(timezone.utc)
+    cutoff = now - timedelta(hours=ORPHAN_QUEUED_CUTOFF_HOURS)
+    retry_cutoff = now - timedelta(minutes=5)
+    async with async_session() as session:
+        dispatch_result = await session.execute(
+            select(JobDispatch).where(
+                JobDispatch.state.in_({"pending", "published"}),
+                JobDispatch.claimed_at.is_(None),
+                or_(
+                    JobDispatch.last_error.like("send_failed:%"),
+                    JobDispatch.last_attempt_at <= retry_cutoff,
+                    (JobDispatch.last_attempt_at.is_(None) & (JobDispatch.created_at <= retry_cutoff)),
+                ),
+            )
+        )
+        for pending_dispatch in dispatch_result.scalars().all():
+            if (pending_dispatch.last_error or "").startswith("send_failed:"):
+                if pending_dispatch.kind == "generation":
+                    terminalized = await refund_generation(
+                        session,
+                        pending_dispatch.job_id,
+                        status="failed",
+                        error=UNDISPATCHED_OPERATION_ERROR,
+                        outbox_dispatch_id=pending_dispatch.id,
+                    )
+                    if terminalized:
+                        counts["dispatch_generation_refunded"] += 1
+                else:
+                    terminalized = await refund_rerender(
+                        session,
+                        pending_dispatch.job_id,
+                        pending_dispatch.operation_id,
+                        outbox_dispatch_id=pending_dispatch.id,
+                    )
+                    if terminalized:
+                        counts["dispatch_rerender_refunded"] += 1
+                await session.commit()
+                continue
+            dispatch_created_at = pending_dispatch.created_at
+            if dispatch_created_at.tzinfo is None:
+                dispatch_created_at = dispatch_created_at.replace(tzinfo=timezone.utc)
+            if pending_dispatch.attempt_count >= 5 and dispatch_created_at <= cutoff:
+                if pending_dispatch.kind == "generation":
+                    terminalized = await refund_generation(
+                        session,
+                        pending_dispatch.job_id,
+                        status="failed",
+                        error=UNDISPATCHED_OPERATION_ERROR,
+                        outbox_dispatch_id=pending_dispatch.id,
+                    )
+                    if terminalized:
+                        counts["dispatch_generation_refunded"] += 1
+                else:
+                    terminalized = await refund_rerender(
+                        session,
+                        pending_dispatch.job_id,
+                        pending_dispatch.operation_id,
+                        outbox_dispatch_id=pending_dispatch.id,
+                    )
+                    if terminalized:
+                        counts["dispatch_rerender_refunded"] += 1
+                await session.commit()
+                continue
+            outcome = await publish_dispatch(
+                session,
+                pending_dispatch.id,
+                send=_send_job_dispatch_message,
+                allow_republish=pending_dispatch.state == "published",
+            )
+            if outcome == "published":
+                if pending_dispatch.kind == "generation":
+                    if await mark_generation_dispatched(session, pending_dispatch.job_id):
+                        counts["dispatch_generation_published"] += 1
+                else:
+                    if await mark_rerender_dispatched(
+                        session,
+                        pending_dispatch.job_id,
+                        pending_dispatch.operation_id,
+                    ):
+                        counts["dispatch_rerender_published"] += 1
+                await session.commit()
+                continue
+            if outcome not in {"pending", "send_failed"}:
+                continue
+
+            refreshed = await session.get(
+                JobDispatch,
+                pending_dispatch.id,
+                populate_existing=True,
+            )
+            created_at = refreshed.created_at if refreshed is not None else None
+            if created_at is not None and created_at.tzinfo is None:
+                created_at = created_at.replace(tzinfo=timezone.utc)
+            if refreshed is None or refreshed.attempt_count < 5 or created_at is None or created_at > cutoff:
+                continue
+            if refreshed.kind == "generation":
+                if await refund_generation(
+                    session,
+                    refreshed.job_id,
+                    status="failed",
+                    error=UNDISPATCHED_OPERATION_ERROR,
+                    require_undispatched=True,
+                    outbox_dispatch_id=refreshed.id,
+                ):
+                    counts["dispatch_generation_refunded"] += 1
+            elif await refund_rerender(
+                session,
+                refreshed.job_id,
+                refreshed.operation_id,
+                require_undispatched=True,
+                outbox_dispatch_id=refreshed.id,
+            ):
+                counts["dispatch_rerender_refunded"] += 1
+            await session.commit()
+
+        claimed_result = await session.execute(
+            select(JobDispatch).where(
+                JobDispatch.state == "claimed",
+                JobDispatch.claimed_at.is_not(None),
+                JobDispatch.claimed_at <= retry_cutoff,
+            )
+        )
+        for claimed_dispatch in claimed_result.scalars().all():
+            live = _redis.hgetall(f"job:{claimed_dispatch.job_id}")
+            if _has_live_post_claim_worker_heartbeat(live, claimed_dispatch, now=now):
+                continue
+            if claimed_dispatch.kind == "generation":
+                terminalized = await refund_generation(
+                    session,
+                    claimed_dispatch.job_id,
+                    status="failed",
+                    error=UNDISPATCHED_OPERATION_ERROR,
+                    outbox_dispatch_id=claimed_dispatch.id,
+                    allow_claimed_outbox=True,
+                )
+                if terminalized:
+                    counts["dispatch_generation_refunded"] += 1
+            else:
+                terminalized = await refund_rerender(
+                    session,
+                    claimed_dispatch.job_id,
+                    claimed_dispatch.operation_id,
+                    outbox_dispatch_id=claimed_dispatch.id,
+                    allow_claimed_outbox=True,
+                )
+                if terminalized:
+                    counts["dispatch_rerender_refunded"] += 1
+            await session.commit()
+
+        published_result = await session.execute(
+            select(JobDispatch).where(
+                JobDispatch.state.in_({"published", "claimed"}),
+                JobDispatch.published_at.is_not(None),
+            )
+        )
+        for published_dispatch in published_result.scalars().all():
+            if published_dispatch.kind == "generation":
+                if await mark_generation_dispatched(session, published_dispatch.job_id):
+                    counts["generation_backfilled"] += 1
+            elif await mark_rerender_dispatched(
+                session,
+                published_dispatch.job_id,
+                published_dispatch.operation_id,
+            ):
+                counts["rerender_backfilled"] += 1
+        await session.commit()
+
+        generation_result = await session.execute(
+            select(Job).where(
+                Job.status.in_({"queued", "processing"}),
+                Job.generation_dispatched_at.is_(None),
+                Job.generation_refunded_at.is_(None),
+                Job.created_at <= cutoff,
+            )
+        )
+        for job in generation_result.scalars().all():
+            dispatch_exists = await session.scalar(
+                select(JobDispatch.id).where(JobDispatch.job_id == job.id, JobDispatch.kind == "generation").limit(1)
+            )
+            if dispatch_exists is not None:
+                continue
+            live = _redis.hgetall(f"job:{job.id}")
+            if _redis_has_dispatch_evidence(
+                live,
+                operation_id=None,
+                operation_started_at=job.created_at,
+            ):
+                if await mark_generation_dispatched(session, job.id):
+                    counts["generation_backfilled"] += 1
+            elif await refund_generation(
+                session,
+                job.id,
+                status="failed",
+                error=UNDISPATCHED_OPERATION_ERROR,
+                require_undispatched=True,
+            ):
+                counts["generation_refunded"] += 1
+
+        rerender_result = await session.execute(
+            select(Job).where(
+                Job.rerender_state == "debited",
+                Job.rerender_dispatched_at.is_(None),
+                Job.rerender_debited_at.is_not(None),
+                Job.rerender_debited_at <= cutoff,
+            )
+        )
+        for job in rerender_result.scalars().all():
+            operation_id = job.rerender_operation_id
+            if operation_id is None:
+                logger.critical("Rerender debited sem operation ID job=%s; no-op seguro", job.id)
+                _send_admin_alert(
+                    "ClipIA - reconciliador encontrou rerender sem operation ID",
+                    f"Job {job.id}: rerender_state=debited sem operation ID; nenhuma cobranca foi inferida.",
+                )
+                continue
+            dispatch_exists = await session.scalar(
+                select(JobDispatch.id)
+                .where(
+                    JobDispatch.job_id == job.id,
+                    JobDispatch.kind == "rerender",
+                    JobDispatch.operation_id == operation_id,
+                )
+                .limit(1)
+            )
+            if dispatch_exists is not None:
+                continue
+            live = _redis.hgetall(f"job:{job.id}")
+            if _redis_has_dispatch_evidence(
+                live,
+                operation_id=operation_id,
+                operation_started_at=job.rerender_debited_at,
+            ):
+                if await mark_rerender_dispatched(session, job.id, operation_id):
+                    counts["rerender_backfilled"] += 1
+            elif await refund_rerender(session, job.id, operation_id, require_undispatched=True):
+                counts["rerender_refunded"] += 1
+
+        for raw_key in list(_redis.scan_iter(match="job:*:cancelled", count=200)):
+            key = raw_key.decode() if isinstance(raw_key, bytes) else raw_key
+            raw_job_id = key.removeprefix("job:").removesuffix(":cancelled")
+            try:
+                parsed_job_id = uuid.UUID(raw_job_id)
+            except ValueError:
+                _redis.delete(key)
+                counts["cancel_flags_removed"] += 1
+                continue
+            job = await session.get(Job, parsed_job_id)
+            active = job is not None and job.status in {"queued", "processing", "cancelling", "finalizing"}
+            delivered = job is not None and (
+                job.video_url is not None or job.completed_at is not None or job.status in {"editable", "completed"}
+            )
+            if job is None or delivered or not active:
+                _redis.delete(key)
+                counts["cancel_flags_removed"] += 1
+                continue
+            ttl = _redis.ttl(key)
+            if ttl == -1:
+                _redis.expire(key, _CANCEL_FLAG_TTL_SECONDS)
+                counts["cancel_flags_ttl_applied"] += 1
+
+        await session.commit()
+    return counts
+
+
+async def _drain_refine_balance_outbox_async() -> dict[str, int]:
+    """Project every durable SQL refine balance to the ba03321 Redis contract."""
+    from sqlalchemy import func, select
+
+    from app.db.engine import worker_session as async_session
+    from app.db.models import RefineBalanceOutbox, User
+    from app.services.refine_balance import ensure_refine_balance_projection, sync_refine_balance_projection
+
+    projected = 0
+    async with async_session() as session:
+        result = await session.execute(
+            select(RefineBalanceOutbox.id)
+            .join(User, User.id == RefineBalanceOutbox.user_id)
+            .where(
+                RefineBalanceOutbox.applied_at.is_(None),
+                User.script_refine_redis_migrated.is_(True),
+            )
+            .order_by(RefineBalanceOutbox.user_id, RefineBalanceOutbox.version)
+        )
+        projection_ids = list(result.scalars().all())
+        for projection_id in projection_ids:
+            if await sync_refine_balance_projection(session, projection_id, _redis):
+                projected += 1
+        mismatches = 0
+        users_result = await session.execute(
+            select(User.id, User.script_refine_version, User.script_refine_pending).where(
+                User.script_refine_redis_migrated.is_(True)
+            )
+        )
+        for user_id, version, balance_after in users_result.all():
+            try:
+                if ensure_refine_balance_projection(
+                    _redis,
+                    user_id=user_id,
+                    version=int(version or 0),
+                    balance_after=float(balance_after or 0.0),
+                ):
+                    projected += 1
+            except Exception:  # noqa: BLE001 - a mismatch must block rollback, not stop the audit
+                mismatches += 1
+                logger.exception("Projecao legacy de refino divergente user=%s", user_id)
+        pending_rows = int(
+            await session.scalar(
+                select(func.count())
+                .select_from(RefineBalanceOutbox)
+                .join(User, User.id == RefineBalanceOutbox.user_id)
+                .where(
+                    RefineBalanceOutbox.applied_at.is_(None),
+                    User.script_refine_redis_migrated.is_(True),
+                )
+            )
+            or 0
+        )
+        remaining = pending_rows + mismatches
+    return {"projected": projected, "remaining": remaining}
+
+
+async def _reconcile_credit_ledger_async() -> dict:
+    """Record the daily shadow comparison without repairing either side."""
+    from app.db.engine import worker_session as async_session
+    from app.services.credit_ledger import reconcile_credit_ledger
+
+    async with async_session() as session:
+        result = await reconcile_credit_ledger(session)
+        await session.commit()
+    if not result["is_clean"]:
+        logger.critical(
+            "Credit ledger divergence: users=%d mismatches=%d max_abs_difference=%d",
+            result["user_count"],
+            result["mismatch_count"],
+            result["max_abs_difference"],
+        )
+        _send_admin_alert(
+            "ClipIA - divergencia no ledger de creditos",
+            "A reconciliacao append-only detectou "
+            f"{result['mismatch_count']} usuario(s) divergentes; "
+            f"diferenca absoluta maxima={result['max_abs_difference']}. "
+            "O modo enforce permanece bloqueado.",
+        )
+    return result
+
+
+async def _prepare_refine_balance_rollback_async() -> dict[str, int]:
+    """Verify Redis and atomically hand authority to the ba03321 binary."""
+    from sqlalchemy import func, or_, select
+
+    from app.db.engine import worker_session as async_session
+    from app.db.models import RefineBalanceOutbox, User
+    from app.services.refine_balance import ensure_refine_balance_projection
+
+    drained = await _drain_refine_balance_outbox_async()
+    result = {**drained, "handed_off": 0}
+    if drained["remaining"]:
+        return result
+
+    async with async_session() as session:
+        users_result = await session.execute(
+            select(User)
+            .where(
+                or_(
+                    User.script_refine_redis_migrated.is_(True),
+                    func.abs(User.script_refine_pending) > 0.000001,
+                )
+            )
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+        authority_users = list(users_result.scalars().all())
+        inconsistent_users = [
+            user
+            for user in authority_users
+            if not user.script_refine_redis_migrated and abs(float(user.script_refine_pending or 0.0)) > 0.000001
+        ]
+        if inconsistent_users:
+            await session.rollback()
+            result["remaining"] = len(inconsistent_users)
+            return result
+        users = [user for user in authority_users if user.script_refine_redis_migrated]
+        pending_rows = int(
+            await session.scalar(
+                select(func.count())
+                .select_from(RefineBalanceOutbox)
+                .join(User, User.id == RefineBalanceOutbox.user_id)
+                .where(
+                    RefineBalanceOutbox.applied_at.is_(None),
+                    User.script_refine_redis_migrated.is_(True),
+                )
+            )
+            or 0
+        )
+        mismatches = 0
+        for user in users:
+            try:
+                if ensure_refine_balance_projection(
+                    _redis,
+                    user_id=user.id,
+                    version=int(user.script_refine_version or 0),
+                    balance_after=float(user.script_refine_pending or 0.0),
+                ):
+                    result["projected"] += 1
+            except Exception:  # noqa: BLE001 - any mismatch blocks the authority switch
+                mismatches += 1
+                logger.exception("Handoff legacy de refino divergente user=%s", user.id)
+        if pending_rows or mismatches:
+            await session.rollback()
+            result["remaining"] = pending_rows + mismatches
+            return result
+
+        for user in users:
+            user.script_refine_pending = 0.0
+            user.script_refine_redis_migrated = False
+        await session.commit()
+        result["handed_off"] = len(users)
+    return result
 
 
 async def _find_orphan_queued_jobs_async() -> list[str]:
@@ -546,21 +1537,9 @@ async def _find_orphan_queued_jobs_async() -> list[str]:
 
 
 def _reap_orphan_queued_jobs() -> int:
-    """Marca jobs queued orfaos (>6h) como ``failed`` e reembolsa o credito da geracao.
-
-    Nao apaga o job (mantem para forense). Reutiliza ``_refund_job_credit`` para garantir a
-    mesma logica de reembolso/integridade de creditos do resto do pipeline (job.credit_cost
-    or 1). Idempotente: ``_refund_job_credit`` so reembolsa uma vez (status final guardado).
-    """
-    orphan_ids = asyncio.run(_find_orphan_queued_jobs_async())
-    for job_id in orphan_ids:
-        logger.warning(
-            "Reaping orphan queued job %s (sem progresso ha >%dh) — marcando failed e reembolsando",
-            job_id,
-            ORPHAN_QUEUED_CUTOFF_HOURS,
-        )
-        _refund_job_credit(job_id, "failed", ORPHAN_QUEUED_ERROR)
-    return len(orphan_ids)
+    """Compatibility entrypoint delegated to the marker-aware reconciler."""
+    result = asyncio.run(_reconcile_undispatched_job_operations_async())
+    return result["generation_refunded"] + result["rerender_refunded"]
 
 
 # ── Watchdog de jobs travados em processamento ─────────────────────────────────
@@ -632,16 +1611,63 @@ def _watchdog_pass() -> int:
         if elapsed <= limit:
             continue
 
-        # Re-checa na hora do abate: o finalize pode ter concluido entre o scan e ca.
-        if _redis.hgetall(key).get("status") not in ("processing", "rendering"):
-            continue
-
-        message = WATCHDOG_STUCK_ERROR.format(step=step or "?", minutes=int(elapsed // 60))
-        logger.error(
-            "Watchdog: job %s travado (%s ha %.0fs > %ds) — cancelando e estornando", job_id, step, elapsed, limit
-        )
-        _redis_set(f"job:{job_id}:cancelled", "true")
-        _refund_job_credit(job_id, "failed", message)
+        if status == "rendering":
+            operation_id = data.get("rerender_operation_id")
+            if not operation_id:
+                logger.critical("Watchdog: rerender travado sem operation ID job=%s; no-op seguro", job_id)
+                _send_admin_alert(
+                    "ClipIA - watchdog encontrou rerender sem operation ID",
+                    f"Job {job_id}: rendering travado sem rerender_operation_id; nenhuma cobranca foi inferida.",
+                )
+                continue
+            if not _claim_stuck_watchdog_snapshot(
+                job_id,
+                status=status,
+                updated_at=updated_raw,
+                operation_id=operation_id,
+            ):
+                continue
+            message = (
+                f"Re-render interrompido por falta de progresso na etapa '{step or '?'}' "
+                f"(sem atualização há {int(elapsed // 60)}min). O crédito foi devolvido."
+            )
+            logger.error(
+                "Watchdog: rerender %s op=%s travado (%s ha %.0fs > %ds)",
+                job_id,
+                operation_id,
+                step,
+                elapsed,
+                limit,
+            )
+            if not _refund_rerender_operation(job_id, operation_id):
+                _redis.delete(f"job:{job_id}:cancelled")
+                continue
+            _update_rerender_terminal(
+                job_id,
+                operation_id,
+                status="error",
+                error=message,
+                detail=message,
+            )
+        else:
+            if not _claim_stuck_watchdog_snapshot(
+                job_id,
+                status=status,
+                updated_at=updated_raw,
+                operation_id=None,
+            ):
+                continue
+            message = WATCHDOG_STUCK_ERROR.format(step=step or "?", minutes=int(elapsed // 60))
+            logger.error(
+                "Watchdog: job %s travado (%s ha %.0fs > %ds) — cancelando e estornando",
+                job_id,
+                step,
+                elapsed,
+                limit,
+            )
+            if not _refund_job_credit(job_id, "failed", message):
+                _redis.delete(f"job:{job_id}:cancelled")
+                continue
         _enqueue_dead_letter(job_id, message)
         reaped += 1
     return reaped
@@ -678,6 +1704,26 @@ def cleanup_old_jobs() -> dict[str, int]:
     return result
 
 
+@celery_app.task(name="reconcile_undispatched_job_operations")
+def reconcile_undispatched_job_operations() -> dict[str, int]:
+    return asyncio.run(_reconcile_undispatched_job_operations_async())
+
+
+@celery_app.task(name="reconcile_payment_checkout_dispatches")
+def reconcile_payment_checkout_dispatches() -> dict[str, int]:
+    return asyncio.run(_reconcile_payment_checkout_dispatches_async())
+
+
+@celery_app.task(name="drain_refine_balance_outbox")
+def drain_refine_balance_outbox() -> dict[str, int]:
+    return asyncio.run(_drain_refine_balance_outbox_async())
+
+
+@celery_app.task(name="reconcile_credit_ledger")
+def reconcile_credit_ledger_task() -> dict:
+    return asyncio.run(_reconcile_credit_ledger_async())
+
+
 @celery_app.task(name="cleanup_orphan_files")
 def cleanup_orphan_files() -> dict[str, int]:
     return asyncio.run(_cleanup_orphan_files_async())
@@ -692,7 +1738,15 @@ def task_generate_script(
     duration_target: int,
     template_id: str = "stock_narration",
     trend_context: str | None = None,
+    dispatch_id: str | None = None,
+    broker_task_id: str | None = None,
 ) -> dict:
+    effective_task_id = broker_task_id or getattr(getattr(self, "request", None), "id", None)
+    if dispatch_id is None:
+        if not _mark_generation_worker_started(job_id):
+            return {"cancelled": True}
+    elif not _mark_generation_worker_started(job_id, dispatch_id, effective_task_id):
+        raise Ignore()
     try:
         if _check_cancelled(job_id):
             return {"cancelled": True}
@@ -768,14 +1822,7 @@ def task_synthesize_audio(self, script: dict, job_id: str, template_id: str = "s
 
             synthesize_dialogue(script["scenes"], output_path, duration_target=duration_target)
         elif voice_provider_name == "custom":
-            # Custom audio — just copy the uploaded file (already validated)
-            uploaded_path = voice_config.get("source_path", "") if voice_config else ""
-            if uploaded_path and Path(uploaded_path).exists():
-                from app.services.custom_audio_provider import normalize_audio
-
-                normalize_audio(uploaded_path, output_path)
-            else:
-                raise RuntimeError("Custom audio source not found")
+            raise RuntimeError("Custom generation paths are disabled; upload audio to an owned job")
         elif voice_provider_name == "elevenlabs":
             # ElevenLabs premium TTS
             from app.services.elevenlabs_provider import ElevenLabsProvider
@@ -1129,57 +2176,146 @@ def _send_video_ready_email(job_id: str) -> None:
         logger.exception("Falha ao enviar email de video pronto (job %s)", job_id)
 
 
+def _claim_generation_finalize(job_id: str) -> str:
+    from app.db.engine import worker_session as async_session
+    from app.services.job_operations import claim_generation_finalize
+
+    async def _claim() -> str:
+        async with async_session() as session:
+            transition = await claim_generation_finalize(session, job_id)
+            if transition == "claimed":
+                await session.commit()
+            return transition
+
+    return asyncio.run(_claim())
+
+
+def _publish_generation_finalize(
+    job_id: str,
+    prepared_video: Path,
+    prepared_thumbnail: Path,
+    *,
+    script: dict | None,
+    telemetry: dict | None,
+) -> str | None:
+    """Publish prepared artifacts while holding only the final DB row lock."""
+    from app.db.engine import worker_session as async_session
+    from app.services.job_operations import finalize_generation
+
+    output_dir = get_output_dir()
+    canonical_video = output_dir / f"{job_id}.mp4"
+    canonical_thumbnail = output_dir / f"{job_id}.jpg"
+    token = prepared_video.stem.removeprefix(f".{job_id}.").removesuffix(".prepared")
+    backup_video = output_dir / f".{job_id}.{token}.backup.mp4"
+    backup_thumbnail = output_dir / f".{job_id}.{token}.backup.jpg"
+
+    async def _publish() -> str | None:
+        async with async_session() as session:
+            transition = await finalize_generation(
+                session,
+                job_id,
+                script=script,
+                video_url=str(canonical_video),
+                telemetry=telemetry,
+            )
+            if transition != "finalized":
+                return None
+
+            video_published = False
+            thumbnail_published = False
+            try:
+                if canonical_video.exists():
+                    canonical_video.replace(backup_video)
+                prepared_video.replace(canonical_video)
+                video_published = True
+                if prepared_thumbnail.exists():
+                    if canonical_thumbnail.exists():
+                        canonical_thumbnail.replace(backup_thumbnail)
+                    prepared_thumbnail.replace(canonical_thumbnail)
+                    thumbnail_published = True
+                await session.commit()
+            except Exception:
+                await session.rollback()
+                if video_published:
+                    canonical_video.unlink(missing_ok=True)
+                if backup_video.exists():
+                    backup_video.replace(canonical_video)
+                if thumbnail_published:
+                    canonical_thumbnail.unlink(missing_ok=True)
+                if backup_thumbnail.exists():
+                    backup_thumbnail.replace(canonical_thumbnail)
+                raise
+            backup_video.unlink(missing_ok=True)
+            backup_thumbnail.unlink(missing_ok=True)
+            return str(canonical_video)
+
+    try:
+        return asyncio.run(_publish())
+    finally:
+        backup_video.unlink(missing_ok=True)
+        backup_thumbnail.unlink(missing_ok=True)
+
+
 @celery_app.task(name="finalize", bind=True, soft_time_limit=120, time_limit=150)
 def task_finalize(self, video_path: str, job_id: str) -> str:
+    prepared_video: Path | None = None
+    prepared_thumbnail: Path | None = None
+    final_src: str | None = None
     try:
         if not video_path or _check_cancelled(job_id):
             return ""
-        _update_job(job_id, "processing", "finalizing", 0.95, detail="Salvando video final...")
+
+        transition = _claim_generation_finalize(job_id)
         output_dir = get_output_dir()
-        final_path = str(output_dir / f"{job_id}.mp4")
-        final_src = append_outro(video_path)  # selo de marca (~1.5s); no-op-safe se off/asset ausente/erro
-        shutil.copy2(final_src, final_path)
-        if final_src != video_path:
-            Path(final_src).unlink(missing_ok=True)
-        _write_thumbnail(final_path, str(output_dir / f"{job_id}.jpg"))
+        canonical_video = output_dir / f"{job_id}.mp4"
+        canonical_thumbnail = output_dir / f"{job_id}.jpg"
+        if transition in {"delivered", "in_progress"}:
+            return ""
+        if transition == "cancelled":
+            canonical_video.unlink(missing_ok=True)
+            canonical_thumbnail.unlink(missing_ok=True)
+            _cancel_job(job_id)
+            return ""
+        if transition != "claimed":
+            canonical_video.unlink(missing_ok=True)
+            canonical_thumbnail.unlink(missing_ok=True)
+            return ""
 
-        # Save script to PostgreSQL for the editor (keep job dir for editing)
+        # Never expose a stale artifact while this persistent claim prepares
+        # the only publication that may become downloadable.
+        canonical_video.unlink(missing_ok=True)
+        canonical_thumbnail.unlink(missing_ok=True)
+        _update_job(job_id, "processing", "finalizing", 0.95, detail="Salvando video final...")
+
+        job_dir = get_job_dir(job_id)
+        script_path = job_dir / "script.json"
+        script_data = _read_json_file(script_path) if script_path.exists() else None
         try:
-            from sqlalchemy import update
+            telemetry = _build_telemetry(job_id, script_data)
+        except Exception as tel_err:  # noqa: BLE001 - telemetry is best-effort
+            logger.warning("telemetria do job %s falhou: %s", job_id, tel_err)
+            telemetry = None
 
-            from app.db.engine import worker_session as async_session  # NullPool: seguro com asyncio.run() por task
-            from app.db.models import Job
+        token = uuid.uuid4().hex
+        prepared_video = output_dir / f".{job_id}.{token}.prepared.mp4"
+        prepared_thumbnail = output_dir / f".{job_id}.{token}.prepared.jpg"
+        final_src = append_outro(video_path)
+        shutil.copy2(final_src, prepared_video)
+        _write_thumbnail(str(prepared_video), str(prepared_thumbnail))
 
-            job_dir = get_job_dir(job_id)
-            script_path = job_dir / "script.json"
-            script_data = _read_json_file(script_path) if script_path.exists() else None
-            try:
-                telemetry = _build_telemetry(job_id, script_data)
-            except Exception as tel_err:  # noqa: BLE001 — telemetria nunca falha o finalize
-                logger.warning("telemetria do job %s falhou: %s", job_id, tel_err)
-                telemetry = None
+        final_path = _publish_generation_finalize(
+            job_id,
+            prepared_video,
+            prepared_thumbnail,
+            script=script_data,
+            telemetry=telemetry,
+        )
+        if final_path is None:
+            return ""
 
-            async def _save_script():
-                async with async_session() as session:
-                    await session.execute(
-                        update(Job)
-                        .where(Job.id == job_id)
-                        .values(
-                            script=script_data,
-                            status="editable",
-                            video_url=final_path,
-                            telemetry=telemetry,
-                        )
-                    )
-                    await session.commit()
-
-            asyncio.run(_save_script())
-            # So depois do commit (job realmente editavel): convite de volta 1x por job.
-            _send_video_ready_email(job_id)
-        except Exception as e:
-            logger.warning(f"Could not save script to DB: {e}")
-
-        _update_job(job_id, "completed", None, 1.0, detail="Video final pronto para download.")
+        _redis.delete(f"job:{job_id}:cancelled")
+        _send_video_ready_email(job_id)
+        _update_generation_completed(job_id, detail="Video final pronto para download.")
         return final_path
     except SoftTimeLimitExceeded:
         _handle_soft_timeout(job_id, "finalize")
@@ -1187,22 +2323,40 @@ def task_finalize(self, video_path: str, job_id: str) -> str:
     except Exception as e:
         _fail_job(job_id, f"Finalize failed: {e}")
         raise
+    finally:
+        if final_src is not None and final_src != video_path:
+            Path(final_src).unlink(missing_ok=True)
+        if prepared_video is not None:
+            prepared_video.unlink(missing_ok=True)
+        if prepared_thumbnail is not None:
+            prepared_thumbnail.unlink(missing_ok=True)
 
 
 @celery_app.task(name="rerender_video", bind=True, soft_time_limit=300, time_limit=360)
-def task_rerender_video(self, job_id: str) -> str:
+def task_rerender_video(
+    self,
+    job_id: str,
+    operation_id: str | None = None,
+    dispatch_id: str | None = None,
+    broker_task_id: str | None = None,
+) -> str:
     """Re-render the edited video for export.
 
     Hybrid engine: Remotion (fiel ao preview) by default, FFmpeg+NVENC as fallback
     via settings.RENDER_ENGINE. Runs in background — user never waits.
     """
-    try:
-        if _check_cancelled(job_id):
+    operation_output_path: str | None = None
+    effective_task_id = broker_task_id or getattr(getattr(self, "request", None), "id", None)
+    if dispatch_id is None:
+        if not _claim_rerender_operation(job_id, operation_id, task_id=effective_task_id):
             return ""
+    elif not _claim_rerender_operation(job_id, operation_id, dispatch_id, effective_task_id):
+        raise Ignore()
+    try:
         rerender_t0 = time.monotonic()
         _update_job(job_id, "rendering", "preparing", 0.05, detail="Preparando arquivos para re-render...")
         job_dir = get_job_dir(job_id)
-        from app.config import BASE_DIR, settings
+        from app.config import settings
         from app.services.compositor import compose_short
 
         script_path = job_dir / "script.json"
@@ -1218,7 +2372,7 @@ def task_rerender_video(self, job_id: str) -> str:
             raise RuntimeError("narration.wav not found")
 
         from app.job_config import resolve_job_flag
-        from app.services.music import auto_music_url
+        from app.services.music import auto_music_asset_id
 
         template_id = _redis_hget(f"job:{job_id}", "template_id") or "stock_narration"
 
@@ -1231,7 +2385,7 @@ def task_rerender_video(self, job_id: str) -> str:
             audio_basename = Path(audio_path).name  # narration_sfx.wav se mixou; senao narration.wav
 
         music_enabled = resolve_job_flag(_redis, job_id, "music_enabled", settings.AUTO_MUSIC_ENABLED)
-        default_music_url = auto_music_url(template_id) if music_enabled else None
+        default_music_asset_id = auto_music_asset_id(template_id) if music_enabled else None
 
         # Collect media file paths
         media_paths = []
@@ -1271,14 +2425,16 @@ def task_rerender_video(self, job_id: str) -> str:
         if settings.RENDER_ENGINE == "remotion":
             from app.services.remotion import invoke_remotion_render
 
-            output_path = str(job_dir / "final_remotion.mp4")
+            operation_suffix = operation_id or "legacy"
+            output_path = str(job_dir / f"final_remotion_{operation_suffix}.mp4")
+            operation_output_path = output_path
             _update_job(job_id, "rendering", "encoding", 0.2, detail="Renderizando com Remotion...")
             logger.info(f"Starting Remotion re-render for job {job_id}")
             invoke_remotion_render(
                 job_id,
                 output_path,
                 audio_filename=audio_basename,
-                default_music_url=default_music_url,
+                default_music_asset_id=default_music_asset_id,
                 on_progress=lambda p: _update_job(
                     job_id,
                     "rendering",
@@ -1290,13 +2446,19 @@ def task_rerender_video(self, job_id: str) -> str:
         else:
             # FFmpeg+NVENC fallback path
             music_path = None
-            music_url = comp_data.get("musicUrl", default_music_url)
-            if music_url:
-                music_file = BASE_DIR / "frontend" / "public" / music_url.lstrip("/")
-                if music_file.exists():
+            from app.services.music import legacy_music_url_to_asset_id, resolve_music_asset_path
+
+            music_asset_id = comp_data.get("musicAssetId", default_music_asset_id)
+            if "musicAssetId" not in comp_data and "musicUrl" in comp_data:
+                music_asset_id = legacy_music_url_to_asset_id(comp_data["musicUrl"])
+            if music_asset_id:
+                music_file = resolve_music_asset_path(music_asset_id)
+                if music_file:
                     music_path = str(music_file)
 
-            output_path = str(job_dir / "final_edited.mp4")
+            operation_suffix = operation_id or "legacy"
+            output_path = str(job_dir / f"final_edited_{operation_suffix}.mp4")
+            operation_output_path = output_path
             _update_job(job_id, "rendering", "encoding", 0.2, detail="Re-renderizando video...")
             logger.info(f"Starting FFmpeg+NVENC re-render for job {job_id}")
 
@@ -1318,73 +2480,52 @@ def task_rerender_video(self, job_id: str) -> str:
             )
 
         _update_job(job_id, "rendering", "finalizing", 0.9, detail="Finalizando re-render...")
+        duration = round(time.monotonic() - rerender_t0, 1)
+        final_path = _publish_rerender_operation(
+            job_id,
+            operation_id,
+            output_path,
+            engine=settings.RENDER_ENGINE,
+            duration=duration,
+        )
+        if final_path is None:
+            return ""
 
-        # Copy to output dir (becomes downloadable version)
-        output_dir = get_output_dir()
-        final_path = str(output_dir / f"{job_id}.mp4")
-        final_src = append_outro(output_path)  # selo de marca tambem no export editado (no-op-safe)
-        shutil.copy2(final_src, final_path)
-        if final_src != output_path:
-            Path(final_src).unlink(missing_ok=True)
-        _write_thumbnail(final_path, str(output_dir / f"{job_id}.jpg"))
-
-        # Telemetria do export: os t:{step} do hash sao first-write-only (colidem com a
-        # geracao), entao o rerender mede a propria duracao e apenda em Job.telemetry
-        # para a aba Economia enxergar exports do editor.
-        try:
-            from sqlalchemy import select as sa_select
-            from sqlalchemy import update as sa_update
-
-            from app.db.engine import worker_session as async_session
-            from app.db.models import Job
-
-            duration = round(time.monotonic() - rerender_t0, 1)
-
-            async def _save_rerender_telemetry():
-                async with async_session() as session:
-                    result = await session.execute(sa_select(Job.telemetry).where(Job.id == job_id))
-                    tel = dict(result.scalar_one_or_none() or {})
-                    rerenders = list(tel.get("rerenders") or [])[-9:]  # ponytail: cap 10 exports por job
-                    rerenders.append(
-                        {
-                            "engine": settings.RENDER_ENGINE,
-                            "duration_seconds": duration,
-                            "at": datetime.now(timezone.utc).isoformat(),
-                        }
-                    )
-                    tel["rerenders"] = rerenders
-                    await session.execute(sa_update(Job).where(Job.id == job_id).values(telemetry=tel))
-                    await session.commit()
-
-            asyncio.run(_save_rerender_telemetry())
-        except Exception as tel_err:  # noqa: BLE001 — telemetria nunca falha o export
-            logger.warning("telemetria do rerender %s falhou: %s", job_id, tel_err)
-
-        # zera o marcador de custo: export entregue, nada a devolver
-        _redis.hset(f"job:{job_id}", mapping={"rerender_cost": 0})
-        _update_job(job_id, "completed", None, 1.0, detail="Re-render concluido.")
+        _update_rerender_terminal(
+            job_id,
+            operation_id,
+            status="completed",
+            detail="Re-render concluido.",
+        )
         logger.info(f"Re-render completed for job {job_id}")
         return final_path
     except SoftTimeLimitExceeded:
         # NAO usar _handle_soft_timeout: ele devolve credit_cost (custo da GERACAO) e
         # marca "failed", bloqueando um editor que continua utilizavel. O export devolve
         # o proprio custo e deixa o job em "error" (re-tentavel).
-        _refund_rerender_cost(job_id)
-        _update_job(
+        if not _refund_rerender_operation(job_id, operation_id):
+            raise
+        _update_rerender_terminal(
             job_id,
-            "error",
+            operation_id,
+            status="error",
             error="Re-render demorou demais.",
             detail="O export demorou demais e foi interrompido. Seu credito foi devolvido — tente novamente.",
         )
         _enqueue_dead_letter(job_id, "rerender_video soft timeout")
         raise
     except Exception as e:
-        _refund_rerender_cost(job_id)
-        _update_job(
+        if not _refund_rerender_operation(job_id, operation_id):
+            raise
+        _update_rerender_terminal(
             job_id,
-            "error",
+            operation_id,
+            status="error",
             error=str(e),
             detail="Falha no re-render. Seu credito do export foi devolvido — tente novamente.",
         )
         logger.error(f"Re-render failed for job {job_id}: {e}")
         raise
+    finally:
+        if operation_output_path is not None:
+            Path(operation_output_path).unlink(missing_ok=True)

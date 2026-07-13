@@ -1,3 +1,5 @@
+from datetime import timedelta
+
 from celery import Celery
 from celery.schedules import crontab
 
@@ -24,6 +26,22 @@ celery_app.conf.update(
         "cleanup-orphan-files": {
             "task": "cleanup_orphan_files",
             "schedule": crontab(hour=4, minute=30, day_of_week=0),
+        },
+        "reconcile-undispatched-job-operations": {
+            "task": "reconcile_undispatched_job_operations",
+            "schedule": timedelta(minutes=10),
+        },
+        "drain-refine-balance-outbox": {
+            "task": "drain_refine_balance_outbox",
+            "schedule": timedelta(minutes=10),
+        },
+        "reconcile-payment-checkout-dispatches": {
+            "task": "reconcile_payment_checkout_dispatches",
+            "schedule": timedelta(minutes=5),
+        },
+        "reconcile-credit-ledger": {
+            "task": "reconcile_credit_ledger",
+            "schedule": crontab(hour=5, minute=0),
         },
     },
 )

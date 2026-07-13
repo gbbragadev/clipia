@@ -43,7 +43,7 @@ const defaultProps: CompositionData = {
   width: 1080,
   height: 1920,
   overlays: [],
-  musicUrl: null,
+  musicAssetId: null,
   musicVolume: 0.15,
 }
 

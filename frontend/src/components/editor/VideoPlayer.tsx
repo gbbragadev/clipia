@@ -47,7 +47,7 @@ export function VideoPlayer() {
       accent: composition.subtitleStyle.accentColor,
       anim: composition.subtitleStyle.animationStyle,
       maxWords: composition.subtitleStyle.maxWordsPerChunk,
-      music: composition.musicUrl,
+      music: composition.musicAssetId,
       musicVol: composition.musicVolume,
     })
     if (lastCompositionRef.current && sig !== lastCompositionRef.current) {

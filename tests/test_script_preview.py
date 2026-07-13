@@ -64,7 +64,7 @@ async def test_preview_requires_enough_balance_for_template(
 
 
 @pytest.mark.asyncio
-async def test_refine_accumulates_half_credit(client, app, verified_user, auth_headers, monkeypatch):
+async def test_refine_accumulates_half_credit(client, app, verified_user, auth_headers, monkeypatch, db_session):
     _mock_scriptwriter(monkeypatch)
 
     body = {
@@ -79,6 +79,9 @@ async def test_refine_accumulates_half_credit(client, app, verified_user, auth_h
 
     r2 = await client.post("/api/v1/script-preview/refine", json=body, headers=auth_headers(verified_user))
     assert r2.json()["refine_pending"] == 1.0
+    db_session.expire_all()
+    fresh = await db_session.get(User, verified_user.id)
+    assert fresh.script_refine_pending == 1.0
 
 
 @pytest.mark.asyncio
@@ -86,8 +89,8 @@ async def test_generate_settles_whole_refines_and_carries_remainder(
     client, app, verified_user, auth_headers, db_session
 ):
     """1,5 pendente: o /generate cobra base+1 e carrega 0,5 (nunca cobra a mais)."""
-    fake = app.state.fake_redis
-    fake.set(f"script_refine_pending:{verified_user.id}", "1.5")
+    await db_session.execute(update(User).where(User.id == verified_user.id).values(script_refine_pending=1.5))
+    await db_session.commit()
     credits_before = verified_user.credits
 
     resp = await client.post("/api/v1/generate", json=BASE_BODY, headers=auth_headers(verified_user))
@@ -96,19 +99,148 @@ async def test_generate_settles_whole_refines_and_carries_remainder(
     assert resp.json()["credit_cost"] == 2  # 1 do template + 1 inteiro dos refinos
     fresh = await db_session.get(User, verified_user.id)
     assert fresh.credits == credits_before - 2
-    assert fake.get(f"script_refine_pending:{verified_user.id}") == "0.5"  # meio carrega
+    assert fresh.script_refine_pending == 0.5  # meio carrega
 
 
 @pytest.mark.asyncio
 async def test_generate_with_half_refine_charges_base_only(client, app, verified_user, auth_headers, db_session):
-    fake = app.state.fake_redis
-    fake.set(f"script_refine_pending:{verified_user.id}", "0.5")
+    await db_session.execute(update(User).where(User.id == verified_user.id).values(script_refine_pending=0.5))
+    await db_session.commit()
 
     resp = await client.post("/api/v1/generate", json=BASE_BODY, headers=auth_headers(verified_user))
 
     assert resp.status_code == 202
     assert resp.json()["credit_cost"] == 1  # floor(0.5) = 0: nada a liquidar ainda
-    assert fake.get(f"script_refine_pending:{verified_user.id}") == "0.5"
+    fresh = await db_session.get(User, verified_user.id)
+    assert fresh.script_refine_pending == 0.5
+
+
+@pytest.mark.asyncio
+async def test_refine_balance_is_not_lost_when_redis_is_unavailable(
+    client,
+    app,
+    verified_user,
+    auth_headers,
+    monkeypatch,
+    db_session,
+):
+    """Refine debt is financial state and must not depend on Redis availability."""
+    _mock_scriptwriter(monkeypatch)
+    await db_session.execute(update(User).where(User.id == verified_user.id).values(script_refine_redis_migrated=True))
+    await db_session.commit()
+    credits_before = verified_user.credits
+    original_get = app.state.fake_redis.get
+    original_set = app.state.fake_redis.set
+
+    def fail_refine_get(key: str):
+        if key.startswith("script_refine_pending:"):
+            raise RuntimeError("redis unavailable")
+        return original_get(key)
+
+    def fail_refine_set(key: str, *args, **kwargs):
+        if key.startswith("script_refine_pending:"):
+            raise RuntimeError("redis unavailable")
+        return original_set(key, *args, **kwargs)
+
+    monkeypatch.setattr(app.state.fake_redis, "get", fail_refine_get)
+    monkeypatch.setattr(app.state.fake_redis, "set", fail_refine_set)
+    body = {
+        "script": VALID_SCRIPT,
+        "instruction": "deixe a cena 2 mais dramatica",
+        "duration_target": 30,
+        "template_id": "stock_narration",
+    }
+
+    response = await client.post(
+        "/api/v1/script-preview/refine",
+        json=body,
+        headers=auth_headers(verified_user),
+    )
+
+    assert response.status_code == 200
+    assert response.json()["refine_pending"] == 0.5
+    db_session.expire_all()
+    fresh = await db_session.get(User, verified_user.id)
+    assert fresh.script_refine_pending == 0.5
+    assert fresh.credits == credits_before
+
+
+@pytest.mark.asyncio
+async def test_generate_imports_legacy_half_refine_once_without_losing_sql_increment(
+    client,
+    app,
+    verified_user,
+    auth_headers,
+    db_session,
+    monkeypatch,
+):
+    legacy_key = f"script_refine_pending:{verified_user.id}"
+    app.state.fake_redis.set(legacy_key, "0.5")
+    await db_session.execute(update(User).where(User.id == verified_user.id).values(script_refine_pending=0.5))
+    await db_session.commit()
+    original_delete = app.state.fake_redis.delete
+
+    def fail_legacy_cleanup(key: str):
+        if key == legacy_key:
+            raise RuntimeError("cleanup unavailable")
+        return original_delete(key)
+
+    monkeypatch.setattr(app.state.fake_redis, "delete", fail_legacy_cleanup)
+
+    first = await client.post("/api/v1/generate", json=BASE_BODY, headers=auth_headers(verified_user))
+    second = await client.post("/api/v1/generate", json=BASE_BODY, headers=auth_headers(verified_user))
+
+    assert first.status_code == 202
+    assert first.json()["credit_cost"] == 2
+    assert second.status_code == 202
+    assert second.json()["credit_cost"] == 1
+    db_session.expire_all()
+    fresh = await db_session.get(User, verified_user.id)
+    assert fresh.script_refine_pending == 0.0
+    assert fresh.script_refine_redis_migrated is True
+    # O leitor ba03321 precisa ver a projecao atual (0), nao o snapshot legado
+    # importado (0,5), mesmo quando a antiga rotina de delete esta indisponivel.
+    assert app.state.fake_redis.get(legacy_key) == "0.00"
+
+
+@pytest.mark.asyncio
+async def test_refine_legacy_migration_fails_closed_when_redis_is_unavailable(
+    client,
+    app,
+    verified_user,
+    auth_headers,
+    db_session,
+    monkeypatch,
+):
+    _mock_scriptwriter(monkeypatch)
+    legacy_key = f"script_refine_pending:{verified_user.id}"
+    original_get = app.state.fake_redis.get
+
+    def fail_legacy_read(key: str):
+        if key == legacy_key:
+            raise RuntimeError("redis unavailable")
+        return original_get(key)
+
+    monkeypatch.setattr(app.state.fake_redis, "get", fail_legacy_read)
+    body = {
+        "script": VALID_SCRIPT,
+        "instruction": "deixe a cena 2 mais dramatica",
+        "duration_target": 30,
+        "template_id": "stock_narration",
+    }
+
+    response = await client.post(
+        "/api/v1/script-preview/refine",
+        json=body,
+        headers=auth_headers(verified_user),
+    )
+
+    assert response.status_code == 503
+    db_session.expire_all()
+    fresh = await db_session.get(User, verified_user.id)
+    assert fresh.script_refine_pending == 0.0
+    assert fresh.script_refine_redis_migrated is False
+    assert fresh.credits == verified_user.credits
 
 
 @pytest.mark.asyncio

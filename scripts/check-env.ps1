@@ -9,6 +9,7 @@ $required = @{
     'OPENAI_API_KEY'       = 'OpenAI (Whisper fallback + futuro gpt-image)'
     'ELEVENLABS_API_KEY'   = 'ElevenLabs TTS'
     'CLOUDFLARE_API_TOKEN' = 'Cloudflare Tunnel'
+    'METRICS_TOKEN'        = 'Bearer privado do Prometheus'
 }
 
 $missing = @()

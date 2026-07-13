@@ -8,21 +8,25 @@ import {
   getMe,
   login as authLogin,
   register as authRegister,
+  logout as authLogout,
   setToken,
+  setCsrfToken,
   clearToken,
-  getToken,
+  hasSessionCandidate,
   NetworkError,
 } from "@/lib/auth";
+import type { SelectedPackage } from "@/lib/package-intent";
 import { getStoredUTM, clearStoredUTM } from "@/hooks/useUTM";
 import { useToast } from "@/components/ui/feedback";
+import { setOnboardingAnalyticsEntry } from "@/lib/analytics";
 
 interface AuthContextType {
   user: User | null;
   loading: boolean;
   login: (email: string, password: string) => Promise<void>;
-  register: (email: string, name: string, password: string, turnstileToken?: string, consent?: boolean) => Promise<void>;
+  register: (email: string, name: string, password: string, turnstileToken?: string, consent?: boolean, selectedPackage?: SelectedPackage) => Promise<void>;
   logout: () => void;
-  refreshUser: () => Promise<void>;
+  refreshUser: () => Promise<User | null>;
 }
 
 const AuthContext = createContext<AuthContextType | null>(null);
@@ -35,8 +39,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const { info } = useToast();
 
   useEffect(() => {
-    const token = getToken();
-    if (!token) {
+    if (!hasSessionCandidate()) {
       setLoading(false);
       return;
     }
@@ -66,8 +69,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [info, pathname, router]);
 
   useEffect(() => {
-    const token = getToken();
-    if (!token) return;
+    if (!hasSessionCandidate()) return;
 
     const interval = window.setInterval(() => {
       getMe()
@@ -88,6 +90,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const login = useCallback(async (email: string, password: string) => {
     const res = await authLogin(email, password);
     setToken(res.access_token);
+    setCsrfToken(res.csrf_token);
     // Erro transitório em /auth/me logo após o login não deve impedir o redirect
     // para o dashboard: o token já foi gravado e o efeito de carregamento inicial
     // vai revalidar. Só repassamos 401 (sessão expirada de verdade).
@@ -103,17 +106,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
-  const register = useCallback(async (email: string, name: string, password: string, turnstileToken?: string, consent?: boolean) => {
+  const register = useCallback(async (email: string, name: string, password: string, turnstileToken?: string, consent?: boolean, selectedPackage?: SelectedPackage) => {
     const utm = getStoredUTM();
-    const res = await authRegister(email, name, password, { ...utm, turnstile_token: turnstileToken, consent });
+    const res = await authRegister(email, name, password, {
+      ...utm,
+      turnstile_token: turnstileToken,
+      consent,
+      selected_package: selectedPackage,
+    });
     // Intenção de nicho (/criar/[nicho] → utm_campaign=nicho-{slug}): sobrevive ao
     // cadastro para o dashboard aplicar template/estilo/tema recomendados UMA vez
     // após o OTP — quem chega buscando "drama histórico" não cai num form genérico.
     if (utm.utm_campaign?.startsWith("nicho-")) {
       localStorage.setItem("clipia_signup_intent", utm.utm_campaign.slice("nicho-".length));
     }
+    setOnboardingAnalyticsEntry(selectedPackage ? "package" : utm.utm_campaign?.startsWith("nicho-") ? "niche" : "direct");
     clearStoredUTM();
     setToken(res.access_token);
+    setCsrfToken(res.csrf_token);
     try {
       const me = await getMe();
       setUser(me);
@@ -127,6 +137,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const logout = useCallback(() => {
+    void authLogout().catch(() => undefined);
     clearToken();
     setUser(null);
   }, []);
@@ -135,7 +146,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     try {
       const me = await getMe();
       setUser(me);
-    } catch { /* silent */ }
+      return me;
+    } catch {
+      return null;
+    }
   }, []);
 
   return (
