@@ -3,18 +3,51 @@ import path from 'node:path'
 
 import { expect, test } from '@playwright/test'
 import { CTA_LABEL, NAV_LINKS } from '../src/components/landing/lib/data'
+import { blogPosts } from '../src/lib/blog-posts'
 import { getArticleLinkProps } from '../src/lib/markdown-links'
+import { NICHES } from '../src/lib/niches'
 import { loadShowcase, SHOWCASE_CATALOG } from '../src/lib/showcase'
 
 const frontendRoot = process.cwd()
 const appBaseUrl = process.env.RELEASE_B_BASE_URL || 'http://127.0.0.1:3307'
 const apex = 'https://clipia.com.br'
-const postSlug = 'como-criar-videos-com-ia-gratis'
+const postSlug = blogPosts[0].slug
 const checkoutUrl = 'https://www.mercadopago.com.br/checkout/v1/redirect?pref_id=qa'
 const firstPurchaseId = '00000000-0000-4000-8000-000000000001'
 const secondPurchaseId = '00000000-0000-4000-8000-000000000002'
 const dispatchId = '00000000-0000-4000-8000-000000000101'
 const checkoutAttemptStorageKey = 'clipia_checkout_attempt'
+
+const STATIC_INDEXABLE_ROUTES = ['/', '/exemplos', '/blog', '/suporte', '/termos', '/privacidade']
+const NICHE_ROUTES = NICHES.map((niche) => `/criar/${niche.slug}`)
+const BLOG_ROUTES = blogPosts.map((post) => `/blog/${post.slug}`)
+const VIEWER_ROUTES = SHOWCASE_CATALOG.videos.map((video) => `/v/${video.id}`)
+const INDEXABLE_ROUTES = [
+  ...STATIC_INDEXABLE_ROUTES,
+  ...NICHE_ROUTES,
+  ...BLOG_ROUTES,
+  ...VIEWER_ROUTES,
+]
+const AUTH_ROUTE_SPECS = [
+  { path: '/auth/login', visit: '/auth/login' },
+  { path: '/auth/register', visit: '/auth/register' },
+  { path: '/auth/forgot-password', visit: '/auth/forgot-password' },
+  {
+    path: '/auth/reset-password',
+    visit: '/auth/reset-password?email=qa%40clipia.com.br',
+  },
+  { path: '/auth/verify', visit: '/auth/verify?email=qa%40clipia.com.br' },
+]
+const PUBLIC_ROUTE_SPECS = [
+  ...INDEXABLE_ROUTES.map((route) => ({ path: route, visit: route, indexable: true })),
+  ...AUTH_ROUTE_SPECS.map((route) => ({ ...route, indexable: false })),
+]
+const ROUTE_MATRIX_VIEWPORTS = [
+  { width: 1440, height: 900 },
+  { width: 320, height: 844 },
+  { width: 390, height: 844 },
+  { width: 393, height: 844 },
+]
 
 async function mockCreditsPage(page, { selectedPackage = 'starter' } = {}) {
   await page.addInitScript(() => {
@@ -60,13 +93,16 @@ async function mockCreditsPage(page, { selectedPackage = 'starter' } = {}) {
           bonus_credits: 6,
         },
         {
-          id: 'pro',
-          name: 'Pro',
-          credits: 120,
+          id: 'professional',
+          selected_package: 'professional',
+          name: 'Profissional',
+          credits: 100,
+          base_credits: 100,
           price_brl: 12990,
           price_display: 'R$ 129,90',
           bonus_percent: 20,
           bonus_credits: 20,
+          total_credits: 120,
         },
       ]),
     }),
@@ -139,15 +175,38 @@ test('catalogo da landing usa o manifesto runtime e recua ao canonico quando ins
   }
 })
 
-test('artigos usam Markdown GFM sem HTML cru e protegem links absolutos', async ({ page }) => {
+test('todos os artigos usam Markdown GFM sem HTML cru e protegem links externos', async ({ page }) => {
+  for (const post of blogPosts) {
+    await page.goto(`${appBaseUrl}/blog/${post.slug}`)
+    const article = page.locator('article .prose')
+    await expect(article).not.toContainText('**')
+    await expect(article.locator('script, iframe, object, embed, style')).toHaveCount(0)
+
+    const links = await article.locator('a').evaluateAll((elements) =>
+      elements.map((element) => ({
+        href: element.getAttribute('href'),
+        target: element.getAttribute('target'),
+        rel: element.getAttribute('rel'),
+      })),
+    )
+    for (const link of links) {
+      if (!link.href) continue
+      const destination = new URL(link.href, 'https://clipia.com.br')
+      if (destination.origin === 'https://clipia.com.br') {
+        expect(link.target, `${post.slug}: link interno abriu nova aba`).not.toBe('_blank')
+      } else {
+        expect(link.target, `${post.slug}: link externo sem nova aba`).toBe('_blank')
+        expect(link.rel, `${post.slug}: link externo sem protecao`).toBe('noopener noreferrer')
+      }
+    }
+  }
+
   await page.goto(`${appBaseUrl}/blog/${postSlug}`)
+  const firstArticle = page.locator('article .prose')
+  await expect(firstArticle.locator('ol')).toHaveCount(1)
+  await expect(firstArticle.locator('ol > li')).toHaveCount(3)
 
-  const article = page.locator('article .prose')
-  await expect(article.locator('ol')).toHaveCount(1)
-  await expect(article.locator('ol > li')).toHaveCount(3)
-  await expect(article).not.toContainText('**')
-
-  const absoluteLink = article.locator('a[href="https://clipia.com.br/criar/curiosidades"]').first()
+  const absoluteLink = firstArticle.locator('a[href="https://clipia.com.br/criar/curiosidades"]').first()
   await expect(absoluteLink).not.toHaveAttribute('target', '_blank')
   await expect(absoluteLink).not.toHaveAttribute('rel', /noopener|noreferrer/)
 
@@ -162,26 +221,16 @@ test('artigos usam Markdown GFM sem HTML cru e protegem links absolutos', async 
   expect(source).not.toContain('dangerouslySetInnerHTML')
 })
 
-test('rotas indexaveis publicam canonical apex e metadados especificos', async ({ page }) => {
-  test.setTimeout(120_000)
-  const routes = [
-    '/',
-    '/exemplos',
-    '/blog',
-    `/blog/${postSlug}`,
-    '/criar/curiosidades',
-    '/suporte',
-    '/termos',
-    '/privacidade',
-    '/v/ocean',
-  ]
+test('as 24 rotas indexaveis publicam um canonical apex autorreferente', async ({ page }) => {
+  test.setTimeout(180_000)
+  expect(INDEXABLE_ROUTES).toHaveLength(24)
+  expect(new Set(INDEXABLE_ROUTES).size).toBe(24)
 
-  for (const route of routes) {
+  for (const route of INDEXABLE_ROUTES) {
     await page.goto(`${appBaseUrl}${route}`, { waitUntil: 'domcontentloaded' })
-    await expect(page.locator('link[rel="canonical"]')).toHaveAttribute(
-      'href',
-      `${apex}${route === '/' ? '' : route}`,
-    )
+    const canonical = page.locator('link[rel="canonical"]')
+    await expect(canonical, route).toHaveCount(1)
+    await expect(canonical, route).toHaveAttribute('href', `${apex}${route === '/' ? '' : route}`)
   }
 
   const legalMetadata = [
@@ -211,17 +260,128 @@ test('datas de artigo coincidem na pagina, schema e sitemap', async ({ page, req
   expect(sitemap).toContain(`<loc>${apex}/suporte</loc>`)
   expect(sitemap).toContain(`<loc>${apex}/termos</loc>`)
   expect(sitemap).toContain(`<loc>${apex}/privacidade</loc>`)
+  for (const route of VIEWER_ROUTES) {
+    expect(sitemap).toContain(`<loc>${apex}${route}</loc>`)
+  }
   expect(sitemap).not.toContain('www.clipia.com.br')
 })
 
-test('www redireciona permanentemente para apex preservando rota e query', async ({ request }) => {
-  const response = await request.get(`${appBaseUrl}/blog?origem=www`, {
-    headers: { host: 'www.clipia.com.br' },
-    maxRedirects: 0,
-  })
+test('www redireciona estatico, dinamico, auth e viewer preservando rota e query', async ({ request }) => {
+  const routes = [
+    '/suporte?origem=www',
+    '/criar/curiosidades?utm_source=qa',
+    '/auth/register?selected_package=starter',
+    '/v/ocean?ref=share',
+  ]
+  for (const route of routes) {
+    const response = await request.get(`${appBaseUrl}${route}`, {
+      headers: { host: 'www.clipia.com.br' },
+      maxRedirects: 0,
+    })
+    expect(response.status(), route).toBe(308)
+    expect(response.headers().location, route).toBe(`${apex}${route}`)
+  }
+})
 
-  expect(response.status()).toBe(308)
-  expect(response.headers().location).toBe(`${apex}/blog?origem=www`)
+test('matriz real cobre 29 rotas em desktop e 320/390/393 sem erro ou overflow', async ({ browser }) => {
+  test.setTimeout(600_000)
+  expect(PUBLIC_ROUTE_SPECS).toHaveLength(29)
+  expect(new Set(PUBLIC_ROUTE_SPECS.map((route) => route.path)).size).toBe(29)
+  expect(PUBLIC_ROUTE_SPECS.length * ROUTE_MATRIX_VIEWPORTS.length).toBe(116)
+
+  for (const viewport of ROUTE_MATRIX_VIEWPORTS) {
+    for (const route of PUBLIC_ROUTE_SPECS) {
+      const page = await browser.newPage({ viewport })
+      const consoleErrors = []
+      const pageErrors = []
+      page.on('console', (message) => {
+        if (message.type() === 'error') consoleErrors.push(message.text())
+      })
+      page.on('pageerror', (error) => pageErrors.push(error.message))
+      await page.route('**/api/v1/config', (requestRoute) =>
+        requestRoute.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({ welcome_credit_bonus: 2, purchase_bonus_percent: 20 }),
+        }),
+      )
+
+      const label = `${route.path} em ${viewport.width}x${viewport.height}`
+      try {
+        const response = await page.goto(`${appBaseUrl}${route.visit}`, {
+          waitUntil: 'domcontentloaded',
+        })
+        expect(response, `${label}: navegacao sem resposta`).not.toBeNull()
+        expect(response.status(), `${label}: status HTTP`).toBe(200)
+        await page.waitForLoadState('load')
+        await expect
+          .poll(async () => (await page.locator('body').innerText()).trim().length, {
+            message: `${label}: pagina sem conteudo utilizavel apos hidratacao`,
+            timeout: 5_000,
+          })
+          .toBeGreaterThan(20)
+
+        const bodyText = (await page.locator('body').innerText()).trim()
+        expect(bodyText, `${label}: erro do Next`).not.toMatch(
+          /Application error|This page could not be found|Internal Server Error/i,
+        )
+
+        const dimensions = await page.evaluate(() => {
+          const documentElement = document.documentElement
+          const body = document.body
+          const viewportWidth = documentElement.clientWidth
+          const escapedContainers = [...document.querySelectorAll('main, header, footer, form, article')]
+            .filter((element) => {
+              const style = window.getComputedStyle(element)
+              const rect = element.getBoundingClientRect()
+              return (
+                style.display !== 'none' &&
+                style.visibility !== 'hidden' &&
+                rect.width > 0 &&
+                (rect.left < -1 || rect.right > viewportWidth + 1)
+              )
+            })
+            .map((element) => ({
+              tag: element.tagName.toLowerCase(),
+              className: element.getAttribute('class') || '',
+              rect: element.getBoundingClientRect().toJSON(),
+            }))
+          return {
+            viewportWidth,
+            documentWidth: documentElement.scrollWidth,
+            bodyWidth: body.scrollWidth,
+            escapedContainers,
+          }
+        })
+        expect(dimensions.documentWidth, `${label}: overflow no documento`).toBeLessThanOrEqual(
+          dimensions.viewportWidth + 1,
+        )
+        expect(dimensions.bodyWidth, `${label}: overflow no body`).toBeLessThanOrEqual(
+          dimensions.viewportWidth + 1,
+        )
+        expect(dimensions.escapedContainers, `${label}: container fora da viewport`).toEqual([])
+
+        if (route.indexable) {
+          const canonical = page.locator('link[rel="canonical"]')
+          await expect(canonical, label).toHaveCount(1)
+          await expect(canonical, label).toHaveAttribute(
+            'href',
+            `${apex}${route.path === '/' ? '' : route.path}`,
+          )
+        } else {
+          await expect(page.locator('meta[name="robots"]'), label).toHaveAttribute(
+            'content',
+            /noindex, nofollow/,
+          )
+        }
+
+        expect(consoleErrors, `${label}: console.error`).toEqual([])
+        expect(pageErrors, `${label}: pageerror`).toEqual([])
+      } finally {
+        await page.close()
+      }
+    }
+  }
 })
 
 test('landing cabe em 320, 390 e 393 px sem mascarar overflow global', async ({ page }) => {
@@ -304,30 +464,33 @@ test('landing cabe em 320, 390 e 393 px sem mascarar overflow global', async ({ 
 })
 
 test('todas as rotas de autenticacao bloqueiam indexacao e seguimento', async ({ page }) => {
-  const authRoutes = [
-    '/auth/login',
-    '/auth/register',
-    '/auth/forgot-password',
-    '/auth/reset-password?email=qa%40clipia.com.br',
-    '/auth/verify?email=qa%40clipia.com.br',
-  ]
-
-  for (const route of authRoutes) {
-    await page.goto(`${appBaseUrl}${route}`, { waitUntil: 'domcontentloaded' })
-    await expect(page.locator('meta[name="robots"]'), route).toHaveAttribute(
+  expect(AUTH_ROUTE_SPECS).toHaveLength(5)
+  for (const route of AUTH_ROUTE_SPECS) {
+    await page.goto(`${appBaseUrl}${route.visit}`, { waitUntil: 'domcontentloaded' })
+    await expect(page.locator('meta[name="robots"]'), route.path).toHaveAttribute(
       'content',
       /noindex, nofollow/,
     )
   }
 })
 
-test('catalogo canonico mostra videos do nicho e fallback quando vazio no HTML inicial', async ({ request }) => {
-  const withVideos = await (await request.get(`${appBaseUrl}/criar/curiosidades`)).text()
-  expect(withVideos).toContain('/v/ocean')
+test('os sete nichos usam somente exemplos canonicos ou exibem fallback sem grade vazia', async ({ page }) => {
+  expect(NICHES).toHaveLength(7)
+  for (const niche of NICHES) {
+    const expectedVideos = SHOWCASE_CATALOG.videos.filter((video) => video.niche === niche.slug)
+    await page.goto(`${appBaseUrl}/criar/${niche.slug}`)
+    const grid = page.locator('[data-niche-video-grid]')
+    if (expectedVideos.length === 0) {
+      await expect(grid, niche.slug).toHaveCount(0)
+      await expect(page.getByRole('link', { name: 'Ver todos os exemplos', exact: true }), niche.slug).toBeVisible()
+      continue
+    }
 
-  const withoutVideos = await (await request.get(`${appBaseUrl}/criar/historias`)).text()
-  expect(withoutVideos).toContain('Ver todos os exemplos')
-  expect(withoutVideos).not.toContain('data-niche-video-grid')
+    const hrefs = await grid.locator('a[href^="/v/"]').evaluateAll((links) =>
+      links.map((link) => link.getAttribute('href')),
+    )
+    expect(hrefs, niche.slug).toEqual(expectedVideos.map((video) => `/v/${video.id}`))
+  }
 })
 
 test('recuperacao de senha exibe Enviar codigo com acento', async ({ page }) => {
@@ -405,7 +568,7 @@ test('cadastro e verificacao mantem pacote valido ate a selecao anterior ao chec
     route.fulfill({
       status: 200,
       contentType: 'application/json',
-      body: JSON.stringify({ welcome_credit_bonus: 2, purchase_bonus_percent: 0 }),
+      body: JSON.stringify({ welcome_credit_bonus: 2, purchase_bonus_percent: 20 }),
     }),
   )
   await page.route('**/api/v1/auth/register', async (route) => {
