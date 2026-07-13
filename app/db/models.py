@@ -72,6 +72,8 @@ class User(Base):
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
     credits: Mapped[int] = mapped_column(Integer, default=2)
+    script_refine_pending: Mapped[float] = mapped_column(Float, default=0.0, server_default="0", nullable=False)
+    script_refine_redis_migrated: Mapped[bool] = mapped_column(default=False, server_default="false", nullable=False)
     plan: Mapped[str] = mapped_column(String(50), default="free")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     email_verified: Mapped[bool] = mapped_column(default=False)
@@ -127,6 +129,7 @@ class Job(Base):
     rerender_debited_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     rerender_dispatched_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     credit_cost: Mapped[int] = mapped_column(Integer, default=1)
+    refine_credit_cost: Mapped[int] = mapped_column(Integer, default=0, server_default="0", nullable=False)
     voice_provider: Mapped[str] = mapped_column(String(50), default="edge")
     voice_config: Mapped[dict | None] = mapped_column(JsonType, nullable=True)
     # Economia por job (consolidado no finalize): {steps: {etapa: segundos},

@@ -111,7 +111,14 @@ async def refund_generation(
         return False
 
     refund_amount = job.credit_cost or 1
-    await session.execute(update(User).where(User.id == job.user_id).values(credits=User.credits + refund_amount))
+    await session.execute(
+        update(User)
+        .where(User.id == job.user_id)
+        .values(
+            credits=User.credits + refund_amount,
+            script_refine_pending=User.script_refine_pending + (job.refine_credit_cost or 0),
+        )
+    )
     job.status = status
     job.error = error
     job.generation_refunded_at = datetime.now(timezone.utc)

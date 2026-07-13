@@ -1,6 +1,7 @@
 import asyncio
 import json
 import logging
+import math
 import shutil
 import time
 import uuid
@@ -224,14 +225,39 @@ async def _refund_credits_safe(db: AsyncSession, user_id, cost: int, action: str
             return False
 
 
-def _restore_refine_snapshot(refine_key: str, snapshot: str | None) -> None:
+async def _lock_script_refine_balance(db: AsyncSession, user_id: uuid.UUID) -> tuple[User, str | None]:
+    """Lock the SQL refine balance and lazily import the legacy Redis value once."""
+    result = await db.execute(
+        select(User).where(User.id == user_id).with_for_update().execution_options(populate_existing=True)
+    )
+    locked_user = result.scalar_one_or_none()
+    if locked_user is None:
+        raise HTTPException(status_code=401, detail=ErrorMessages.UNAUTHORIZED)
+    if locked_user.script_refine_redis_migrated:
+        return locked_user, None
+
+    legacy_key = f"script_refine_pending:{user_id}"
     try:
-        if snapshot is None:
-            _redis.delete(refine_key)
-        else:
-            _redis.set(refine_key, snapshot, ex=86400)
-    except Exception:  # noqa: BLE001 - compensation remains best-effort at the Redis edge
-        logger.exception("Falha ao restaurar snapshot de refino key=%s", refine_key)
+        raw_legacy = _redis.get(legacy_key)
+        legacy_pending = float(raw_legacy or 0.0)
+        if not math.isfinite(legacy_pending) or legacy_pending < 0:
+            raise ValueError("invalid legacy refine balance")
+    except Exception as exc:  # noqa: BLE001 - unknown legacy debt must never be discarded
+        logger.error("Falha ao importar saldo legado de refino user=%s: %s", user_id, exc)
+        raise HTTPException(status_code=503, detail="Nao foi possivel reservar o saldo de refinos agora.") from exc
+
+    locked_user.script_refine_pending = round(float(locked_user.script_refine_pending or 0.0) + legacy_pending, 2)
+    locked_user.script_refine_redis_migrated = True
+    return locked_user, legacy_key
+
+
+def _clear_legacy_refine_balance(legacy_key: str | None) -> None:
+    if legacy_key is None:
+        return
+    try:
+        _redis.delete(legacy_key)
+    except Exception:  # noqa: BLE001 - SQL migration flag prevents duplicate import
+        logger.exception("Falha ao remover saldo legado de refino key=%s", legacy_key)
 
 
 def _release_generation_quota(cap_key: str | None, reserved: bool) -> None:
@@ -247,13 +273,11 @@ async def _compensate_generation_dispatch(
     db: AsyncSession,
     *,
     job_id: uuid.UUID,
-    refine_key: str,
-    refine_snapshot: str | None,
     cap_key: str | None,
     quota_reserved: bool,
     credit_cost: int,
     error: Exception,
-) -> None:
+) -> bool:
     refunded = False
     for attempt in range(2):
         try:
@@ -284,14 +308,23 @@ async def _compensate_generation_dispatch(
 
     cleanup_job_dir(str(job_id))
     _release_generation_quota(cap_key, quota_reserved)
-    _restore_refine_snapshot(refine_key, refine_snapshot)
     try:
+        message = (
+            "Falha ao enfileirar a geracao. Credito estornado."
+            if refunded
+            else "Falha ao enfileirar a geracao. Estorno persistente pendente."
+        )
         _redis.hset(
             f"job:{job_id}",
-            mapping={"status": "failed", "error": "Falha ao enfileirar a geracao. Credito estornado."},
+            mapping={
+                "status": "failed" if refunded else "refund_pending",
+                "error": message,
+                "generation_broker_state": "failed",
+            },
         )
     except Exception:  # noqa: BLE001 - terminal Redis state is best-effort; DB is authoritative
         logger.exception("Falha ao publicar estado Redis compensado job=%s", job_id)
+    return refunded
 
 
 @router.post(
@@ -317,14 +350,11 @@ async def generate(
     cost_provider = (
         "elevenlabs" if (req.narration_mode == "dialogue" or template.script.is_dialogue) else req.voice_provider
     )
-    credit_cost = get_generation_credit_cost(req.template_id, cost_provider)
+    base_credit_cost = get_generation_credit_cost(req.template_id, cost_provider)
+    credit_cost = base_credit_cost
 
-    # Refinos de roteiro (0,5 cada) acumulados em Redis pelo /script-preview/refine:
-    # cobra a parte INTEIRA junto da geracao e carrega o resto (2 refinos = 1 credito;
-    # 1 refino sozinho fica anotado p/ a proxima — nunca cobra a mais).
-    refine_key = f"script_refine_pending:{user.id}"
-    refine_snapshot: str | None = None
-    refine_owed = 0.0
+    # Refinos de roteiro (0,5 cada) ficam autoritativos no PostgreSQL. A parte
+    # inteira entra no debito desta geracao e a fracao restante segue para a proxima.
     refine_extra = 0
 
     # Guardrail $: video IA (Seedance) e a operacao mais cara. Teto DIARIO por usuario, vale ate p/
@@ -338,6 +368,7 @@ async def generate(
 
     job_uuid = uuid.uuid4()
     quota_reserved = False
+    legacy_refine_key: str | None = None
 
     async with get_lock(f"generate:{user.id}"):
         _ensure_storage_ready()
@@ -352,18 +383,6 @@ async def generate(
                 cleanup_job_dir(str(job_uuid))
                 logger.error("Falha ao preparar custom script job=%s: %s", job_uuid, exc)
                 raise HTTPException(status_code=503, detail="Nao foi possivel preparar os arquivos da geracao.")
-
-        try:
-            refine_snapshot = _redis.get(refine_key)
-            refine_owed = float(refine_snapshot or 0.0)
-        except (TypeError, ValueError):
-            refine_owed = 0.0
-        except Exception as exc:  # noqa: BLE001 - unknown debt must not be charged or discarded
-            cleanup_job_dir(str(job_uuid))
-            logger.error("Falha ao ler snapshot de refino user=%s: %s", user.id, exc)
-            raise HTTPException(status_code=503, detail="Nao foi possivel reservar a geracao agora.")
-        refine_extra = int(refine_owed)
-        credit_cost += refine_extra
 
         if cap_key:
             try:
@@ -388,17 +407,22 @@ async def generate(
                 raise HTTPException(status_code=503, detail="Nao foi possivel reservar a geracao agora.")
 
         try:
+            locked_user, legacy_refine_key = await _lock_script_refine_balance(db, user.id)
+            if not locked_user.email_verified:
+                raise HTTPException(status_code=403, detail=ErrorMessages.EMAIL_NOT_VERIFIED)
+
+            refine_pending = float(locked_user.script_refine_pending or 0.0)
+            refine_extra = int(refine_pending)
+            credit_cost = base_credit_cost + refine_extra
             debit = await db.execute(
                 update(User)
                 .where(User.id == user.id, User.email_verified.is_(True), User.credits >= credit_cost)
-                .values(credits=User.credits - credit_cost)
+                .values(
+                    credits=User.credits - credit_cost,
+                    script_refine_pending=User.script_refine_pending - refine_extra,
+                )
             )
             if debit.rowcount == 0:
-                fresh_user = await db.get(User, user.id)
-                if fresh_user is None:
-                    raise HTTPException(status_code=401, detail=ErrorMessages.UNAUTHORIZED)
-                if not fresh_user.email_verified:
-                    raise HTTPException(status_code=403, detail=ErrorMessages.EMAIL_NOT_VERIFIED)
                 raise HTTPException(status_code=402, detail=ErrorMessages.INSUFFICIENT_CREDITS)
 
             job = Job(
@@ -411,10 +435,12 @@ async def generate(
                 voice_provider=req.voice_provider,
                 voice_config=req.voice_config,
                 credit_cost=credit_cost,
+                refine_credit_cost=refine_extra,
                 status="queued",
             )
             db.add(job)
             await db.commit()
+            _clear_legacy_refine_balance(legacy_refine_key)
         except HTTPException:
             await db.rollback()
             _release_generation_quota(cap_key, quota_reserved)
@@ -436,6 +462,7 @@ async def generate(
             "error": "",
             "detail": "",
             "template_id": req.template_id,
+            "generation_broker_state": "attempting",
             "created_at": datetime.now(timezone.utc).isoformat(),
         }
         if req.sfx_enabled is not None:
@@ -446,13 +473,6 @@ async def generate(
             job_meta["narration_mode"] = req.narration_mode
 
         try:
-            if refine_extra > 0:
-                remainder = round(refine_owed - refine_extra, 2)
-                if remainder > 0:
-                    _redis.set(refine_key, str(remainder), ex=86400)
-                else:
-                    _redis.delete(refine_key)
-
             _redis.hset(f"job:{job_id}", mapping=job_meta)
             if req.custom_script is not None:
                 _redis.hset(f"job:{job_id}", mapping={"custom_script": "1"})
@@ -469,11 +489,9 @@ async def generate(
                 narration_mode=req.narration_mode,
             )
         except Exception as exc:  # noqa: BLE001 - broker has not acknowledged the message
-            await _compensate_generation_dispatch(
+            refunded = await _compensate_generation_dispatch(
                 db,
                 job_id=job_uuid,
-                refine_key=refine_key,
-                refine_snapshot=refine_snapshot,
                 cap_key=cap_key,
                 quota_reserved=quota_reserved,
                 credit_cost=credit_cost,
@@ -482,8 +500,23 @@ async def generate(
             logger.error("Dispatch compensado job=%s user=%s: %s", job_id, user.id, exc)
             raise HTTPException(
                 status_code=503,
-                detail="Nao foi possivel iniciar a geracao agora. Seu credito foi estornado, tente novamente em instantes.",
+                detail=(
+                    "Nao foi possivel iniciar a geracao agora. Seu credito foi estornado, tente novamente em instantes."
+                    if refunded
+                    else "Nao foi possivel iniciar a geracao agora. O estorno ficou pendente para reconciliacao."
+                ),
             )
+
+        try:
+            _redis.hset(
+                f"job:{job_id}",
+                mapping={
+                    "generation_broker_accepted_at": datetime.now(timezone.utc).isoformat(),
+                    "generation_broker_state": "accepted",
+                },
+            )
+        except Exception:  # noqa: BLE001 - broker already accepted; DB marker is the next durable proof
+            logger.critical("Falha ao registrar evidencia Redis de broker aceito job=%s", job_id, exc_info=True)
 
         try:
             await mark_generation_dispatched(db, job_uuid)
@@ -542,12 +575,16 @@ def _script_preview_rate_limit(user_id) -> None:
 async def script_preview(
     req: GenerateRequest,
     user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
 ):
     """Preview do roteiro sem debitar (incluso). Anti-farming: exige saldo suficiente
     para gerar o video deste template + cap horario."""
     cost_provider = "elevenlabs" if req.narration_mode == "dialogue" else req.voice_provider
     template_cost = get_generation_credit_cost(req.template_id, cost_provider)
-    if user.credits < template_cost:
+    locked_user, legacy_refine_key = await _lock_script_refine_balance(db, user.id)
+    await db.commit()
+    _clear_legacy_refine_balance(legacy_refine_key)
+    if locked_user.credits < template_cost:
         raise HTTPException(status_code=402, detail=ErrorMessages.INSUFFICIENT_CREDITS)
     _script_preview_rate_limit(user.id)
 
@@ -568,7 +605,8 @@ async def script_preview(
         logger.warning("script-preview falhou user=%s: %s", user.id, e)
         raise HTTPException(status_code=502, detail="Não foi possível gerar o rascunho agora. Tente novamente.")
 
-    refine_owed = float(_redis.get(f"script_refine_pending:{user.id}") or 0.0)
+    await db.refresh(locked_user, attribute_names=["script_refine_pending"])
+    refine_owed = float(locked_user.script_refine_pending or 0.0)
     return {"script": script, "refine_cost": 0.5, "refine_pending": refine_owed}
 
 
@@ -581,9 +619,13 @@ async def script_preview(
 async def script_preview_refine(
     req: ScriptRefineRequest,
     user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
 ):
-    """Refino = 0,5 credito ACUMULADO server-side (Redis) e liquidado no proximo
+    """Refino = 0,5 credito acumulado no PostgreSQL e liquidado no proximo
     /generate (parte inteira; o resto carrega). Nunca um campo de custo do cliente."""
+    _, legacy_refine_key = await _lock_script_refine_balance(db, user.id)
+    await db.commit()
+    _clear_legacy_refine_balance(legacy_refine_key)
     _script_preview_rate_limit(user.id)
 
     from app.services.scriptwriter import refine_script
@@ -596,10 +638,16 @@ async def script_preview_refine(
         logger.warning("script-refine falhou user=%s: %s", user.id, e)
         raise HTTPException(status_code=502, detail="Não foi possível refinar o rascunho agora. Tente novamente.")
 
-    # Debita os 0,5 SOMENTE com refino entregue
-    refine_key = f"script_refine_pending:{user.id}"
-    pending = float(_redis.get(refine_key) or 0.0) + 0.5
-    _redis.set(refine_key, str(pending), ex=86400)
+    # Debita os 0,5 SOMENTE com refino entregue. O incremento SQL aritmetico
+    # serializa com a reserva da geracao e preserva refinamentos concorrentes.
+    pending_result = await db.execute(
+        update(User)
+        .where(User.id == user.id)
+        .values(script_refine_pending=User.script_refine_pending + 0.5)
+        .returning(User.script_refine_pending)
+    )
+    pending = float(pending_result.scalar_one())
+    await db.commit()
     return {"script": refined, "refine_cost": 0.5, "refine_pending": pending}
 
 
@@ -1432,6 +1480,7 @@ async def render_video(
                     "detail": "Re-render enfileirado...",
                     "rerender_cost": operation.cost,
                     "rerender_operation_id": str(operation_id),
+                    "rerender_broker_state": "attempting",
                 },
             )
             task_rerender_video.delay(job_id, str(operation_id))
@@ -1450,8 +1499,14 @@ async def render_video(
                 _update_rerender_terminal(
                     job_id,
                     str(operation_id),
-                    status="completed",
-                    detail="Re-render nao pode ser enfileirado; credito estornado.",
+                    status="completed" if refunded else "refund_pending",
+                    error="" if refunded else "Estorno persistente pendente.",
+                    detail=(
+                        "Re-render nao pode ser enfileirado; credito estornado."
+                        if refunded
+                        else "Re-render nao foi enfileirado; estorno pendente para reconciliacao."
+                    ),
+                    broker_state="failed",
                 )
             except Exception:  # noqa: BLE001 - DB is authoritative
                 logger.exception("Falha ao publicar compensation Redis rerender job=%s", job_id)
@@ -1467,7 +1522,28 @@ async def render_video(
             logger.error("Dispatch de rerender compensado job=%s op=%s: %s", job_id, operation_id, exc)
             raise HTTPException(
                 status_code=503,
-                detail="Nao foi possivel iniciar o re-render agora. Seu credito foi estornado, tente novamente.",
+                detail=(
+                    "Nao foi possivel iniciar o re-render agora. Seu credito foi estornado, tente novamente."
+                    if refunded
+                    else "Nao foi possivel iniciar o re-render agora. O estorno ficou pendente para reconciliacao."
+                ),
+            )
+
+        try:
+            _redis.hset(
+                f"job:{job_id}",
+                mapping={
+                    "rerender_broker_accepted_at": datetime.now(timezone.utc).isoformat(),
+                    "rerender_broker_accepted_operation_id": str(operation_id),
+                    "rerender_broker_state": "accepted",
+                },
+            )
+        except Exception:  # noqa: BLE001 - broker already accepted; DB marker is the next durable proof
+            logger.critical(
+                "Falha ao registrar evidencia Redis de broker aceito job=%s op=%s",
+                job_id,
+                operation_id,
+                exc_info=True,
             )
 
         try:

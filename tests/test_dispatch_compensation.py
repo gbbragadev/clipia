@@ -6,7 +6,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import select, update
 
 from app.api import routes as api_routes
 from app.db.models import Job, User
@@ -29,7 +29,7 @@ def _generate_payload() -> dict:
 
 
 @pytest.mark.asyncio
-async def test_generate_initial_redis_failure_refunds_and_restores_refine_snapshot(
+async def test_generate_initial_redis_failure_refunds_persisted_refine_reservation(
     client,
     verified_user,
     auth_headers,
@@ -38,8 +38,10 @@ async def test_generate_initial_redis_failure_refunds_and_restores_refine_snapsh
     storage_dir: Path,
     monkeypatch,
 ):
-    refine_key = f"script_refine_pending:{verified_user.id}"
-    app.state.fake_redis.set(refine_key, "1.5", ex=86400)
+    async with test_db["session_factory"]() as session:
+        persisted_user = await session.get(User, verified_user.id)
+        persisted_user.script_refine_pending = 1.5
+        await session.commit()
     original_hset = app.state.fake_redis.hset
     calls = 0
 
@@ -65,7 +67,7 @@ async def test_generate_initial_redis_failure_refunds_and_restores_refine_snapsh
     assert user.credits == 5
     assert job.status == "failed"
     assert job.generation_refunded_at is not None
-    assert app.state.fake_redis.get(refine_key) == "1.5"
+    assert user.script_refine_pending == 1.5
     assert not (storage_dir / "jobs" / str(job.id)).exists()
     app.state.dispatch_pipeline.assert_not_called()
 
@@ -98,7 +100,7 @@ async def test_generate_dispatch_failure_refunds_and_cleans_custom_script(
 
 
 @pytest.mark.asyncio
-async def test_generate_marker_failure_after_broker_acceptance_does_not_refund(
+async def test_generate_marker_failure_after_broker_acceptance_reconciles_without_refund(
     client,
     verified_user,
     auth_headers,
@@ -106,6 +108,8 @@ async def test_generate_marker_failure_after_broker_acceptance_does_not_refund(
     test_db,
     monkeypatch,
 ):
+    original_marker = api_routes.mark_generation_dispatched
+
     async def fail_marker(*_args, **_kwargs):
         raise RuntimeError("database unavailable after dispatch")
 
@@ -126,6 +130,78 @@ async def test_generate_marker_failure_after_broker_acceptance_does_not_refund(
     assert job.generation_refunded_at is None
     assert job.generation_dispatched_at is None
     app.state.dispatch_pipeline.assert_called_once()
+    accepted_at = app.state.fake_redis.hget(f"job:{job.id}", "generation_broker_accepted_at")
+    assert accepted_at
+
+    async with test_db["session_factory"]() as session:
+        persisted = await session.get(Job, job.id)
+        persisted.created_at = datetime.now(timezone.utc) - timedelta(hours=7)
+        await session.commit()
+    monkeypatch.setattr(api_routes, "mark_generation_dispatched", original_marker)
+    db_engine_module = importlib.import_module("app.db.engine")
+    monkeypatch.setattr(db_engine_module, "worker_session", test_db["session_factory"])
+
+    result = await worker_tasks._reconcile_undispatched_job_operations_async()
+
+    async with test_db["session_factory"]() as session:
+        persisted = await session.get(Job, job.id)
+        persisted_user = await session.get(User, verified_user.id)
+    assert result["generation_backfilled"] == 1
+    assert result["generation_refunded"] == 0
+    assert persisted.generation_dispatched_at is not None
+    assert persisted.generation_refunded_at is None
+    assert persisted_user.credits == 4
+
+
+@pytest.mark.asyncio
+async def test_generate_double_marker_failure_remains_ambiguous_without_refund(
+    client,
+    verified_user,
+    auth_headers,
+    app,
+    test_db,
+    monkeypatch,
+):
+    async def fail_db_marker(*_args, **_kwargs):
+        raise RuntimeError("database marker unavailable")
+
+    original_hset = app.state.fake_redis.hset
+
+    def fail_accepted_hset(key: str, mapping: dict):
+        if "generation_broker_accepted_at" in mapping:
+            raise RuntimeError("redis acceptance marker unavailable")
+        return original_hset(key, mapping)
+
+    monkeypatch.setattr(api_routes, "mark_generation_dispatched", fail_db_marker)
+    monkeypatch.setattr(app.state.fake_redis, "hset", fail_accepted_hset)
+
+    response = await client.post(
+        "/api/v1/generate",
+        headers=auth_headers(verified_user),
+        json=_generate_payload(),
+    )
+
+    assert response.status_code == 202
+    async with test_db["session_factory"]() as session:
+        job = (await session.execute(select(Job).where(Job.user_id == verified_user.id))).scalar_one()
+        job.created_at = datetime.now(timezone.utc) - timedelta(hours=7)
+        await session.commit()
+    live = app.state.fake_redis.hgetall(f"job:{job.id}")
+    assert live.get("generation_broker_state") == "attempting"
+
+    monkeypatch.setattr(app.state.fake_redis, "hset", original_hset)
+    db_engine_module = importlib.import_module("app.db.engine")
+    monkeypatch.setattr(db_engine_module, "worker_session", test_db["session_factory"])
+    result = await worker_tasks._reconcile_undispatched_job_operations_async()
+
+    async with test_db["session_factory"]() as session:
+        persisted = await session.get(Job, job.id)
+        persisted_user = await session.get(User, verified_user.id)
+    assert result["generation_backfilled"] == 0
+    assert result["generation_refunded"] == 0
+    assert persisted.generation_dispatched_at is None
+    assert persisted.generation_refunded_at is None
+    assert persisted_user.credits == 4
 
 
 @pytest.mark.asyncio
@@ -188,36 +264,32 @@ async def test_generate_quota_reservation_failure_happens_before_debit(
 
 
 @pytest.mark.asyncio
-async def test_generate_snapshots_refine_balance_inside_user_lock(
+async def test_generate_compensation_preserves_concurrent_refine_increment(
     client,
     verified_user,
     auth_headers,
     app,
+    test_db,
     monkeypatch,
 ):
-    locked = False
-    original_get = app.state.fake_redis.get
+    async with test_db["session_factory"]() as session:
+        persisted_user = await session.get(User, verified_user.id)
+        persisted_user.script_refine_pending = 1.5
+        await session.commit()
+    original_compensate = api_routes._compensate_generation_dispatch
 
-    class RecordingLock:
-        async def __aenter__(self):
-            nonlocal locked
-            locked = True
+    async def interleave_refine(db, **kwargs):
+        async with test_db["session_factory"]() as session:
+            await session.execute(
+                update(User)
+                .where(User.id == verified_user.id)
+                .values(script_refine_pending=User.script_refine_pending + 0.5)
+            )
+            await session.commit()
+        await original_compensate(db, **kwargs)
 
-        async def __aexit__(self, *_args):
-            nonlocal locked
-            locked = False
-
-    def guarded_get(key: str):
-        if key.startswith("script_refine_pending:"):
-            assert locked, "refine snapshot must be serialized with debit and mutation"
-        return original_get(key)
-
-    def guarded_dispatch(*_args, **_kwargs):
-        assert locked, "dispatch compensation must remain serialized with its refine snapshot"
-
-    monkeypatch.setattr(api_routes, "get_lock", lambda _key: RecordingLock())
-    monkeypatch.setattr(app.state.fake_redis, "get", guarded_get)
-    app.state.dispatch_pipeline.side_effect = guarded_dispatch
+    monkeypatch.setattr(api_routes, "_compensate_generation_dispatch", interleave_refine)
+    app.state.dispatch_pipeline.side_effect = RuntimeError("broker unavailable")
 
     response = await client.post(
         "/api/v1/generate",
@@ -225,7 +297,27 @@ async def test_generate_snapshots_refine_balance_inside_user_lock(
         json={"topic": "Tema valido para lock de refino", "style": "educational", "duration_target": 30},
     )
 
-    assert response.status_code == 202
+    assert response.status_code == 503
+    async with test_db["session_factory"]() as session:
+        persisted_user = await session.get(User, verified_user.id)
+        job = (await session.execute(select(Job).where(Job.user_id == verified_user.id))).scalar_one()
+    assert persisted_user.credits == 5
+    assert persisted_user.script_refine_pending == 2.0
+    assert job.refine_credit_cost == 1
+    assert job.generation_refunded_at is not None
+
+    async with test_db["session_factory"]() as session:
+        replay = await job_operations.refund_generation(
+            session,
+            job.id,
+            status="failed",
+            error="replay",
+        )
+        await session.commit()
+        replay_user = await session.get(User, verified_user.id)
+    assert replay is False
+    assert replay_user.credits == 5
+    assert replay_user.script_refine_pending == 2.0
 
 
 @pytest.mark.asyncio
@@ -269,6 +361,7 @@ async def test_render_initial_redis_failure_refunds_exact_operation_snapshot(
 async def test_render_marker_failure_after_broker_acceptance_does_not_refund(
     client,
     db_session,
+    test_db,
     verified_user,
     auth_headers,
     job_factory,
@@ -278,6 +371,8 @@ async def test_render_marker_failure_after_broker_acceptance_does_not_refund(
 ):
     job = await job_factory(status="completed", pending_credits=1.5)
     (storage_dir / "jobs" / str(job.id)).mkdir(parents=True)
+
+    original_marker = api_routes.mark_rerender_dispatched
 
     async def fail_marker(*_args, **_kwargs):
         raise RuntimeError("database unavailable after dispatch")
@@ -296,6 +391,137 @@ async def test_render_marker_failure_after_broker_acceptance_does_not_refund(
     assert persisted_job.rerender_state == "debited"
     assert persisted_job.rerender_dispatched_at is None
     app.state.rerender_task.delay.assert_called_once_with(str(job.id), str(persisted_job.rerender_operation_id))
+    accepted_operation = app.state.fake_redis.hget(f"job:{job.id}", "rerender_broker_accepted_operation_id")
+    assert accepted_operation == str(persisted_job.rerender_operation_id)
+
+    persisted_job.rerender_debited_at = datetime.now(timezone.utc) - timedelta(hours=7)
+    await db_session.commit()
+    monkeypatch.setattr(api_routes, "mark_rerender_dispatched", original_marker)
+    db_engine_module = importlib.import_module("app.db.engine")
+    monkeypatch.setattr(db_engine_module, "worker_session", test_db["session_factory"])
+
+    result = await worker_tasks._reconcile_undispatched_job_operations_async()
+
+    db_session.expire_all()
+    persisted_job = await db_session.get(Job, job.id)
+    persisted_user = await db_session.get(User, verified_user.id)
+    assert result["rerender_backfilled"] == 1
+    assert result["rerender_refunded"] == 0
+    assert persisted_job.rerender_dispatched_at is not None
+    assert persisted_job.rerender_state == "dispatched"
+    assert persisted_user.credits == 3
+
+
+@pytest.mark.asyncio
+async def test_rerender_double_marker_failure_remains_ambiguous_without_refund(
+    client,
+    db_session,
+    test_db,
+    verified_user,
+    auth_headers,
+    job_factory,
+    app,
+    storage_dir: Path,
+    monkeypatch,
+):
+    job = await job_factory(status="completed", pending_credits=1.5)
+    (storage_dir / "jobs" / str(job.id)).mkdir(parents=True)
+
+    async def fail_db_marker(*_args, **_kwargs):
+        raise RuntimeError("database marker unavailable")
+
+    original_hset = app.state.fake_redis.hset
+
+    def fail_accepted_hset(key: str, mapping: dict):
+        if "rerender_broker_accepted_at" in mapping:
+            raise RuntimeError("redis acceptance marker unavailable")
+        return original_hset(key, mapping)
+
+    monkeypatch.setattr(api_routes, "mark_rerender_dispatched", fail_db_marker)
+    monkeypatch.setattr(api_routes, "_send_admin_alert", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(app.state.fake_redis, "hset", fail_accepted_hset)
+
+    response = await client.post(f"/api/v1/jobs/{job.id}/render", headers=auth_headers(verified_user))
+
+    assert response.status_code == 200
+    db_session.expire_all()
+    persisted = await db_session.get(Job, job.id)
+    persisted.rerender_debited_at = datetime.now(timezone.utc) - timedelta(hours=7)
+    operation_id = persisted.rerender_operation_id
+    await db_session.commit()
+    live = app.state.fake_redis.hgetall(f"job:{job.id}")
+    assert live.get("rerender_broker_state") == "attempting"
+
+    monkeypatch.setattr(app.state.fake_redis, "hset", original_hset)
+    db_engine_module = importlib.import_module("app.db.engine")
+    monkeypatch.setattr(db_engine_module, "worker_session", test_db["session_factory"])
+    result = await worker_tasks._reconcile_undispatched_job_operations_async()
+
+    db_session.expire_all()
+    persisted = await db_session.get(Job, job.id)
+    persisted_user = await db_session.get(User, verified_user.id)
+    assert result["rerender_backfilled"] == 0
+    assert result["rerender_refunded"] == 0
+    assert persisted.rerender_operation_id == operation_id
+    assert persisted.rerender_dispatched_at is None
+    assert persisted.rerender_state == "debited"
+    assert persisted_user.credits == 3
+
+
+@pytest.mark.asyncio
+async def test_render_failed_dispatch_and_failed_refund_remains_reconcilable(
+    client,
+    db_session,
+    test_db,
+    verified_user,
+    auth_headers,
+    job_factory,
+    app,
+    storage_dir: Path,
+    monkeypatch,
+):
+    job = await job_factory(status="completed", pending_credits=1.5)
+    (storage_dir / "jobs" / str(job.id)).mkdir(parents=True)
+    original_refund = api_routes.refund_rerender
+
+    async def fail_refund(*_args, **_kwargs):
+        raise RuntimeError("database unavailable during refund")
+
+    monkeypatch.setattr(api_routes, "refund_rerender", fail_refund)
+    app.state.rerender_task.delay.side_effect = RuntimeError("broker unavailable")
+
+    response = await client.post(f"/api/v1/jobs/{job.id}/render", headers=auth_headers(verified_user))
+
+    assert response.status_code == 503
+    assert "estornado" not in response.json()["detail"].lower()
+    live = app.state.fake_redis.hgetall(f"job:{job.id}")
+    assert live.get("status") == "refund_pending"
+    assert "rerender_broker_accepted_operation_id" not in live
+    db_session.expire_all()
+    persisted_job = await db_session.get(Job, job.id)
+    persisted_user = await db_session.get(User, verified_user.id)
+    assert persisted_job.rerender_state == "debited"
+    assert persisted_job.rerender_dispatched_at is None
+    assert persisted_user.credits == 3
+
+    persisted_job.rerender_debited_at = datetime.now(timezone.utc) - timedelta(hours=7)
+    await db_session.commit()
+    monkeypatch.setattr(api_routes, "refund_rerender", original_refund)
+    app.state.rerender_task.delay.side_effect = None
+    db_engine_module = importlib.import_module("app.db.engine")
+    monkeypatch.setattr(db_engine_module, "worker_session", test_db["session_factory"])
+
+    result = await worker_tasks._reconcile_undispatched_job_operations_async()
+
+    db_session.expire_all()
+    persisted_job = await db_session.get(Job, job.id)
+    persisted_user = await db_session.get(User, verified_user.id)
+    assert result["rerender_backfilled"] == 0
+    assert result["rerender_refunded"] == 1
+    assert persisted_job.rerender_state == "refunded"
+    assert persisted_job.rerender_dispatched_at is None
+    assert persisted_job.pending_credits == 1.5
+    assert persisted_user.credits == 5
 
 
 @pytest.mark.asyncio
@@ -583,3 +809,29 @@ def test_celery_beat_schedules_undispatched_reconciler_every_ten_minutes():
 
     assert entry["task"] == "reconcile_undispatched_job_operations"
     assert entry["schedule"].total_seconds() == 10 * 60
+
+
+def test_dispatch_evidence_rejects_acknowledgement_older_than_operation():
+    operation_started_at = datetime.now(timezone.utc)
+    stale = (operation_started_at - timedelta(hours=1)).isoformat()
+    operation_id = uuid.uuid4()
+
+    assert (
+        worker_tasks._redis_has_dispatch_evidence(
+            {"generation_broker_accepted_at": stale},
+            operation_id=None,
+            operation_started_at=operation_started_at,
+        )
+        is False
+    )
+    assert (
+        worker_tasks._redis_has_dispatch_evidence(
+            {
+                "rerender_broker_accepted_at": stale,
+                "rerender_broker_accepted_operation_id": str(operation_id),
+            },
+            operation_id=operation_id,
+            operation_started_at=operation_started_at,
+        )
+        is False
+    )

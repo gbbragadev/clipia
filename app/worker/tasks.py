@@ -141,6 +141,7 @@ def _update_rerender_terminal(
     status: str,
     error: str = "",
     detail: str = "",
+    broker_state: str | None = None,
 ) -> bool:
     """Atomically publish a rerender terminal state only for the current operation."""
     key = f"job:{job_id}"
@@ -151,9 +152,12 @@ def _update_rerender_terminal(
         "progress": "1.0" if status == "completed" else "0.0",
         "error": error,
         "detail": detail,
-        "rerender_cost": "0",
         "updated_at": datetime.now(timezone.utc).isoformat(),
     }
+    if status != "refund_pending":
+        mapping["rerender_cost"] = "0"
+    if broker_state is not None:
+        mapping["rerender_broker_state"] = broker_state
     arguments = [expected_operation_id]
     for field, value in mapping.items():
         arguments.extend((field, str(value)))
@@ -850,18 +854,58 @@ UNDISPATCHED_OPERATION_ERROR = "Operacao antiga sem evidencia de dispatch; credi
 _CANCEL_FLAG_TTL_SECONDS = 24 * 60 * 60
 
 
-def _redis_has_dispatch_evidence(data: dict[str, str], *, operation_id: uuid.UUID | None) -> bool:
+def _redis_has_dispatch_evidence(
+    data: dict[str, str],
+    *,
+    operation_id: uuid.UUID | None,
+    operation_started_at: datetime | None,
+) -> bool:
+    """Accept only explicit broker acknowledgement or a fresh compatible worker heartbeat."""
+    accepted_at_key = "generation_broker_accepted_at" if operation_id is None else "rerender_broker_accepted_at"
+    accepted_at = data.get(accepted_at_key)
+    accepted_operation_id = data.get("rerender_broker_accepted_operation_id") or None
+    if accepted_at and (operation_id is None or accepted_operation_id == str(operation_id)):
+        try:
+            accepted_at_dt = datetime.fromisoformat(accepted_at)
+        except (TypeError, ValueError):
+            pass
+        else:
+            if accepted_at_dt.tzinfo is None:
+                accepted_at_dt = accepted_at_dt.replace(tzinfo=timezone.utc)
+            accepted_after_start = operation_started_at is None
+            if operation_started_at is not None:
+                accepted_start = operation_started_at
+                if accepted_start.tzinfo is None:
+                    accepted_start = accepted_start.replace(tzinfo=timezone.utc)
+                accepted_after_start = accepted_at_dt >= accepted_start
+            if accepted_after_start:
+                return True
+
     heartbeat = data.get("updated_at")
     if not heartbeat:
         return False
     try:
-        datetime.fromisoformat(heartbeat)
+        heartbeat_at = datetime.fromisoformat(heartbeat)
     except (TypeError, ValueError):
         return False
+    if heartbeat_at.tzinfo is None:
+        heartbeat_at = heartbeat_at.replace(tzinfo=timezone.utc)
+    if operation_started_at is not None:
+        if operation_started_at.tzinfo is None:
+            operation_started_at = operation_started_at.replace(tzinfo=timezone.utc)
+        if heartbeat_at < operation_started_at:
+            return False
     redis_operation_id = data.get("rerender_operation_id") or None
     if operation_id is None:
         return redis_operation_id is None and data.get("status") in {"processing", "completed"}
     return redis_operation_id == str(operation_id) and data.get("status") in {"rendering", "completed"}
+
+
+def _redis_has_ambiguous_dispatch_attempt(data: dict[str, str], *, operation_id: uuid.UUID | None) -> bool:
+    """A pre-broker intent without acceptance/rejection is unsafe to auto-refund."""
+    if operation_id is None:
+        return data.get("generation_broker_state") == "attempting"
+    return data.get("rerender_broker_state") == "attempting" and data.get("rerender_operation_id") == str(operation_id)
 
 
 async def _reconcile_undispatched_job_operations_async() -> dict[str, int]:
@@ -880,8 +924,10 @@ async def _reconcile_undispatched_job_operations_async() -> dict[str, int]:
     counts = {
         "generation_backfilled": 0,
         "generation_refunded": 0,
+        "generation_ambiguous": 0,
         "rerender_backfilled": 0,
         "rerender_refunded": 0,
+        "rerender_ambiguous": 0,
         "cancel_flags_removed": 0,
         "cancel_flags_ttl_applied": 0,
     }
@@ -897,9 +943,16 @@ async def _reconcile_undispatched_job_operations_async() -> dict[str, int]:
         )
         for job in generation_result.scalars().all():
             live = _redis.hgetall(f"job:{job.id}")
-            if _redis_has_dispatch_evidence(live, operation_id=None):
+            if _redis_has_dispatch_evidence(
+                live,
+                operation_id=None,
+                operation_started_at=job.created_at,
+            ):
                 if await mark_generation_dispatched(session, job.id):
                     counts["generation_backfilled"] += 1
+            elif _redis_has_ambiguous_dispatch_attempt(live, operation_id=None):
+                counts["generation_ambiguous"] += 1
+                logger.critical("Dispatch de geracao ambiguo job=%s; no-op seguro", job.id)
             elif await refund_generation(
                 session,
                 job.id,
@@ -927,9 +980,16 @@ async def _reconcile_undispatched_job_operations_async() -> dict[str, int]:
                 )
                 continue
             live = _redis.hgetall(f"job:{job.id}")
-            if _redis_has_dispatch_evidence(live, operation_id=operation_id):
+            if _redis_has_dispatch_evidence(
+                live,
+                operation_id=operation_id,
+                operation_started_at=job.rerender_debited_at,
+            ):
                 if await mark_rerender_dispatched(session, job.id, operation_id):
                     counts["rerender_backfilled"] += 1
+            elif _redis_has_ambiguous_dispatch_attempt(live, operation_id=operation_id):
+                counts["rerender_ambiguous"] += 1
+                logger.critical("Dispatch de rerender ambiguo job=%s op=%s; no-op seguro", job.id, operation_id)
             elif await refund_rerender(session, job.id, operation_id, require_undispatched=True):
                 counts["rerender_refunded"] += 1
 
