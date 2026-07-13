@@ -5,6 +5,7 @@ import "./globals.css";
 import FilmGrain from "@/components/FilmGrain";
 import AppProviders from "@/components/providers/AppProviders";
 import TrackingScripts from "@/components/TrackingScripts";
+import { SITE } from "@/lib/site";
 
 // Sora = display (titulos cinematograficos); GeistSans = corpo (var --font-geist-sans).
 const sora = Sora({
@@ -28,7 +29,7 @@ export const metadata: Metadata = {
     title: "ClipIA - Crie vídeos curtos com IA",
     description:
       "Transforme qualquer tema em vídeo pronto para publicar. Roteiro, narração, legendas e edição — tudo automático com IA.",
-    url: "https://clipia.com.br",
+    url: SITE.url,
     siteName: "ClipIA",
     images: [
       {
@@ -48,9 +49,7 @@ export const metadata: Metadata = {
       "Transforme qualquer tema em video pronto para publicar com IA.",
     images: ["/og-image.png"],
   },
-  metadataBase: new URL(
-    process.env.NEXT_PUBLIC_BASE_URL || "https://clipia.com.br"
-  ),
+  metadataBase: new URL(SITE.url),
 };
 
 export const viewport: Viewport = {

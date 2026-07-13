@@ -1,4 +1,18 @@
-import { strings } from '@/lib/strings'
+import type { Metadata } from 'next'
+
+import { canonicalUrl } from '@/lib/site'
+
+export const metadata: Metadata = {
+  title: 'Política de Privacidade — ClipIA',
+  description: 'Política de privacidade e tratamento de dados pessoais da plataforma ClipIA.',
+  alternates: { canonical: canonicalUrl('/privacidade') },
+  openGraph: {
+    title: 'Política de Privacidade — ClipIA',
+    description: 'Como o ClipIA trata e protege dados pessoais.',
+    url: canonicalUrl('/privacidade'),
+    type: 'website',
+  },
+}
 
 export default function PrivacidadePage() {
   return (

@@ -9,6 +9,7 @@ import { BreadcrumbSchema } from "@/components/StructuredData/BreadcrumbSchema";
 import { CinematicSection } from "@/components/ui/CinematicSection";
 import { GlowCard } from "@/components/ui/GlowCard";
 import { getAllNicheSlugs, getNicheBySlug } from "@/lib/niches";
+import { getShowcaseVideosForNiche } from "@/lib/showcase";
 
 const BASE = "https://clipia.com.br";
 
@@ -50,6 +51,7 @@ export default async function NichoPage({
   const { nicho } = await params;
   const n = getNicheBySlug(nicho);
   if (!n) notFound();
+  const videos = getShowcaseVideosForNiche(n.slug);
 
   return (
     <div className="min-h-screen bg-[#0b0d15]">
@@ -90,7 +92,7 @@ export default async function NichoPage({
             </h2>
             <p className="mt-3 text-slate-400">Vídeos reais gerados e editados na plataforma. Passe o mouse para ouvir.</p>
           </div>
-          <NicheGallery niche={n.slug} />
+          <NicheGallery videos={videos} />
         </CinematicSection>
 
         {/* Texto SEO (intro) */}

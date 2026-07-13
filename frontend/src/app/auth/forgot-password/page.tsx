@@ -69,7 +69,7 @@ export default function ForgotPasswordPage() {
             disabled={loading}
             className="btn-primary w-full py-2.5 rounded-lg font-semibold disabled:opacity-50"
           >
-            {loading ? "Enviando..." : "Enviar codigo"}
+            {loading ? "Enviando..." : "Enviar código"}
           </button>
         </form>
 

@@ -7,6 +7,16 @@ const nextConfig: NextConfig = {
   // scripts/restart-frontend.ps1 — rebuild in-place derruba o next start vivo).
   distDir: process.env.NEXT_DIST_DIR || ".next",
   allowedDevOrigins: ["autoshorts.gbbragadev.com", "clipia.com.br", "www.clipia.com.br"],
+  async redirects() {
+    return [
+      {
+        source: "/:path*",
+        has: [{ type: "host", value: "www\\.clipia\\.com\\.br" }],
+        destination: "https://clipia.com.br/:path*",
+        permanent: true,
+      },
+    ];
+  },
   async headers() {
     // Headers de seguranca espelham a politica do backend (app/main.py) + anti-clickjacking.
     // CSP usa apenas frame-ancestors para nao quebrar os scripts/styles inline do Next/Remotion.

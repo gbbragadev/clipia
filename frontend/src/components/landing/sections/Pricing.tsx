@@ -19,7 +19,7 @@ export function Pricing() {
   const ab = useAb();
 
   return (
-    <section id="preco" className="relative scroll-mt-20 py-20 sm:py-24">
+    <section id="preco" className="relative overflow-clip scroll-mt-20 py-20 sm:py-24">
       {/* fundo */}
       <div aria-hidden className="pointer-events-none absolute inset-0 -z-10">
         <div

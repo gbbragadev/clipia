@@ -1,10 +1,18 @@
 import type { Metadata } from 'next'
 
 import { SUPPORT_EMAIL, SUPPORT_MAILTO, SUPPORT_WHATSAPP_URL } from '@/lib/support'
+import { canonicalUrl } from '@/lib/site'
 
 export const metadata: Metadata = {
   title: 'Suporte — ClipIA',
   description: 'Central de ajuda do ClipIA: perguntas frequentes e canais de contato (e-mail e WhatsApp).',
+  alternates: { canonical: canonicalUrl('/suporte') },
+  openGraph: {
+    title: 'Suporte — ClipIA',
+    description: 'Central de ajuda do ClipIA: perguntas frequentes e canais de contato.',
+    url: canonicalUrl('/suporte'),
+    type: 'website',
+  },
 }
 
 const FAQS = [

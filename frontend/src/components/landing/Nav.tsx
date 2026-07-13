@@ -85,8 +85,10 @@ export function Nav() {
       <div
         id="menu-mobile"
         className={cn(
-          "overflow-hidden border-t border-white/8 bg-ink/95 backdrop-blur-xl transition-[max-height,opacity] duration-300 lg:hidden",
-          open ? "max-h-[26rem] opacity-100" : "max-h-0 opacity-0"
+          "border-t border-white/8 bg-ink/95 backdrop-blur-xl transition-[max-height,opacity] duration-300 lg:hidden",
+          open
+            ? "max-h-[calc(100dvh-4rem)] overflow-y-auto overscroll-y-contain opacity-100"
+            : "max-h-0 overflow-y-hidden opacity-0"
         )}
       >
         <div className="space-y-1 px-5 py-4">
