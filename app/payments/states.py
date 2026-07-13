@@ -57,6 +57,19 @@ def canonical_payment_state(status: str | None, payment_state: str | None) -> st
     return max(candidates, key=_PRECEDENCE.__getitem__)
 
 
+def canonical_payment_state_or_invalid(status: str | None, payment_state: str | None) -> str:
+    """Resolve read-only diagnostics without hiding corrupt persisted values.
+
+    Financial mutations keep using :func:`canonical_payment_state` and fail
+    closed. Diagnostics may expose ``__invalid__`` instead of silently treating
+    an unsupported rolling-deploy row as pending.
+    """
+    try:
+        return canonical_payment_state(status, payment_state)
+    except ValueError:
+        return "__invalid__"
+
+
 def payment_state_values(state: str) -> dict[str, str]:
     canonical = _normalize(state)
     if canonical not in CANONICAL_PAYMENT_STATES:

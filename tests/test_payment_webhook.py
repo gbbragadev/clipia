@@ -31,7 +31,7 @@ async def test_checkout_creates_pending_purchase(client, db_session, verified_us
                     "status": 201,
                     "response": {
                         "id": preference_id,
-                        "init_point": ("https://www.mercadopago.com/mla/checkout/start?" f"pref_id={preference_id}"),
+                        "init_point": (f"https://www.mercadopago.com/mla/checkout/start?pref_id={preference_id}"),
                     },
                 }
 
@@ -83,7 +83,7 @@ async def test_checkout_rejects_invalid_package(client, verified_user, auth_head
         headers=auth_headers(verified_user),
         json={"package": "bad-package"},
     )
-    assert response.status_code == 400, "Invalid credit packages must be rejected."
+    assert response.status_code == 422, "Invalid credit packages must be rejected by the request schema."
 
 
 @pytest.mark.asyncio

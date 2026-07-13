@@ -12,7 +12,7 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import FileResponse
 from slowapi import Limiter
-from sqlalchemy import func, select, update
+from sqlalchemy import func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.security import get_owned_job
@@ -36,7 +36,10 @@ from app.models import (
     WaitlistRequest,
 )
 from app.observability import record_credit_metric
-from app.payments.states import canonical_payment_state, canonical_payment_state_expression
+from app.payments.states import (
+    canonical_payment_state_expression,
+    canonical_payment_state_or_invalid,
+)
 from app.pricing import get_generation_credit_cost
 from app.redis_pool import get_redis
 from app.services.dispatch_outbox import DispatchPayload, create_dispatch, publish_dispatch
@@ -2078,8 +2081,11 @@ async def admin_economy(
     _admin_user: User = Depends(get_current_admin_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Margem real da operação: telemetria consolidada no finalize de cada job.
-    Jobs antigos (sem telemetry) ficam de fora — a visão cresce com o uso."""
+    """Estimativa operacional baseada na telemetria disponível no finalize.
+
+    Jobs sem telemetry ficam de fora e ``api_cost_usd_est`` não substitui
+    faturas, câmbio, impostos, storage, tráfego ou suporte.
+    """
     result = await db.execute(select(Job).where(Job.telemetry.isnot(None)).order_by(Job.created_at.desc()).limit(100))
     jobs = result.scalars().all()
 
@@ -2116,7 +2122,13 @@ async def admin_economy(
         agg["avg_cost_usd"] = round(agg["api_cost_usd_est"] / n, 4)
         agg["avg_seconds"] = round(agg["total_seconds"] / n, 1)
 
-    return {"jobs": items, "by_template": by_template}
+    return {
+        "basis": "estimate",
+        "telemetry_jobs": len(items),
+        "limitations": "Exclui jobs sem telemetria e nao representa COGS real reconciliado com faturas.",
+        "jobs": items,
+        "by_template": by_template,
+    }
 
 
 @router.get(
@@ -2141,23 +2153,47 @@ async def admin_dashboard(
     users_result = await db.execute(select(User).where(User.created_at >= window_start))
     users_in_range = list(users_result.scalars().all())
 
-    purchases_result = await db.execute(select(CreditPurchase).where(CreditPurchase.created_at >= window_start))
-    purchases_in_range = list(purchases_result.scalars().all())
-
-    jobs_result = await db.execute(select(Job).where(Job.created_at >= window_start))
-    jobs_in_range = list(jobs_result.scalars().all())
-
-    # Aggregate totals via SQL — no need to load all rows
-    purchase_states = {
-        purchase.id: canonical_payment_state(purchase.status, purchase.payment_state) for purchase in purchases_in_range
-    }
-    approved_purchases = [purchase for purchase in purchases_in_range if purchase_states[purchase.id] == "paid"]
-    pending_purchases = [purchase for purchase in purchases_in_range if purchase_states[purchase.id] == "pending"]
-
     canonical_state_sql = canonical_payment_state_expression(
         CreditPurchase.status,
         CreditPurchase.payment_state,
     )
+    purchases_result = await db.execute(
+        select(CreditPurchase, canonical_state_sql.label("canonical_state")).where(
+            or_(CreditPurchase.created_at >= window_start, CreditPurchase.paid_at >= window_start)
+        )
+    )
+    purchase_rows = list(purchases_result.all())
+    purchases_in_range = [row[0] for row in purchase_rows]
+    purchase_states = {row[0].id: row[1] for row in purchase_rows}
+
+    jobs_result = await db.execute(select(Job).where(Job.created_at >= window_start))
+    jobs_in_range = list(jobs_result.scalars().all())
+
+    dispatches_result = await db.execute(select(JobDispatch).where(JobDispatch.created_at >= window_start))
+    dispatches_in_range = list(dispatches_result.scalars().all())
+
+    def in_window(value: datetime | None) -> bool:
+        utc_value = _coerce_utc(value)
+        return utc_value is not None and utc_value >= window_start
+
+    created_purchases = [purchase for purchase in purchases_in_range if in_window(purchase.created_at)]
+    approved_purchases = [
+        purchase
+        for purchase in purchases_in_range
+        if purchase_states[purchase.id] == "paid" and in_window(purchase.paid_at)
+    ]
+    pending_purchases = [purchase for purchase in created_purchases if purchase_states[purchase.id] == "pending"]
+    refunded_purchases = [
+        purchase
+        for purchase in purchases_in_range
+        if purchase_states[purchase.id] == "refunded" and in_window(purchase.paid_at)
+    ]
+    invalid_purchases = [
+        purchase
+        for purchase in purchases_in_range
+        if purchase_states[purchase.id] == "__invalid__"
+        or (purchase_states[purchase.id] in {"paid", "refunded"} and purchase.paid_at is None)
+    ]
 
     approved_user_ids_result = await db.execute(
         select(CreditPurchase.user_id).where(canonical_state_sql == "paid").distinct()
@@ -2198,36 +2234,64 @@ async def admin_dashboard(
         if bucket:
             users_by_day[bucket] += 1
 
-    for purchase in purchases_in_range:
-        bucket = _bucket_key(purchase.created_at)
+    for purchase in approved_purchases:
+        bucket = _bucket_key(purchase.paid_at)
         if bucket:
-            if purchase_states[purchase.id] == "paid":
-                revenue_by_day[bucket] += purchase.price_brl / 100
-                approved_orders_by_day[bucket] += 1
+            revenue_by_day[bucket] += purchase.price_brl / 100
+            approved_orders_by_day[bucket] += 1
 
+    relevant_purchase_ids = {purchase.id for purchase in [*created_purchases, *approved_purchases, *refunded_purchases]}
+    for purchase in purchases_in_range:
+        if purchase.id not in relevant_purchase_ids:
+            continue
         mix = package_mix.setdefault(
             purchase.package_name,
             {
                 "package_name": purchase.package_name,
                 "orders": 0,
+                "checkouts": 0,
+                "pending_orders": 0,
+                "paid_orders": 0,
+                "refunded_orders": 0,
+                "pending_checkout_value_brl": 0.0,
+                "paid_gross_revenue_brl": 0.0,
+                "refunded_value_brl": 0.0,
                 "approved_revenue_brl": 0.0,
                 "credits_sold": 0,
             },
         )
-        mix["orders"] += 1
-        if purchase_states[purchase.id] == "paid":
-            mix["approved_revenue_brl"] = _round2(float(mix["approved_revenue_brl"]) + (purchase.price_brl / 100))
-            mix["credits_sold"] = int(mix["credits_sold"]) + purchase.credits_amount
+        if purchase in created_purchases:
+            mix["orders"] = int(mix["orders"]) + 1
+            mix["checkouts"] = int(mix["checkouts"]) + 1
+        if purchase in pending_purchases:
+            mix["pending_orders"] = int(mix["pending_orders"]) + 1
+            mix["pending_checkout_value_brl"] = _round2(
+                float(mix["pending_checkout_value_brl"]) + (purchase.price_brl / 100)
+            )
+        if purchase in approved_purchases:
+            paid_value = _round2(float(mix["paid_gross_revenue_brl"]) + (purchase.price_brl / 100))
+            mix["paid_orders"] = int(mix["paid_orders"]) + 1
+            mix["paid_gross_revenue_brl"] = paid_value
+            mix["approved_revenue_brl"] = paid_value
+            mix["credits_sold"] = int(mix["credits_sold"]) + purchase.credits_amount + purchase.bonus_credits
+        if purchase in refunded_purchases:
+            mix["refunded_orders"] = int(mix["refunded_orders"]) + 1
+            mix["refunded_value_brl"] = _round2(float(mix["refunded_value_brl"]) + (purchase.price_brl / 100))
 
     for job in jobs_in_range:
         bucket = _bucket_key(job.created_at)
         if bucket:
             jobs_by_day[bucket] += 1
 
-    settled_jobs = [job for job in jobs_in_range if job.status in {"completed", "failed"}]
-    success_rate = 0.0
-    if settled_jobs:
-        success_rate = _round2((sum(1 for job in settled_jobs if job.status == "completed") / len(settled_jobs)) * 100)
+    delivered_dispatches = [dispatch for dispatch in dispatches_in_range if dispatch.state == "completed"]
+    cancelled_dispatches = [dispatch for dispatch in dispatches_in_range if dispatch.state == "cancelled"]
+    active_dispatches = [
+        dispatch for dispatch in dispatches_in_range if dispatch.state in {"pending", "published", "claimed"}
+    ]
+    terminal_dispatches = [*delivered_dispatches, *cancelled_dispatches]
+    operation_success_rate = (
+        _round2((len(delivered_dispatches) / len(terminal_dispatches)) * 100) if terminal_dispatches else 0.0
+    )
 
     avg_pending_credits = (
         _round2(sum(pending_credits_jobs) / len(pending_credits_jobs)) if pending_credits_jobs else 0.0
@@ -2237,11 +2301,13 @@ async def admin_dashboard(
 
     approved_revenue_brl = _round2(sum(purchase.price_brl for purchase in approved_purchases) / 100)
     pending_revenue_brl = _round2(sum(purchase.price_brl for purchase in pending_purchases) / 100)
+    refunded_value_brl = _round2(sum(purchase.price_brl for purchase in refunded_purchases) / 100)
     approved_orders = len(approved_purchases)
     average_ticket_brl = _round2(approved_revenue_brl / approved_orders) if approved_orders else 0.0
     verified_users = sum(1 for user in users_in_range if user.email_verified)
-    paying_users = len({str(purchase.user_id) for purchase in approved_purchases})
     registered = len(users_in_range)
+    cohort_user_ids = {str(user.id) for user in users_in_range}
+    paying_users = len(cohort_user_ids & approved_user_ids)
     verification_rate = _round2((verified_users / registered) * 100) if registered else 0.0
     payer_conversion_rate = _round2((paying_users / registered) * 100) if registered else 0.0
 
@@ -2250,17 +2316,25 @@ async def admin_dashboard(
         "window_start": window_start.date().isoformat(),
         "window_end": now.date().isoformat(),
         "summary": {
+            "paid_gross_revenue_brl": approved_revenue_brl,
+            "pending_checkout_value_brl": pending_revenue_brl,
+            "refunded_value_brl": refunded_value_brl,
+            "refund_adjustment_brl": -refunded_value_brl,
             "approved_revenue_brl": approved_revenue_brl,
             "pending_revenue_brl": pending_revenue_brl,
             "approved_orders": approved_orders,
             "pending_orders": len(pending_purchases),
+            "refunded_orders": len(refunded_purchases),
+            "invalid_purchase_rows": len(invalid_purchases),
             "average_ticket_brl": average_ticket_brl,
             "new_users": registered,
             "verified_users": verified_users,
             "paying_users": paying_users,
             "active_jobs": int(current_job_statuses["queued"] + current_job_statuses["processing"]),
-            "credits_sold": int(sum(purchase.credits_amount for purchase in approved_purchases)),
-            "credits_consumed": int(len(jobs_in_range)),
+            "credits_sold": int(
+                sum(purchase.credits_amount + purchase.bonus_credits for purchase in approved_purchases)
+            ),
+            "credits_consumed": int(sum(dispatch.debited_credits for dispatch in delivered_dispatches)),
         },
         "timeseries": {
             "revenue_by_day": [{"date": date, "value": _round2(value)} for date, value in revenue_by_day.items()],
@@ -2282,7 +2356,19 @@ async def admin_dashboard(
             "processing_jobs": int(current_job_statuses["processing"]),
             "completed_jobs": int(current_job_statuses["completed"]),
             "failed_jobs": int(current_job_statuses["failed"]),
-            "success_rate": success_rate,
+            "success_rate": operation_success_rate,
+            "operation_success_rate": operation_success_rate,
+            "delivered_operations": len(delivered_dispatches),
+            "delivered_generation_operations": sum(
+                1 for dispatch in delivered_dispatches if dispatch.kind == "generation"
+            ),
+            "delivered_rerender_operations": sum(1 for dispatch in delivered_dispatches if dispatch.kind == "rerender"),
+            "cancelled_generation_operations": sum(
+                1 for dispatch in cancelled_dispatches if dispatch.kind == "generation"
+            ),
+            "cancelled_rerender_operations": sum(1 for dispatch in cancelled_dispatches if dispatch.kind == "rerender"),
+            "active_generation_operations": sum(1 for dispatch in active_dispatches if dispatch.kind == "generation"),
+            "active_rerender_operations": sum(1 for dispatch in active_dispatches if dispatch.kind == "rerender"),
             "avg_pending_credits": avg_pending_credits,
             **storage_stats,
         },
@@ -2311,7 +2397,7 @@ async def admin_dashboard(
                     "package_name": purchase.package_name,
                     "price_brl": purchase.price_brl,
                     "credits_amount": purchase.credits_amount,
-                    "status": canonical_payment_state(purchase.status, purchase.payment_state),
+                    "status": canonical_payment_state_or_invalid(purchase.status, purchase.payment_state),
                     "created_at": purchase.created_at.isoformat() if purchase.created_at else None,
                     "paid_at": purchase.paid_at.isoformat() if purchase.paid_at else None,
                 }
@@ -2454,7 +2540,7 @@ async def admin_list_purchases(
                 "bonus_credits": p.bonus_credits,
                 "price_brl": p.price_brl,
                 "provider": p.provider,
-                "status": canonical_payment_state(p.status, p.payment_state),
+                "status": canonical_payment_state_or_invalid(p.status, p.payment_state),
                 "created_at": p.created_at.isoformat() if p.created_at else None,
                 "paid_at": p.paid_at.isoformat() if p.paid_at else None,
             }

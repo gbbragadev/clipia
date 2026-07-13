@@ -1,9 +1,10 @@
+import uuid
 from datetime import datetime, timedelta, timezone
 
 import pytest
 from sqlalchemy import update
 
-from app.db.models import CreditPurchase, Job, User
+from app.db.models import CreditPurchase, Job, JobDispatch, User
 
 
 def _write_file(path, size: int) -> None:
@@ -39,6 +40,40 @@ async def test_admin_dashboard_aggregates_finance_funnel_operations_and_recent_a
     completed_job = await job_factory(user_id=verified_user.id, status="completed", pending_credits=2.0)
     failed_job = await job_factory(user_id=other_verified_user.id, status="failed")
     old_job = await job_factory(user_id=verified_user.id, status="completed")
+
+    completed_dispatch = JobDispatch(
+        job_id=completed_job.id,
+        operation_id=completed_job.id,
+        kind="generation",
+        payload={},
+        debited_credits=3,
+        state="completed",
+    )
+    failed_dispatch = JobDispatch(
+        job_id=failed_job.id,
+        operation_id=failed_job.id,
+        kind="generation",
+        payload={},
+        debited_credits=2,
+        state="cancelled",
+    )
+    queued_dispatch = JobDispatch(
+        job_id=queued_job.id,
+        operation_id=queued_job.id,
+        kind="generation",
+        payload={},
+        debited_credits=1,
+        state="pending",
+    )
+    processing_dispatch = JobDispatch(
+        job_id=processing_job.id,
+        operation_id=uuid.uuid4(),
+        kind="rerender",
+        payload={},
+        debited_credits=1,
+        state="claimed",
+    )
+    db_session.add_all([completed_dispatch, failed_dispatch, queued_dispatch, processing_dispatch])
 
     now = datetime.now(timezone.utc)
     recent_created = now - timedelta(days=2)
@@ -95,8 +130,9 @@ async def test_admin_dashboard_aggregates_finance_funnel_operations_and_recent_a
     assert body["summary"]["verified_users"] == 1
     assert body["summary"]["paying_users"] == 1
     assert body["summary"]["active_jobs"] == 2
-    assert body["summary"]["credits_sold"] == 10
-    assert body["summary"]["credits_consumed"] == 4
+    expected_credits_sold = approved_purchase.credits_amount + approved_purchase.bonus_credits
+    assert body["summary"]["credits_sold"] == expected_credits_sold
+    assert body["summary"]["credits_consumed"] == 3
 
     assert body["funnel"]["registered"] == 2
     assert body["funnel"]["verified"] == 1
@@ -117,7 +153,7 @@ async def test_admin_dashboard_aggregates_finance_funnel_operations_and_recent_a
     package_mix = {item["package_name"]: item for item in body["package_mix"]}
     assert package_mix["starter"]["orders"] == 1
     assert package_mix["starter"]["approved_revenue_brl"] == 19.9
-    assert package_mix["starter"]["credits_sold"] == 10
+    assert package_mix["starter"]["credits_sold"] == expected_credits_sold
     assert package_mix["popular"]["orders"] == 1
     assert package_mix["popular"]["approved_revenue_brl"] == 0.0
 
@@ -166,7 +202,7 @@ async def test_admin_dashboard_uses_canonical_payment_precedence(
     await db_session.execute(
         update(CreditPurchase)
         .where(CreditPurchase.id.in_([stale_approved.id, rolling_paid.id]))
-        .values(created_at=datetime.now(timezone.utc))
+        .values(created_at=datetime.now(timezone.utc), paid_at=datetime.now(timezone.utc))
     )
     await db_session.commit()
 

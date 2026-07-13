@@ -32,6 +32,13 @@ def test_payment_state_adapter_fails_closed_for_unknown_states():
         states.payment_state_values("mystery")
 
 
+def test_read_only_payment_state_adapter_surfaces_invalid_rows():
+    states = importlib.import_module("app.payments.states")
+
+    assert states.canonical_payment_state_or_invalid("mystery", None) == "__invalid__"
+    assert states.canonical_payment_state_or_invalid("pending", "paid") == "paid"
+
+
 def test_credit_purchase_model_declares_canonical_state_and_provider_identity_guards():
     table = CreditPurchase.__table__
 

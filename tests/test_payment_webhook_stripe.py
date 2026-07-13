@@ -50,7 +50,7 @@ async def test_checkout_rejects_invalid_provider(client, verified_user, auth_hea
         headers=auth_headers(verified_user),
         json={"package": "starter", "provider": "paypal"},
     )
-    assert response.status_code == 400, "Unknown payment providers must be rejected."
+    assert response.status_code == 422, "Unknown payment providers must be rejected by the request schema."
 
 
 def _patch_retrieve(monkeypatch, session_obj):

@@ -3,6 +3,7 @@ import os
 import re
 import uuid
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 
 import asyncpg
 import pytest
@@ -11,9 +12,10 @@ import stripe
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
+from app import observability
 from app.api.routes import _debit_credits, admin_adjust_credits
 from app.db.base import Base
-from app.db.models import CreditAdjustment, CreditPurchase, ProcessedPaymentEvent, User
+from app.db.models import CreditAdjustment, CreditPurchase, Job, JobDispatch, ProcessedPaymentEvent, User
 from app.models import AdminCreditAdjustRequest
 from app.payments.service import _apply_payment_event, process_webhook_stripe
 
@@ -328,3 +330,60 @@ async def test_postgres_provider_identity_collision_credits_only_one_purchase(po
             )
             == 1
         )
+
+
+@pytest.mark.asyncio
+async def test_postgres_authoritative_aggregates_respect_rolling_payment_precedence(
+    postgres_payment_sessions,
+    monkeypatch,
+):
+    sessions = postgres_payment_sessions
+    user = await _seed_user(sessions)
+    refunded = await _seed_purchase(
+        sessions,
+        user,
+        checkout_id=f"cs_{uuid.uuid4().hex}",
+        status="approved",
+        payment_state="refunded",
+    )
+    paid = await _seed_purchase(
+        sessions,
+        user,
+        checkout_id=f"cs_{uuid.uuid4().hex}",
+        status="pending",
+        payment_state="paid",
+    )
+    async with sessions() as session:
+        paid.bonus_credits = 2
+        paid.paid_at = datetime.now(timezone.utc)
+        refunded.paid_at = datetime.now(timezone.utc)
+        session.add_all([paid, refunded])
+        job = Job(
+            user_id=user.id,
+            topic="PostgreSQL aggregate",
+            style="educational",
+            duration_target=45,
+            status="editable",
+        )
+        session.add(job)
+        await session.flush()
+        session.add(
+            JobDispatch(
+                job_id=job.id,
+                operation_id=job.id,
+                kind="generation",
+                payload={},
+                debited_credits=3,
+                state="completed",
+            )
+        )
+        await session.commit()
+
+    @asynccontextmanager
+    async def runtime_session():
+        async with sessions() as session:
+            yield session
+
+    monkeypatch.setattr(observability, "_runtime_session", runtime_session)
+
+    assert await observability._get_credit_totals() == {"purchased": 12.0, "consumed": 3.0}

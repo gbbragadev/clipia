@@ -18,7 +18,8 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from app.auth.service import decode_access_token
 from app.config import settings
 from app.db.engine import build_engine
-from app.db.models import CreditPurchase, Job
+from app.db.models import CreditPurchase, Job, JobDispatch
+from app.payments.states import canonical_payment_state_expression
 from app.redis_pool import get_redis
 from app.worker.celery_app import celery_app
 
@@ -190,6 +191,7 @@ async def _check_celery() -> dict[str, Any]:
 async def render_metrics() -> str:
     active_jobs = await _get_active_job_counts()
     credit_totals = await _get_credit_totals()
+    process_credit_totals = _snapshot_credit_totals()
     request_counts = _snapshot_request_counts()
 
     lines = [
@@ -212,12 +214,22 @@ async def render_metrics() -> str:
     lines.extend(
         [
             "",
-            "# HELP clipia_credits_total Total credits transacted",
+            "# HELP clipia_credits_total Authoritative credits from durable database state",
             "# TYPE clipia_credits_total counter",
         ]
     )
-    for kind, amount in sorted(credit_totals.items()):
+    for kind, amount in (("credit", credit_totals["purchased"]), ("debit", credit_totals["consumed"])):
         lines.append(f'clipia_credits_total{{type="{kind}"}} {amount}')
+
+    lines.extend(
+        [
+            "",
+            "# HELP clipia_credit_mutations_process_total Process-local mutation observations; resets on restart",
+            "# TYPE clipia_credit_mutations_process_total counter",
+        ]
+    )
+    for kind, amount in sorted(process_credit_totals.items()):
+        lines.append(f'clipia_credit_mutations_process_total{{type="{kind}"}} {amount}')
 
     return "\n".join(lines) + "\n"
 
@@ -225,6 +237,11 @@ async def render_metrics() -> str:
 def _snapshot_request_counts() -> Counter[tuple[str, str, str]]:
     with _METRIC_LOCK:
         return Counter(_REQUEST_COUNTS)
+
+
+def _snapshot_credit_totals() -> Counter[str]:
+    with _METRIC_LOCK:
+        return Counter(_CREDIT_TOTALS)
 
 
 async def _get_active_job_counts() -> dict[str, int]:
@@ -243,11 +260,22 @@ async def _get_active_job_counts() -> dict[str, int]:
 
 async def _get_credit_totals() -> dict[str, float]:
     async with _runtime_session() as session:
-        purchased = await session.scalar(select(func.coalesce(func.sum(CreditPurchase.credits_amount), 0)))
-    with _METRIC_LOCK:
-        debit_total = float(_CREDIT_TOTALS.get("debit", 0))
-        bonus_total = float(_CREDIT_TOTALS.get("credit", 0))
+        canonical_state = canonical_payment_state_expression(
+            CreditPurchase.status,
+            CreditPurchase.payment_state,
+        )
+        purchased = await session.scalar(
+            select(
+                func.coalesce(
+                    func.sum(CreditPurchase.credits_amount + CreditPurchase.bonus_credits),
+                    0,
+                )
+            ).where(canonical_state == "paid")
+        )
+        consumed = await session.scalar(
+            select(func.coalesce(func.sum(JobDispatch.debited_credits), 0)).where(JobDispatch.state == "completed")
+        )
     return {
-        "credit": float(purchased or 0) + bonus_total,
-        "debit": debit_total,
+        "purchased": float(purchased or 0),
+        "consumed": float(consumed or 0),
     }
