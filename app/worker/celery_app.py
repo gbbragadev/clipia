@@ -1,3 +1,5 @@
+from datetime import timedelta
+
 from celery import Celery
 from celery.schedules import crontab
 
@@ -24,6 +26,10 @@ celery_app.conf.update(
         "cleanup-orphan-files": {
             "task": "cleanup_orphan_files",
             "schedule": crontab(hour=4, minute=30, day_of_week=0),
+        },
+        "reconcile-undispatched-job-operations": {
+            "task": "reconcile_undispatched_job_operations",
+            "schedule": timedelta(minutes=10),
         },
     },
 )

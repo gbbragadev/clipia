@@ -59,9 +59,31 @@ async def mark_generation_dispatched(session: AsyncSession, job_id: uuid.UUID | 
         select(Job).where(Job.id == job_id).with_for_update().execution_options(populate_existing=True)
     )
     job = result.scalar_one_or_none()
-    if job is None or job.generation_dispatched_at is not None:
+    if (
+        job is None
+        or job.generation_dispatched_at is not None
+        or job.generation_refunded_at is not None
+        or job.status not in {"queued", "processing", "cancelling"}
+    ):
         return False
     job.generation_dispatched_at = datetime.now(timezone.utc)
+    return True
+
+
+async def claim_generation_worker_start(session: AsyncSession, job_id: uuid.UUID | str) -> bool:
+    """Atomically allow accepted generation work unless reconciliation already refunded it."""
+    result = await session.execute(
+        select(Job).where(Job.id == job_id).with_for_update().execution_options(populate_existing=True)
+    )
+    job = result.scalar_one_or_none()
+    if (
+        job is None
+        or job.generation_refunded_at is not None
+        or job.status not in {"queued", "processing", "cancelling"}
+    ):
+        return False
+    if job.generation_dispatched_at is None:
+        job.generation_dispatched_at = datetime.now(timezone.utc)
     return True
 
 
@@ -71,6 +93,7 @@ async def refund_generation(
     *,
     status: str,
     error: str,
+    require_undispatched: bool = False,
 ) -> bool:
     """Refund an undelivered generation exactly once under a row lock."""
     result = await session.execute(
@@ -80,6 +103,7 @@ async def refund_generation(
     if (
         job is None
         or job.generation_refunded_at is not None
+        or (require_undispatched and job.generation_dispatched_at is not None)
         or job.status not in {"queued", "processing", "cancelling", "finalizing"}
         or job.video_url is not None
         or job.completed_at is not None
@@ -233,7 +257,13 @@ async def complete_rerender(session: AsyncSession, job_id: uuid.UUID | str, oper
     return True
 
 
-async def refund_rerender(session: AsyncSession, job_id: uuid.UUID | str, operation_id: uuid.UUID) -> bool:
+async def refund_rerender(
+    session: AsyncSession,
+    job_id: uuid.UUID | str,
+    operation_id: uuid.UUID,
+    *,
+    require_undispatched: bool = False,
+) -> bool:
     """Refund one exact active rerender and restore its fractional snapshot."""
     result = await session.execute(
         select(Job).where(Job.id == job_id).with_for_update().execution_options(populate_existing=True)
@@ -243,6 +273,7 @@ async def refund_rerender(session: AsyncSession, job_id: uuid.UUID | str, operat
         job is None
         or job.rerender_operation_id != operation_id
         or job.rerender_state not in {"debited", "dispatched", "running"}
+        or (require_undispatched and (job.rerender_state != "debited" or job.rerender_dispatched_at is not None))
     ):
         return False
 

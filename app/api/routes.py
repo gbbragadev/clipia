@@ -42,6 +42,7 @@ from app.services.job_operations import (
     begin_rerender,
     mark_generation_dispatched,
     mark_rerender_dispatched,
+    refund_generation,
     refund_rerender,
     request_generation_cancel,
 )
@@ -49,7 +50,7 @@ from app.services.llm import complete_text, strip_code_fences
 from app.services.remotion import scene_sort_key
 from app.services.trends import fetch_trends, get_example_topics
 from app.templates import get_template
-from app.utils.files import bytes_to_gb, get_job_dir, path_size_bytes
+from app.utils.files import bytes_to_gb, cleanup_job_dir, get_job_dir, path_size_bytes
 from app.utils.locks import get_lock
 from app.utils.media_url import sign_media_url
 from app.utils.ratelimit import client_ip
@@ -223,6 +224,76 @@ async def _refund_credits_safe(db: AsyncSession, user_id, cost: int, action: str
             return False
 
 
+def _restore_refine_snapshot(refine_key: str, snapshot: str | None) -> None:
+    try:
+        if snapshot is None:
+            _redis.delete(refine_key)
+        else:
+            _redis.set(refine_key, snapshot, ex=86400)
+    except Exception:  # noqa: BLE001 - compensation remains best-effort at the Redis edge
+        logger.exception("Falha ao restaurar snapshot de refino key=%s", refine_key)
+
+
+def _release_generation_quota(cap_key: str | None, reserved: bool) -> None:
+    if not cap_key or not reserved:
+        return
+    try:
+        _redis.decr(cap_key)
+    except Exception:  # noqa: BLE001 - SQL refund must not be hidden by Redis cleanup
+        logger.exception("Falha ao devolver quota de geracao key=%s", cap_key)
+
+
+async def _compensate_generation_dispatch(
+    db: AsyncSession,
+    *,
+    job_id: uuid.UUID,
+    refine_key: str,
+    refine_snapshot: str | None,
+    cap_key: str | None,
+    quota_reserved: bool,
+    credit_cost: int,
+    error: Exception,
+) -> None:
+    refunded = False
+    for attempt in range(2):
+        try:
+            refunded = await refund_generation(
+                db,
+                job_id,
+                status="failed",
+                error="Falha ao enfileirar a geracao. Credito estornado.",
+            )
+            await db.commit()
+            break
+        except Exception:  # noqa: BLE001 - rollback and one retry before escalating
+            await db.rollback()
+            if attempt == 1:
+                logger.critical("Refund persistente falhou job=%s", job_id, exc_info=True)
+
+    if refunded:
+        record_credit_metric("credit", credit_cost)
+    else:
+        try:
+            await asyncio.to_thread(
+                _send_admin_alert,
+                "ClipIA - compensation de dispatch falhou",
+                f"job_id={job_id} error={error!r}. Verificar estorno persistente manualmente.",
+            )
+        except Exception:  # noqa: BLE001
+            logger.exception("Falha ao alertar compensation manual job=%s", job_id)
+
+    cleanup_job_dir(str(job_id))
+    _release_generation_quota(cap_key, quota_reserved)
+    _restore_refine_snapshot(refine_key, refine_snapshot)
+    try:
+        _redis.hset(
+            f"job:{job_id}",
+            mapping={"status": "failed", "error": "Falha ao enfileirar a geracao. Credito estornado."},
+        )
+    except Exception:  # noqa: BLE001 - terminal Redis state is best-effort; DB is authoritative
+        logger.exception("Falha ao publicar estado Redis compensado job=%s", job_id)
+
+
 @router.post(
     "/generate",
     summary="Generate a video",
@@ -252,12 +323,9 @@ async def generate(
     # cobra a parte INTEIRA junto da geracao e carrega o resto (2 refinos = 1 credito;
     # 1 refino sozinho fica anotado p/ a proxima — nunca cobra a mais).
     refine_key = f"script_refine_pending:{user.id}"
-    try:
-        refine_owed = float(_redis.get(refine_key) or 0.0)
-    except (TypeError, ValueError):
-        refine_owed = 0.0
-    refine_extra = int(refine_owed)
-    credit_cost += refine_extra
+    refine_snapshot: str | None = None
+    refine_owed = 0.0
+    refine_extra = 0
 
     # Guardrail $: video IA (Seedance) e a operacao mais cara. Teto DIARIO por usuario, vale ate p/
     # conta admin/seed (foi o vetor do gasto de ~$6). O lock por usuario serializa get->incr (sem race).
@@ -268,122 +336,184 @@ async def generate(
         else None
     )
 
+    job_uuid = uuid.uuid4()
+    quota_reserved = False
+
     async with get_lock(f"generate:{user.id}"):
         _ensure_storage_ready()
-        if cap_key and int(_redis.get(cap_key) or 0) >= settings.MAX_AI_VIDEO_PER_DAY:
-            raise HTTPException(
-                status_code=429,
-                detail=f"Limite diário de vídeos IA atingido ({settings.MAX_AI_VIDEO_PER_DAY}/dia). Tente novamente amanhã.",
-            )
-        debit = await db.execute(
-            update(User)
-            .where(User.id == user.id, User.email_verified.is_(True), User.credits >= credit_cost)
-            .values(credits=User.credits - credit_cost)
-        )
-        if debit.rowcount == 0:
-            fresh_user = await db.get(User, user.id)
-            if fresh_user is None:
-                raise HTTPException(status_code=401, detail=ErrorMessages.UNAUTHORIZED)
-            if not fresh_user.email_verified:
-                raise HTTPException(status_code=403, detail=ErrorMessages.EMAIL_NOT_VERIFIED)
-            raise HTTPException(status_code=402, detail=ErrorMessages.INSUFFICIENT_CREDITS)
+        if req.custom_script is not None:
+            try:
+                script_path = get_job_dir(str(job_uuid)) / "script.json"
+                script_path.write_text(
+                    json.dumps(req.custom_script, ensure_ascii=False, indent=2),
+                    encoding="utf-8",
+                )
+            except Exception as exc:  # noqa: BLE001 - prove filesystem before charging
+                cleanup_job_dir(str(job_uuid))
+                logger.error("Falha ao preparar custom script job=%s: %s", job_uuid, exc)
+                raise HTTPException(status_code=503, detail="Nao foi possivel preparar os arquivos da geracao.")
 
-        fresh_user = await db.get(User, user.id)
-        if fresh_user is None:
-            raise HTTPException(status_code=401, detail=ErrorMessages.UNAUTHORIZED)
-        record_credit_metric("debit", credit_cost)
+        try:
+            refine_snapshot = _redis.get(refine_key)
+            refine_owed = float(refine_snapshot or 0.0)
+        except (TypeError, ValueError):
+            refine_owed = 0.0
+        except Exception as exc:  # noqa: BLE001 - unknown debt must not be charged or discarded
+            cleanup_job_dir(str(job_uuid))
+            logger.error("Falha ao ler snapshot de refino user=%s: %s", user.id, exc)
+            raise HTTPException(status_code=503, detail="Nao foi possivel reservar a geracao agora.")
+        refine_extra = int(refine_owed)
+        credit_cost += refine_extra
 
-        # Debito ok: liquida a parte inteira dos refinos e carrega o resto (ex.: 0,5)
-        if refine_extra > 0:
-            remainder = round(refine_owed - refine_extra, 2)
-            if remainder > 0:
-                _redis.set(refine_key, str(remainder), ex=86400)
-            else:
-                _redis.delete(refine_key)
-
-        job = Job(
-            user_id=fresh_user.id,
-            topic=req.topic,
-            style=req.style,
-            duration_target=req.duration_target,
-            template_id=req.template_id,
-            voice_provider=req.voice_provider,
-            voice_config=req.voice_config,
-            credit_cost=credit_cost,
-            status="queued",
-        )
-        db.add(job)
-        await db.commit()
-        await db.refresh(job)
-        if cap_key:  # conta a geracao de video IA do dia (so apos debito + job criados com sucesso)
-            _redis.incr(cap_key)
-            _redis.expire(cap_key, 90000)  # ~25h: zera no dia seguinte
-
-    job_id = str(job.id)
-
-    job_meta = {
-        "status": "queued",
-        "progress": "0",
-        "current_step": "",
-        "error": "",
-        "detail": "",
-        "template_id": req.template_id,
-        "created_at": datetime.now(timezone.utc).isoformat(),
-    }
-    if req.sfx_enabled is not None:
-        job_meta["sfx_enabled"] = "1" if req.sfx_enabled else "0"
-    if req.music_enabled is not None:
-        job_meta["music_enabled"] = "1" if req.music_enabled else "0"
-    if req.narration_mode != "single":
-        job_meta["narration_mode"] = req.narration_mode
-    _redis.hset(f"job:{job_id}", mapping=job_meta)
-
-    # Roteiro pronto (preview editado): grava script.json ANTES do dispatch — a task
-    # generate_script detecta o arquivo e pula a chamada de LLM (1o rascunho incluso).
-    if req.custom_script is not None:
-        script_path = get_job_dir(job_id) / "script.json"
-        script_path.write_text(json.dumps(req.custom_script, ensure_ascii=False, indent=2), encoding="utf-8")
-        _redis.hset(f"job:{job_id}", mapping={"custom_script": "1"})
-
-    try:
-        dispatch_pipeline(
-            job_id,
-            req.topic,
-            req.style,
-            req.duration_target,
-            template_id=req.template_id,
-            voice_provider=req.voice_provider,
-            voice_config=req.voice_config,
-            trend_context=req.trend_context,
-            narration_mode=req.narration_mode,
-        )
-    except Exception as e:  # noqa: BLE001 — enfileirar falhou (Celery/Redis down): estorna p/ nao cobrar sem gerar
-        await _refund_credits_safe(db, user.id, credit_cost, "generate/enqueue")
         if cap_key:
-            _redis.decr(cap_key)  # devolve a cota diaria de ai_video consumida na linha ~243
-        _redis.hset(
-            f"job:{job_id}",
-            mapping={"status": "failed", "error": "Falha ao enfileirar a geracao. Credito estornado."},
-        )
-        logger.error("dispatch_pipeline falhou job=%s user=%s: %s — credito estornado", job_id, user.id, e)
-        raise HTTPException(
-            status_code=503,
-            detail="Nao foi possivel iniciar a geracao agora. Seu credito foi estornado, tente novamente em instantes.",
-        )
+            try:
+                quota_count = int(_redis.incr(cap_key))
+                quota_reserved = True
+                _redis.expire(cap_key, 90000)
+                if quota_count > settings.MAX_AI_VIDEO_PER_DAY:
+                    _release_generation_quota(cap_key, quota_reserved)
+                    quota_reserved = False
+                    cleanup_job_dir(str(job_uuid))
+                    raise HTTPException(
+                        status_code=429,
+                        detail=f"Limite diário de vídeos IA atingido ({settings.MAX_AI_VIDEO_PER_DAY}/dia). Tente novamente amanhã.",
+                    )
+            except HTTPException:
+                raise
+            except Exception as exc:  # noqa: BLE001 - quota reservation precedes debit
+                _release_generation_quota(cap_key, quota_reserved)
+                quota_reserved = False
+                cleanup_job_dir(str(job_uuid))
+                logger.error("Falha ao reservar quota de geracao key=%s: %s", cap_key, exc)
+                raise HTTPException(status_code=503, detail="Nao foi possivel reservar a geracao agora.")
 
-    await mark_generation_dispatched(db, job.id)
-    await db.commit()
+        try:
+            debit = await db.execute(
+                update(User)
+                .where(User.id == user.id, User.email_verified.is_(True), User.credits >= credit_cost)
+                .values(credits=User.credits - credit_cost)
+            )
+            if debit.rowcount == 0:
+                fresh_user = await db.get(User, user.id)
+                if fresh_user is None:
+                    raise HTTPException(status_code=401, detail=ErrorMessages.UNAUTHORIZED)
+                if not fresh_user.email_verified:
+                    raise HTTPException(status_code=403, detail=ErrorMessages.EMAIL_NOT_VERIFIED)
+                raise HTTPException(status_code=402, detail=ErrorMessages.INSUFFICIENT_CREDITS)
 
-    if is_ai_video:
-        # Telemetria de custo p/ medir gasto real (dono pediu): Seedance ~R$0,67/s.
-        logger.warning(
-            "ai_video enfileirado: ~R$%.2f de API estimado (%ds @ R$0,67/s) user=%s job=%s",
-            req.duration_target * 0.67,
-            req.duration_target,
-            user.id,
-            job_id,
-        )
-    return {"job_id": job_id, "status": "queued", "credit_cost": credit_cost}
+            job = Job(
+                id=job_uuid,
+                user_id=user.id,
+                topic=req.topic,
+                style=req.style,
+                duration_target=req.duration_target,
+                template_id=req.template_id,
+                voice_provider=req.voice_provider,
+                voice_config=req.voice_config,
+                credit_cost=credit_cost,
+                status="queued",
+            )
+            db.add(job)
+            await db.commit()
+        except HTTPException:
+            await db.rollback()
+            _release_generation_quota(cap_key, quota_reserved)
+            cleanup_job_dir(str(job_uuid))
+            raise
+        except Exception as exc:  # noqa: BLE001 - debit and queued row share one transaction
+            await db.rollback()
+            _release_generation_quota(cap_key, quota_reserved)
+            cleanup_job_dir(str(job_uuid))
+            logger.exception("Falha na transacao de geracao job=%s", job_uuid)
+            raise HTTPException(status_code=503, detail="Nao foi possivel reservar a geracao agora.") from exc
+
+        record_credit_metric("debit", credit_cost)
+        job_id = str(job_uuid)
+        job_meta = {
+            "status": "queued",
+            "progress": "0",
+            "current_step": "",
+            "error": "",
+            "detail": "",
+            "template_id": req.template_id,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        }
+        if req.sfx_enabled is not None:
+            job_meta["sfx_enabled"] = "1" if req.sfx_enabled else "0"
+        if req.music_enabled is not None:
+            job_meta["music_enabled"] = "1" if req.music_enabled else "0"
+        if req.narration_mode != "single":
+            job_meta["narration_mode"] = req.narration_mode
+
+        try:
+            if refine_extra > 0:
+                remainder = round(refine_owed - refine_extra, 2)
+                if remainder > 0:
+                    _redis.set(refine_key, str(remainder), ex=86400)
+                else:
+                    _redis.delete(refine_key)
+
+            _redis.hset(f"job:{job_id}", mapping=job_meta)
+            if req.custom_script is not None:
+                _redis.hset(f"job:{job_id}", mapping={"custom_script": "1"})
+
+            dispatch_pipeline(
+                job_id,
+                req.topic,
+                req.style,
+                req.duration_target,
+                template_id=req.template_id,
+                voice_provider=req.voice_provider,
+                voice_config=req.voice_config,
+                trend_context=req.trend_context,
+                narration_mode=req.narration_mode,
+            )
+        except Exception as exc:  # noqa: BLE001 - broker has not acknowledged the message
+            await _compensate_generation_dispatch(
+                db,
+                job_id=job_uuid,
+                refine_key=refine_key,
+                refine_snapshot=refine_snapshot,
+                cap_key=cap_key,
+                quota_reserved=quota_reserved,
+                credit_cost=credit_cost,
+                error=exc,
+            )
+            logger.error("Dispatch compensado job=%s user=%s: %s", job_id, user.id, exc)
+            raise HTTPException(
+                status_code=503,
+                detail="Nao foi possivel iniciar a geracao agora. Seu credito foi estornado, tente novamente em instantes.",
+            )
+
+        try:
+            await mark_generation_dispatched(db, job_uuid)
+            await db.commit()
+        except Exception as exc:  # noqa: BLE001 - accepted work must never be refunded
+            await db.rollback()
+            logger.critical(
+                "Broker aceitou geracao mas marker falhou job=%s user=%s; worker deve autocurar",
+                job_id,
+                user.id,
+                exc_info=True,
+            )
+            try:
+                await asyncio.to_thread(
+                    _send_admin_alert,
+                    "ClipIA - marker de dispatch da geracao falhou",
+                    f"job_id={job_id} user_id={user.id} error={exc!r}. Broker aceitou; nao estornar.",
+                )
+            except Exception:  # noqa: BLE001
+                logger.exception("Falha ao enviar alerta de marker job=%s", job_id)
+
+        if is_ai_video:
+            logger.warning(
+                "ai_video enfileirado: ~R$%.2f de API estimado (%ds @ R$0,67/s) user=%s job=%s",
+                req.duration_target * 0.67,
+                req.duration_target,
+                user.id,
+                job_id,
+            )
+        return {"job_id": job_id, "status": "queued", "credit_cost": credit_cost}
 
 
 # ── Rascunho de roteiro (preview gratis + refino 0,5) ────────────────────────
@@ -1285,42 +1415,80 @@ async def render_video(
             await db.rollback()
             raise HTTPException(status_code=409, detail=str(exc)) from exc
 
-        # Generation cancellation is a separate operation. Only a valid,
-        # persisted rerender may clear a stale legacy generation flag.
-        _redis.delete(f"job:{job_id}:cancelled")
-
         from app.worker.tasks import _update_rerender_terminal, task_rerender_video
 
-        _redis.hset(
-            f"job:{job_id}",
-            mapping={
-                "status": "rendering",
-                "progress": 0.0,
-                "current_step": "queued",
-                "detail": "Re-render enfileirado...",
-                "rerender_cost": operation.cost,
-                "rerender_operation_id": str(operation_id),
-            },
-        )
         try:
-            task_rerender_video.delay(job_id, str(operation_id))
-        except Exception as e:  # noqa: BLE001 - preserve the existing enqueue refund contract
-            await refund_rerender(db, job.id, operation_id)
-            await db.commit()
-            _update_rerender_terminal(
-                job_id,
-                str(operation_id),
-                status="completed",
-                detail="Re-render nao pode ser enfileirado; credito estornado.",
+            # Generation cancellation is a separate operation. Only a valid,
+            # persisted rerender may clear a stale legacy generation flag. This
+            # Redis mutation is still pre-broker, so a failure must compensate
+            # the already-persisted rerender debit below.
+            _redis.delete(f"job:{job_id}:cancelled")
+            _redis.hset(
+                f"job:{job_id}",
+                mapping={
+                    "status": "rendering",
+                    "progress": 0.0,
+                    "current_step": "queued",
+                    "detail": "Re-render enfileirado...",
+                    "rerender_cost": operation.cost,
+                    "rerender_operation_id": str(operation_id),
+                },
             )
-            logger.error("task_rerender_video.delay falhou job=%s: %s - credito estornado", job_id, e)
+            task_rerender_video.delay(job_id, str(operation_id))
+        except Exception as exc:  # noqa: BLE001 - broker has not acknowledged the operation
+            refunded = False
+            for attempt in range(2):
+                try:
+                    refunded = await refund_rerender(db, job.id, operation_id)
+                    await db.commit()
+                    break
+                except Exception:  # noqa: BLE001
+                    await db.rollback()
+                    if attempt == 1:
+                        logger.critical("Refund de rerender falhou job=%s op=%s", job_id, operation_id, exc_info=True)
+            try:
+                _update_rerender_terminal(
+                    job_id,
+                    str(operation_id),
+                    status="completed",
+                    detail="Re-render nao pode ser enfileirado; credito estornado.",
+                )
+            except Exception:  # noqa: BLE001 - DB is authoritative
+                logger.exception("Falha ao publicar compensation Redis rerender job=%s", job_id)
+            if not refunded:
+                try:
+                    await asyncio.to_thread(
+                        _send_admin_alert,
+                        "ClipIA - refund de rerender falhou",
+                        f"job_id={job_id} operation_id={operation_id} error={exc!r}.",
+                    )
+                except Exception:  # noqa: BLE001
+                    logger.exception("Falha ao alertar refund de rerender job=%s", job_id)
+            logger.error("Dispatch de rerender compensado job=%s op=%s: %s", job_id, operation_id, exc)
             raise HTTPException(
                 status_code=503,
                 detail="Nao foi possivel iniciar o re-render agora. Seu credito foi estornado, tente novamente.",
             )
 
-        if await mark_rerender_dispatched(db, job.id, operation_id):
-            await db.commit()
+        try:
+            if await mark_rerender_dispatched(db, job.id, operation_id):
+                await db.commit()
+        except Exception as exc:  # noqa: BLE001 - broker accepted; worker claim self-heals marker
+            await db.rollback()
+            logger.critical(
+                "Broker aceitou rerender mas marker falhou job=%s op=%s; worker deve autocurar",
+                job_id,
+                operation_id,
+                exc_info=True,
+            )
+            try:
+                await asyncio.to_thread(
+                    _send_admin_alert,
+                    "ClipIA - marker de dispatch do rerender falhou",
+                    f"job_id={job_id} operation_id={operation_id} error={exc!r}. Nao estornar.",
+                )
+            except Exception:  # noqa: BLE001
+                logger.exception("Falha ao enviar alerta de marker do rerender job=%s", job_id)
 
     return {
         "status": "rendering",

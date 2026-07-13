@@ -54,6 +54,17 @@ end
 return 1
 """
 
+_WATCHDOG_CLAIM_LUA = """
+local status = redis.call('HGET', KEYS[1], 'status') or ''
+local updated_at = redis.call('HGET', KEYS[1], 'updated_at') or ''
+local operation_id = redis.call('HGET', KEYS[1], 'rerender_operation_id') or ''
+if status ~= ARGV[1] or updated_at ~= ARGV[2] or operation_id ~= ARGV[3] then
+    return 0
+end
+redis.call('SET', KEYS[2], 'true', 'EX', ARGV[4])
+return 1
+"""
+
 
 def _write_thumbnail(video_path: str, thumb_path: str) -> None:
     """Poster do card no dashboard: 1 frame em ~1.5s (depois do fade de abertura).
@@ -185,15 +196,55 @@ def _update_generation_completed(job_id: str, *, detail: str) -> bool:
         return True
 
 
+def _claim_stuck_watchdog_snapshot(
+    job_id: str,
+    *,
+    status: str,
+    updated_at: str,
+    operation_id: str | None,
+) -> bool:
+    """Atomically claim the exact Redis heartbeat inspected by the watchdog."""
+    key = f"job:{job_id}"
+    cancel_key = f"job:{job_id}:cancelled"
+    expected_operation_id = operation_id or ""
+    evaluator = getattr(_redis, "eval", None)
+    if evaluator is not None:
+        return bool(
+            evaluator(
+                _WATCHDOG_CLAIM_LUA,
+                2,
+                key,
+                cancel_key,
+                status,
+                updated_at,
+                expected_operation_id,
+                str(_CANCEL_FLAG_TTL_SECONDS),
+            )
+        )
+
+    # Unit-test/legacy fake fallback. Production redis-py uses the Lua path so
+    # heartbeat revalidation and cancel-flag publication remain one operation.
+    with _rerender_terminal_fallback_lock:
+        current = _redis.hgetall(key)
+        if (
+            current.get("status") != status
+            or current.get("updated_at") != updated_at
+            or (current.get("rerender_operation_id") or "") != expected_operation_id
+        ):
+            return False
+        _redis_set(cancel_key, "true", ex=_CANCEL_FLAG_TTL_SECONDS)
+        return True
+
+
 def _redis_get(key: str) -> str | None:
     getter = getattr(_redis, "get", None)
     return getter(key) if getter else None
 
 
-def _redis_set(key: str, value: str) -> None:
+def _redis_set(key: str, value: str, *, ex: int | None = None) -> None:
     setter = getattr(_redis, "set", None)
     if setter:
-        setter(key, value)
+        setter(key, value, ex=ex)
 
 
 def _redis_hget(key: str, field: str) -> str | None:
@@ -346,6 +397,37 @@ def _claim_rerender_operation(job_id: str, operation_id: str | None) -> bool:
             return claimed
 
     return asyncio.run(_claim())
+
+
+def _mark_generation_worker_started(job_id: str) -> bool:
+    """Backfill the dispatch marker once the broker message is demonstrably executing."""
+    from app.db.engine import worker_session as async_session
+    from app.services.job_operations import claim_generation_worker_start
+
+    async def _mark() -> bool:
+        async with async_session() as session:
+            allowed = await claim_generation_worker_start(session, job_id)
+            if allowed:
+                await session.commit()
+            return allowed
+
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        pass
+    else:
+        # Celery executes this sync task without an event loop. Tests and
+        # embedders can invoke it from one, where asyncio.run is unavailable;
+        # that is a marker-write failure, not proof that the accepted broker
+        # message was refunded. Continue and let reconciliation backfill it.
+        logger.warning("Self-heal sync adiado dentro de event loop ativo job=%s", job_id)
+        return True
+
+    try:
+        return asyncio.run(_mark())
+    except Exception:  # noqa: BLE001 - accepted work must continue; reconciler is the fallback
+        logger.critical("Falha ao autocurar generation_dispatched_at job=%s", job_id, exc_info=True)
+        return True
 
 
 def _publish_rerender_operation(
@@ -764,6 +846,118 @@ async def _cleanup_orphan_files_async() -> dict[str, int]:
 
 ORPHAN_QUEUED_CUTOFF_HOURS = 6
 ORPHAN_QUEUED_ERROR = f"Job órfão: chain aparentemente abandonada (sem progresso há >{ORPHAN_QUEUED_CUTOFF_HOURS}h)"
+UNDISPATCHED_OPERATION_ERROR = "Operacao antiga sem evidencia de dispatch; credito estornado pelo reconciliador."
+_CANCEL_FLAG_TTL_SECONDS = 24 * 60 * 60
+
+
+def _redis_has_dispatch_evidence(data: dict[str, str], *, operation_id: uuid.UUID | None) -> bool:
+    heartbeat = data.get("updated_at")
+    if not heartbeat:
+        return False
+    try:
+        datetime.fromisoformat(heartbeat)
+    except (TypeError, ValueError):
+        return False
+    redis_operation_id = data.get("rerender_operation_id") or None
+    if operation_id is None:
+        return redis_operation_id is None and data.get("status") in {"processing", "completed"}
+    return redis_operation_id == str(operation_id) and data.get("status") in {"rendering", "completed"}
+
+
+async def _reconcile_undispatched_job_operations_async() -> dict[str, int]:
+    """Close old DB/broker ambiguity using worker Redis evidence or a one-shot refund."""
+    from sqlalchemy import select
+
+    from app.db.engine import worker_session as async_session
+    from app.db.models import Job
+    from app.services.job_operations import (
+        mark_generation_dispatched,
+        mark_rerender_dispatched,
+        refund_generation,
+        refund_rerender,
+    )
+
+    counts = {
+        "generation_backfilled": 0,
+        "generation_refunded": 0,
+        "rerender_backfilled": 0,
+        "rerender_refunded": 0,
+        "cancel_flags_removed": 0,
+        "cancel_flags_ttl_applied": 0,
+    }
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=ORPHAN_QUEUED_CUTOFF_HOURS)
+    async with async_session() as session:
+        generation_result = await session.execute(
+            select(Job).where(
+                Job.status.in_({"queued", "processing"}),
+                Job.generation_dispatched_at.is_(None),
+                Job.generation_refunded_at.is_(None),
+                Job.created_at <= cutoff,
+            )
+        )
+        for job in generation_result.scalars().all():
+            live = _redis.hgetall(f"job:{job.id}")
+            if _redis_has_dispatch_evidence(live, operation_id=None):
+                if await mark_generation_dispatched(session, job.id):
+                    counts["generation_backfilled"] += 1
+            elif await refund_generation(
+                session,
+                job.id,
+                status="failed",
+                error=UNDISPATCHED_OPERATION_ERROR,
+                require_undispatched=True,
+            ):
+                counts["generation_refunded"] += 1
+
+        rerender_result = await session.execute(
+            select(Job).where(
+                Job.rerender_state == "debited",
+                Job.rerender_dispatched_at.is_(None),
+                Job.rerender_debited_at.is_not(None),
+                Job.rerender_debited_at <= cutoff,
+            )
+        )
+        for job in rerender_result.scalars().all():
+            operation_id = job.rerender_operation_id
+            if operation_id is None:
+                logger.critical("Rerender debited sem operation ID job=%s; no-op seguro", job.id)
+                _send_admin_alert(
+                    "ClipIA - reconciliador encontrou rerender sem operation ID",
+                    f"Job {job.id}: rerender_state=debited sem operation ID; nenhuma cobranca foi inferida.",
+                )
+                continue
+            live = _redis.hgetall(f"job:{job.id}")
+            if _redis_has_dispatch_evidence(live, operation_id=operation_id):
+                if await mark_rerender_dispatched(session, job.id, operation_id):
+                    counts["rerender_backfilled"] += 1
+            elif await refund_rerender(session, job.id, operation_id, require_undispatched=True):
+                counts["rerender_refunded"] += 1
+
+        for raw_key in list(_redis.scan_iter(match="job:*:cancelled", count=200)):
+            key = raw_key.decode() if isinstance(raw_key, bytes) else raw_key
+            raw_job_id = key.removeprefix("job:").removesuffix(":cancelled")
+            try:
+                parsed_job_id = uuid.UUID(raw_job_id)
+            except ValueError:
+                _redis.delete(key)
+                counts["cancel_flags_removed"] += 1
+                continue
+            job = await session.get(Job, parsed_job_id)
+            active = job is not None and job.status in {"queued", "processing", "cancelling", "finalizing"}
+            delivered = job is not None and (
+                job.video_url is not None or job.completed_at is not None or job.status in {"editable", "completed"}
+            )
+            if job is None or delivered or not active:
+                _redis.delete(key)
+                counts["cancel_flags_removed"] += 1
+                continue
+            ttl = _redis.ttl(key)
+            if ttl == -1:
+                _redis.expire(key, _CANCEL_FLAG_TTL_SECONDS)
+                counts["cancel_flags_ttl_applied"] += 1
+
+        await session.commit()
+    return counts
 
 
 async def _find_orphan_queued_jobs_async() -> list[str]:
@@ -787,21 +981,9 @@ async def _find_orphan_queued_jobs_async() -> list[str]:
 
 
 def _reap_orphan_queued_jobs() -> int:
-    """Marca jobs queued orfaos (>6h) como ``failed`` e reembolsa o credito da geracao.
-
-    Nao apaga o job (mantem para forense). Reutiliza ``_refund_job_credit`` para garantir a
-    mesma logica de reembolso/integridade de creditos do resto do pipeline (job.credit_cost
-    or 1). Idempotente: ``_refund_job_credit`` so reembolsa uma vez (status final guardado).
-    """
-    orphan_ids = asyncio.run(_find_orphan_queued_jobs_async())
-    for job_id in orphan_ids:
-        logger.warning(
-            "Reaping orphan queued job %s (sem progresso ha >%dh) — marcando failed e reembolsando",
-            job_id,
-            ORPHAN_QUEUED_CUTOFF_HOURS,
-        )
-        _refund_job_credit(job_id, "failed", ORPHAN_QUEUED_ERROR)
-    return len(orphan_ids)
+    """Compatibility entrypoint delegated to the marker-aware reconciler."""
+    result = asyncio.run(_reconcile_undispatched_job_operations_async())
+    return result["generation_refunded"] + result["rerender_refunded"]
 
 
 # ── Watchdog de jobs travados em processamento ─────────────────────────────────
@@ -873,16 +1055,63 @@ def _watchdog_pass() -> int:
         if elapsed <= limit:
             continue
 
-        # Re-checa na hora do abate: o finalize pode ter concluido entre o scan e ca.
-        if _redis.hgetall(key).get("status") not in ("processing", "rendering"):
-            continue
-
-        message = WATCHDOG_STUCK_ERROR.format(step=step or "?", minutes=int(elapsed // 60))
-        logger.error(
-            "Watchdog: job %s travado (%s ha %.0fs > %ds) — cancelando e estornando", job_id, step, elapsed, limit
-        )
-        _redis_set(f"job:{job_id}:cancelled", "true")
-        _refund_job_credit(job_id, "failed", message)
+        if status == "rendering":
+            operation_id = data.get("rerender_operation_id")
+            if not operation_id:
+                logger.critical("Watchdog: rerender travado sem operation ID job=%s; no-op seguro", job_id)
+                _send_admin_alert(
+                    "ClipIA - watchdog encontrou rerender sem operation ID",
+                    f"Job {job_id}: rendering travado sem rerender_operation_id; nenhuma cobranca foi inferida.",
+                )
+                continue
+            if not _claim_stuck_watchdog_snapshot(
+                job_id,
+                status=status,
+                updated_at=updated_raw,
+                operation_id=operation_id,
+            ):
+                continue
+            message = (
+                f"Re-render interrompido por falta de progresso na etapa '{step or '?'}' "
+                f"(sem atualização há {int(elapsed // 60)}min). O crédito foi devolvido."
+            )
+            logger.error(
+                "Watchdog: rerender %s op=%s travado (%s ha %.0fs > %ds)",
+                job_id,
+                operation_id,
+                step,
+                elapsed,
+                limit,
+            )
+            if not _refund_rerender_operation(job_id, operation_id):
+                _redis.delete(f"job:{job_id}:cancelled")
+                continue
+            _update_rerender_terminal(
+                job_id,
+                operation_id,
+                status="error",
+                error=message,
+                detail=message,
+            )
+        else:
+            if not _claim_stuck_watchdog_snapshot(
+                job_id,
+                status=status,
+                updated_at=updated_raw,
+                operation_id=None,
+            ):
+                continue
+            message = WATCHDOG_STUCK_ERROR.format(step=step or "?", minutes=int(elapsed // 60))
+            logger.error(
+                "Watchdog: job %s travado (%s ha %.0fs > %ds) — cancelando e estornando",
+                job_id,
+                step,
+                elapsed,
+                limit,
+            )
+            if not _refund_job_credit(job_id, "failed", message):
+                _redis.delete(f"job:{job_id}:cancelled")
+                continue
         _enqueue_dead_letter(job_id, message)
         reaped += 1
     return reaped
@@ -919,6 +1148,11 @@ def cleanup_old_jobs() -> dict[str, int]:
     return result
 
 
+@celery_app.task(name="reconcile_undispatched_job_operations")
+def reconcile_undispatched_job_operations() -> dict[str, int]:
+    return asyncio.run(_reconcile_undispatched_job_operations_async())
+
+
 @celery_app.task(name="cleanup_orphan_files")
 def cleanup_orphan_files() -> dict[str, int]:
     return asyncio.run(_cleanup_orphan_files_async())
@@ -934,6 +1168,8 @@ def task_generate_script(
     template_id: str = "stock_narration",
     trend_context: str | None = None,
 ) -> dict:
+    if not _mark_generation_worker_started(job_id):
+        return {"cancelled": True}
     try:
         if _check_cancelled(job_id):
             return {"cancelled": True}

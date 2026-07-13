@@ -29,6 +29,7 @@ class FakeRedis:
     def __init__(self):
         self.data: dict[str, dict[str, str]] = {}
         self.values: dict[str, str] = {}
+        self.expirations: dict[str, int] = {}
 
     def hset(self, key: str, mapping: dict[str, str]):
         self.data.setdefault(key, {}).update({k: str(v) for k, v in mapping.items()})
@@ -43,6 +44,8 @@ class FakeRedis:
         if nx and key in self.values:
             return None  # redis-py: SET NX em chave existente retorna None
         self.values[key] = str(value)
+        if ex is not None:
+            self.expirations[key] = ex
         return True
 
     def get(self, key: str) -> str | None:
@@ -53,12 +56,23 @@ class FakeRedis:
         self.values[key] = str(n)
         return n
 
+    def decr(self, key: str) -> int:
+        n = int(self.values.get(key, "0")) - 1
+        self.values[key] = str(n)
+        return n
+
     def expire(self, key: str, seconds: int):
-        pass  # fake: sem expiracao real em teste
+        self.expirations[key] = seconds
+
+    def ttl(self, key: str) -> int:
+        if key not in self.values and key not in self.data:
+            return -2
+        return self.expirations.get(key, -1)
 
     def delete(self, key: str):
         self.data.pop(key, None)
         self.values.pop(key, None)
+        self.expirations.pop(key, None)
 
     def scan_iter(self, match: str = "*", count: int = 100):
         import fnmatch
@@ -70,6 +84,7 @@ class FakeRedis:
     def clear(self):
         self.data.clear()
         self.values.clear()
+        self.expirations.clear()
 
 
 @pytest.fixture(autouse=True)
