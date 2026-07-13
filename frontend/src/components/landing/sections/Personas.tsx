@@ -112,8 +112,8 @@ function PersonaBlock({ persona, flip }: { persona: Persona; flip: boolean }) {
   const a = accentMap[persona.accent];
 
   return (
-    <div className="relative grid items-center gap-10 lg:grid-cols-2 lg:gap-14">
-      <div className={cn("relative", flip && "lg:order-2")}>
+    <div className="relative grid w-full min-w-0 items-center gap-10 lg:grid-cols-2 lg:gap-14">
+      <div className={cn("relative min-w-0", flip && "lg:order-2")}>
         <span
           aria-hidden
           className="font-display pointer-events-none absolute -left-3 -top-14 select-none text-[7rem] font-extrabold leading-none text-white/[0.04] sm:text-[8.5rem]"
@@ -171,7 +171,7 @@ function PersonaBlock({ persona, flip }: { persona: Persona; flip: boolean }) {
         </Reveal>
       </div>
 
-      <Reveal delay={200} className={cn("w-full", flip && "lg:order-1")}>
+      <Reveal delay={200} className={cn("w-full min-w-0", flip && "lg:order-1")}>
         <PersonaVisual persona={persona} />
       </Reveal>
     </div>

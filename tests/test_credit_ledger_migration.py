@@ -22,7 +22,7 @@ def _load_migration():
 def test_credit_ledger_migration_backfills_projects_and_is_append_only_on_sqlite(monkeypatch):
     migration = _load_migration()
     assert migration.down_revision == "a4b5c6d7e8f9"
-    assert ScriptDirectory.from_config(Config("alembic.ini")).get_heads() == ["c6d7e8f9a0b1"]
+    assert ScriptDirectory.from_config(Config("alembic.ini")).get_heads() == ["d7e8f9a0b1c2"]
 
     engine = sa.create_engine("sqlite:///:memory:")
     metadata = sa.MetaData()

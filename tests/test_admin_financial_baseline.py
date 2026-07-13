@@ -65,11 +65,12 @@ async def test_dashboard_uses_paid_at_and_limits_payers_to_registered_cohort(
     assert response.status_code == 200
     body = response.json()
     assert body["summary"]["paid_gross_revenue_brl"] == 69.8
+    assert body["summary"]["net_revenue_brl"] == 69.8
     assert body["summary"]["approved_revenue_brl"] == 69.8
     assert body["summary"]["approved_orders"] == 2
-    assert body["funnel"]["registered"] == 1
-    assert body["funnel"]["paying"] == 1
-    assert body["funnel"]["payer_conversion_rate"] == 100.0
+    assert body["funnel"]["registered"] == 0
+    assert body["funnel"]["paying"] == 0
+    assert body["funnel"]["payer_conversion_rate"] == 0.0
 
     revenue_points = {item["date"]: item["value"] for item in body["timeseries"]["revenue_by_day"]}
     assert revenue_points[recent.date().isoformat()] == 69.8
@@ -104,8 +105,10 @@ async def test_dashboard_separates_pending_paid_refunded_and_uses_frozen_bonus(
     )
     for purchase in (paid, pending, refunded):
         values = {"created_at": recent}
-        if purchase is not pending:
+        if purchase is paid:
             values["paid_at"] = recent
+        elif purchase is refunded:
+            values["refunded_at"] = recent
         await _set_times(db_session, CreditPurchase, purchase.id, **values)
     await db_session.commit()
 
@@ -116,10 +119,61 @@ async def test_dashboard_separates_pending_paid_refunded_and_uses_frozen_bonus(
     assert summary["paid_gross_revenue_brl"] == 19.9
     assert summary["pending_checkout_value_brl"] == 49.9
     assert summary["refunded_value_brl"] == 129.9
+    assert summary["net_revenue_brl"] == -110.0
     assert summary["approved_orders"] == 1
     assert summary["pending_orders"] == 1
     assert summary["refunded_orders"] == 1
     assert summary["credits_sold"] == 12
+    assert summary["invalid_purchase_rows"] == 0
+
+
+@pytest.mark.asyncio
+async def test_dashboard_uses_refunded_at_for_old_and_refund_before_paid_purchases(
+    client,
+    db_session,
+    admin_user,
+    auth_headers,
+    purchase_factory,
+):
+    now = datetime.now(timezone.utc)
+    old = now - timedelta(days=90)
+    recent = now - timedelta(days=1)
+    old_paid_then_refunded = await purchase_factory(
+        package_name="starter",
+        status="refunded",
+        payment_state="refunded",
+    )
+    refund_before_paid = await purchase_factory(
+        package_name="popular",
+        status="refunded",
+        payment_state="refunded",
+    )
+    await _set_times(
+        db_session,
+        CreditPurchase,
+        old_paid_then_refunded.id,
+        created_at=old,
+        paid_at=old,
+        refunded_at=recent,
+    )
+    await _set_times(
+        db_session,
+        CreditPurchase,
+        refund_before_paid.id,
+        created_at=old,
+        paid_at=None,
+        refunded_at=recent,
+    )
+    await db_session.commit()
+
+    response = await client.get("/api/v1/admin/dashboard?range=30d", headers=auth_headers(admin_user))
+
+    assert response.status_code == 200
+    summary = response.json()["summary"]
+    assert summary["refunded_orders"] == 2
+    assert summary["refunded_value_brl"] == 69.8
+    assert summary["paid_gross_revenue_brl"] == 0.0
+    assert summary["net_revenue_brl"] == -69.8
     assert summary["invalid_purchase_rows"] == 0
 
 

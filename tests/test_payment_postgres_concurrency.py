@@ -14,8 +14,17 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 
 from app import observability
 from app.api.routes import _debit_credits, admin_adjust_credits
+from app.auth.referrals import award_verified_referral
 from app.db.base import Base
-from app.db.models import CreditAdjustment, CreditPurchase, Job, JobDispatch, ProcessedPaymentEvent, User
+from app.db.models import (
+    CreditAdjustment,
+    CreditPurchase,
+    Job,
+    JobDispatch,
+    ProcessedPaymentEvent,
+    ReferralCreditAward,
+    User,
+)
 from app.models import AdminCreditAdjustRequest
 from app.payments.service import _apply_payment_event, process_webhook_stripe
 
@@ -156,6 +165,46 @@ async def test_postgres_admin_beta_adjustment_racing_payment_and_generation_has_
         assert len(adjustments) == 1
         assert adjustments[0].delta == 18
         assert adjustments[0].reason == "beta_invite_2026"
+
+
+@pytest.mark.asyncio
+async def test_postgres_referral_limit_is_serialized_under_concurrent_verifications(
+    postgres_payment_sessions,
+):
+    sessions = postgres_payment_sessions
+    referrer = await _seed_user(sessions, credits=18)
+    referred_users = [await _seed_user(sessions, credits=2) for _ in range(11)]
+    async with sessions() as seed_session:
+        await seed_session.execute(
+            User.__table__.update()
+            .where(User.id.in_([user.id for user in referred_users]))
+            .values(referred_by=referrer.id)
+        )
+        seed_session.add_all(
+            [
+                ReferralCreditAward(
+                    referred_user_id=user.id,
+                    referrer_user_id=referrer.id,
+                    credits=2,
+                )
+                for user in referred_users[:9]
+            ]
+        )
+        await seed_session.commit()
+
+    async def award(user_id):
+        async with sessions() as session:
+            referred = await session.get(User, user_id)
+            result = await award_verified_referral(session, referred)
+            await session.commit()
+            return result
+
+    results = await asyncio.gather(award(referred_users[9].id), award(referred_users[10].id))
+
+    assert sorted(results) == [0, 2]
+    async with sessions() as verification:
+        assert await verification.scalar(select(func.count()).select_from(ReferralCreditAward)) == 10
+        assert (await verification.get(User, referrer.id)).credits == 20
 
 
 def _paid_event(purchase: CreditPurchase, *, event_id: str, payment_intent: str) -> dict:

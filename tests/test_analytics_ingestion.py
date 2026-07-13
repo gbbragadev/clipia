@@ -246,8 +246,8 @@ async def test_analytics_optional_auth_rejects_invalid_and_derives_valid_user(
         _event(event_id=str(uuid.uuid1())),
         _event(anonymous_session_id=str(uuid.uuid1())),
         _event(occurred_at=datetime.now().isoformat()),
-        _event(occurred_at=(datetime.now(timezone.utc) + timedelta(minutes=6)).isoformat()),
-        _event(occurred_at=(datetime.now(timezone.utc) - timedelta(hours=25)).isoformat()),
+        _event(occurred_at=(datetime.now(timezone.utc) + timedelta(days=1)).isoformat()),
+        _event(occurred_at=(datetime.now(timezone.utc) - timedelta(days=2)).isoformat()),
     ],
 )
 async def test_analytics_rejects_non_v4_ids_and_out_of_window_timestamps(

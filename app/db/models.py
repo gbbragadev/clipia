@@ -62,6 +62,7 @@ class CreditPurchase(Base):
             postgresql_where=text("mp_payment_id IS NOT NULL"),
             sqlite_where=text("mp_payment_id IS NOT NULL"),
         ),
+        Index("ix_credit_purchases_refunded_at", "refunded_at"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(GUID(), primary_key=True, default=uuid.uuid4)
@@ -88,6 +89,7 @@ class CreditPurchase(Base):
     snapshot_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     paid_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    refunded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     user: Mapped["User"] = relationship(back_populates="purchases")
 
@@ -232,6 +234,23 @@ class CreditAdjustment(Base):
     reason: Mapped[str] = mapped_column(String(255), nullable=False)
     previous_balance: Mapped[int] = mapped_column(Integer, nullable=False)
     new_balance: Mapped[int] = mapped_column(Integer, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class ReferralCreditAward(Base):
+    """One durable, idempotent credit award for a verified referred user."""
+
+    __tablename__ = "referral_credit_awards"
+    __table_args__ = (
+        UniqueConstraint("referred_user_id", name="uq_referral_credit_award_referred_user"),
+        CheckConstraint("credits > 0", name="ck_referral_credit_award_credits_positive"),
+        Index("ix_referral_credit_awards_referrer_created", "referrer_user_id", "created_at"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(GUID(), primary_key=True, default=uuid.uuid4)
+    referred_user_id: Mapped[uuid.UUID] = mapped_column(GUID(), ForeignKey("users.id"), nullable=False)
+    referrer_user_id: Mapped[uuid.UUID] = mapped_column(GUID(), ForeignKey("users.id"), nullable=False)
+    credits: Mapped[int] = mapped_column(Integer, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
@@ -507,6 +526,7 @@ class Job(Base):
     exported_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     pending_credits: Mapped[float] = mapped_column(Float, default=0.0)
     rerender_operation_id: Mapped[uuid.UUID | None] = mapped_column(GUID(), nullable=True)
+    legacy_rerender_task_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
     rerender_state: Mapped[str] = mapped_column(String(20), default="idle", server_default="idle", nullable=False)
     rerender_cost: Mapped[int] = mapped_column(Integer, default=0, server_default="0", nullable=False)
     rerender_pending_credits: Mapped[float] = mapped_column(Float, default=0.0, server_default="0", nullable=False)

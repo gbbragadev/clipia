@@ -2343,7 +2343,11 @@ async def admin_dashboard(
     )
     purchases_result = await db.execute(
         select(CreditPurchase, canonical_state_sql.label("canonical_state")).where(
-            or_(CreditPurchase.created_at >= window_start, CreditPurchase.paid_at >= window_start)
+            or_(
+                CreditPurchase.created_at >= window_start,
+                CreditPurchase.paid_at >= window_start,
+                CreditPurchase.refunded_at >= window_start,
+            )
         )
     )
     purchase_rows = list(purchases_result.all())
@@ -2358,29 +2362,41 @@ async def admin_dashboard(
 
     analytics_result = await db.execute(select(AnalyticsEvent).where(AnalyticsEvent.occurred_at >= window_start))
     analytics_events = list(analytics_result.scalars().all())
-    analytics_started_at = await db.scalar(select(func.min(AnalyticsEvent.occurred_at)))
+
+    coverage_window_start = now.replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=13)
+    coverage_window_end = now.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1)
+    coverage_result = await db.execute(
+        select(AnalyticsEvent.occurred_at).where(
+            AnalyticsEvent.authority == "client",
+            AnalyticsEvent.event_name == "landing_viewed",
+            AnalyticsEvent.occurred_at >= coverage_window_start,
+            AnalyticsEvent.occurred_at < coverage_window_end,
+        )
+    )
+    coverage_occurred_at = list(coverage_result.scalars().all())
 
     def in_window(value: datetime | None) -> bool:
         utc_value = _coerce_utc(value)
         return utc_value is not None and utc_value >= window_start
 
     created_purchases = [purchase for purchase in purchases_in_range if in_window(purchase.created_at)]
-    approved_purchases = [
+    gross_paid_purchases = [
         purchase
         for purchase in purchases_in_range
-        if purchase_states[purchase.id] == "paid" and in_window(purchase.paid_at)
+        if purchase_states[purchase.id] in {"paid", "refunded"} and in_window(purchase.paid_at)
     ]
     pending_purchases = [purchase for purchase in created_purchases if purchase_states[purchase.id] == "pending"]
     refunded_purchases = [
         purchase
         for purchase in purchases_in_range
-        if purchase_states[purchase.id] == "refunded" and in_window(purchase.paid_at)
+        if purchase_states[purchase.id] == "refunded" and in_window(purchase.refunded_at)
     ]
     invalid_purchases = [
         purchase
         for purchase in purchases_in_range
         if purchase_states[purchase.id] == "__invalid__"
-        or (purchase_states[purchase.id] in {"paid", "refunded"} and purchase.paid_at is None)
+        or (purchase_states[purchase.id] == "paid" and purchase.paid_at is None)
+        or (purchase_states[purchase.id] == "refunded" and purchase.refunded_at is None)
     ]
 
     approved_user_ids_result = await db.execute(
@@ -2422,13 +2438,15 @@ async def admin_dashboard(
         if bucket:
             users_by_day[bucket] += 1
 
-    for purchase in approved_purchases:
+    for purchase in gross_paid_purchases:
         bucket = _bucket_key(purchase.paid_at)
         if bucket:
             revenue_by_day[bucket] += purchase.price_brl / 100
             approved_orders_by_day[bucket] += 1
 
-    relevant_purchase_ids = {purchase.id for purchase in [*created_purchases, *approved_purchases, *refunded_purchases]}
+    relevant_purchase_ids = {
+        purchase.id for purchase in [*created_purchases, *gross_paid_purchases, *refunded_purchases]
+    }
     for purchase in purchases_in_range:
         if purchase.id not in relevant_purchase_ids:
             continue
@@ -2444,6 +2462,7 @@ async def admin_dashboard(
                 "pending_checkout_value_brl": 0.0,
                 "paid_gross_revenue_brl": 0.0,
                 "refunded_value_brl": 0.0,
+                "net_revenue_brl": 0.0,
                 "approved_revenue_brl": 0.0,
                 "credits_sold": 0,
             },
@@ -2456,7 +2475,7 @@ async def admin_dashboard(
             mix["pending_checkout_value_brl"] = _round2(
                 float(mix["pending_checkout_value_brl"]) + (purchase.price_brl / 100)
             )
-        if purchase in approved_purchases:
+        if purchase in gross_paid_purchases:
             paid_value = _round2(float(mix["paid_gross_revenue_brl"]) + (purchase.price_brl / 100))
             mix["paid_orders"] = int(mix["paid_orders"]) + 1
             mix["paid_gross_revenue_brl"] = paid_value
@@ -2465,6 +2484,9 @@ async def admin_dashboard(
         if purchase in refunded_purchases:
             mix["refunded_orders"] = int(mix["refunded_orders"]) + 1
             mix["refunded_value_brl"] = _round2(float(mix["refunded_value_brl"]) + (purchase.price_brl / 100))
+
+    for mix in package_mix.values():
+        mix["net_revenue_brl"] = _round2(float(mix["paid_gross_revenue_brl"]) - float(mix["refunded_value_brl"]))
 
     for job in jobs_in_range:
         bucket = _bucket_key(job.created_at)
@@ -2487,47 +2509,26 @@ async def admin_dashboard(
 
     storage_stats = await _build_storage_stats(db)
 
-    approved_revenue_brl = _round2(sum(purchase.price_brl for purchase in approved_purchases) / 100)
+    paid_gross_revenue_brl = _round2(sum(purchase.price_brl for purchase in gross_paid_purchases) / 100)
     pending_revenue_brl = _round2(sum(purchase.price_brl for purchase in pending_purchases) / 100)
     refunded_value_brl = _round2(sum(purchase.price_brl for purchase in refunded_purchases) / 100)
-    approved_orders = len(approved_purchases)
-    average_ticket_brl = _round2(approved_revenue_brl / approved_orders) if approved_orders else 0.0
+    net_revenue_brl = _round2(paid_gross_revenue_brl - refunded_value_brl)
+    approved_orders = len(gross_paid_purchases)
+    average_ticket_brl = _round2(paid_gross_revenue_brl / approved_orders) if approved_orders else 0.0
     verified_users = sum(1 for user in users_in_range if user.email_verified)
     registered = len(users_in_range)
     cohort_user_ids = {str(user.id) for user in users_in_range}
     paying_users = len(cohort_user_ids & approved_user_ids)
-    verification_rate = _round2((verified_users / registered) * 100) if registered else 0.0
-    payer_conversion_rate = _round2((paying_users / registered) * 100) if registered else 0.0
 
-    cohort_uuid_ids = {user.id for user in users_in_range}
-    cohort_jobs: list[Job] = []
-    cohort_purchases: list[CreditPurchase] = []
-    if cohort_uuid_ids:
-        cohort_jobs = list((await db.execute(select(Job).where(Job.user_id.in_(cohort_uuid_ids)))).scalars().all())
-        cohort_purchases = list(
-            (await db.execute(select(CreditPurchase).where(CreditPurchase.user_id.in_(cohort_uuid_ids))))
-            .scalars()
-            .all()
-        )
-
-    job_counts_by_user: dict[str, int] = defaultdict(int)
-    first_generation_user_ids: set[str] = set()
-    exported_user_ids: set[str] = set()
-    for job in cohort_jobs:
-        user_id = str(job.user_id)
-        job_counts_by_user[user_id] += 1
-        first_generation_user_ids.add(user_id)
-        if job.exported_at is not None:
-            exported_user_ids.add(user_id)
-    second_generation_user_ids = {
-        user_id for user_id, generation_count in job_counts_by_user.items() if generation_count >= 2
-    }
-    checkout_user_ids = {str(purchase.user_id) for purchase in cohort_purchases}
-
-    session_user_ids: dict[str, str] = {}
+    session_user_candidates: dict[str, set[str]] = defaultdict(set)
     for event in analytics_events:
         if event.anonymous_session_id is not None and event.user_id is not None:
-            session_user_ids[str(event.anonymous_session_id)] = str(event.user_id)
+            session_user_candidates[str(event.anonymous_session_id)].add(str(event.user_id))
+    session_user_ids = {
+        session_id: next(iter(user_ids))
+        for session_id, user_ids in session_user_candidates.items()
+        if len(user_ids) == 1
+    }
 
     def analytics_identity(event: AnalyticsEvent) -> str | None:
         if event.user_id is not None:
@@ -2538,16 +2539,89 @@ async def admin_dashboard(
         linked_user_id = session_user_ids.get(session_id)
         return f"user:{linked_user_id}" if linked_user_id else f"session:{session_id}"
 
-    visited_identities = {
-        identity
-        for event in analytics_events
-        if event.event_name == "landing_viewed" and (identity := analytics_identity(event)) is not None
-    }
-    cta_identities = {
-        identity
-        for event in analytics_events
-        if event.event_name == "hero_cta_clicked" and (identity := analytics_identity(event)) is not None
-    }
+    events_by_identity: dict[str, list[tuple[datetime, datetime, str]]] = defaultdict(list)
+    for event in analytics_events:
+        identity = analytics_identity(event)
+        occurred_at = _coerce_utc(event.occurred_at)
+        if identity is None or occurred_at is None:
+            continue
+        received_at = _coerce_utc(event.received_at) or occurred_at
+        events_by_identity[identity].append((occurred_at, received_at, event.event_name))
+
+    StageCursor = tuple[datetime, datetime]
+    StageIdentities = dict[str, StageCursor]
+
+    def next_stage_identities(
+        prior_stage: StageIdentities | None,
+        event_name: str,
+    ) -> StageIdentities:
+        reached: StageIdentities = {}
+        candidates = prior_stage.keys() if prior_stage is not None else events_by_identity.keys()
+        for identity in candidates:
+            prior_cursor = prior_stage.get(identity) if prior_stage is not None else None
+            for occurred_at, received_at, candidate_name in sorted(events_by_identity[identity]):
+                cursor = (occurred_at, received_at)
+                if candidate_name == event_name and (prior_cursor is None or cursor >= prior_cursor):
+                    reached[identity] = cursor
+                    break
+        return reached
+
+    def ordered_stage_identities(sequence: tuple[str, ...]) -> dict[str, StageIdentities]:
+        reached: dict[str, StageIdentities] = {}
+        prior_stage: StageIdentities | None = None
+        for stage in sequence:
+            prior_stage = next_stage_identities(prior_stage, stage)
+            reached[stage] = prior_stage
+        return reached
+
+    acquisition_sequence = (
+        "landing_viewed",
+        "hero_cta_clicked",
+        "user_registered",
+        "email_verified",
+    )
+    funnel_stages = ordered_stage_identities(acquisition_sequence)
+    verified_identities = funnel_stages["email_verified"]
+    first_generation_identities = next_stage_identities(verified_identities, "generation_requested")
+    exported_identities = next_stage_identities(first_generation_identities, "video_exported")
+    checkout_identities = next_stage_identities(verified_identities, "checkout_started")
+    paying_identities = next_stage_identities(checkout_identities, "payment_completed")
+    second_generation_identities = next_stage_identities(
+        first_generation_identities,
+        "second_generation_requested",
+    )
+    post_export_checkout_identities = next_stage_identities(exported_identities, "checkout_started")
+    post_export_paying_identities = next_stage_identities(
+        post_export_checkout_identities,
+        "payment_completed",
+    )
+
+    signup_stages = ordered_stage_identities(("user_registered", "email_verified"))
+    signup_verified_identities = signup_stages["email_verified"]
+    signup_first_generation_identities = next_stage_identities(
+        signup_verified_identities,
+        "generation_requested",
+    )
+    signup_exported_identities = next_stage_identities(
+        signup_first_generation_identities,
+        "video_exported",
+    )
+    signup_checkout_identities = next_stage_identities(signup_verified_identities, "checkout_started")
+    signup_paying_identities = next_stage_identities(signup_checkout_identities, "payment_completed")
+    signup_second_generation_identities = next_stage_identities(
+        signup_first_generation_identities,
+        "second_generation_requested",
+    )
+
+    def user_ids_at(stage_identities: StageIdentities) -> set[str]:
+        return {identity.removeprefix("user:") for identity in stage_identities if identity.startswith("user:")}
+
+    signup_verified_user_ids = user_ids_at(signup_verified_identities)
+    signup_first_generation_user_ids = user_ids_at(signup_first_generation_identities)
+    signup_exported_user_ids = user_ids_at(signup_exported_identities)
+    signup_checkout_user_ids = user_ids_at(signup_checkout_identities)
+    signup_paying_user_ids = user_ids_at(signup_paying_identities)
+    signup_second_generation_user_ids = user_ids_at(signup_second_generation_identities)
 
     device_by_user: dict[str, tuple[datetime, str]] = {}
     for event in analytics_events:
@@ -2582,12 +2656,12 @@ async def admin_dashboard(
 
     def cohort_metrics(key: str, user_ids: set[str]) -> dict[str, int | float | str]:
         cohort_registered = len(user_ids)
-        cohort_verified = sum(1 for user in users_in_range if str(user.id) in user_ids and user.email_verified)
-        cohort_first = len(user_ids & first_generation_user_ids)
-        cohort_exported = len(user_ids & exported_user_ids)
-        cohort_checkout = len(user_ids & checkout_user_ids)
-        cohort_paying = len(user_ids & approved_user_ids)
-        cohort_second = len(user_ids & second_generation_user_ids)
+        cohort_verified = len(user_ids & signup_verified_user_ids)
+        cohort_first = len(user_ids & signup_first_generation_user_ids)
+        cohort_exported = len(user_ids & signup_exported_user_ids)
+        cohort_checkout = len(user_ids & signup_checkout_user_ids)
+        cohort_paying = len(user_ids & signup_paying_user_ids)
+        cohort_second = len(user_ids & signup_second_generation_user_ids)
         return {
             "key": key,
             "registered": cohort_registered,
@@ -2608,27 +2682,33 @@ async def admin_dashboard(
             groups[group_key(user)].add(str(user.id))
         return [cohort_metrics(key, groups[key]) for key in sorted(groups)]
 
-    baseline_start = _coerce_utc(analytics_started_at)
-    baseline_days = (
-        max((now.date() - baseline_start.date()).days + 1, 0)
-        if settings.ANALYTICS_ENABLED and baseline_start is not None
-        else 0
-    )
-    first_generation_users = len(cohort_user_ids & first_generation_user_ids)
-    exported_users = len(cohort_user_ids & exported_user_ids)
-    checkout_users = len(cohort_user_ids & checkout_user_ids)
-    second_generation_users = len(cohort_user_ids & second_generation_user_ids)
+    collection_flags_aligned = settings.ANALYTICS_ENABLED and settings.ANALYTICS_FRONTEND_ENABLED
+    client_collection_dates = {
+        occurred_at.date() for value in coverage_occurred_at if (occurred_at := _coerce_utc(value)) is not None
+    }
+    baseline_days = 0
+    if collection_flags_aligned:
+        cursor = now.date()
+        while cursor in client_collection_dates:
+            baseline_days += 1
+            cursor -= timedelta(days=1)
+    baseline_start = now.date() - timedelta(days=baseline_days - 1) if baseline_days else None
+
+    visited_identities = funnel_stages["landing_viewed"]
+    cta_identities = funnel_stages["hero_cta_clicked"]
+    registered_identities = funnel_stages["user_registered"]
 
     return {
         "range": range,
         "window_start": window_start.date().isoformat(),
         "window_end": now.date().isoformat(),
         "summary": {
-            "paid_gross_revenue_brl": approved_revenue_brl,
+            "paid_gross_revenue_brl": paid_gross_revenue_brl,
             "pending_checkout_value_brl": pending_revenue_brl,
             "refunded_value_brl": refunded_value_brl,
             "refund_adjustment_brl": -refunded_value_brl,
-            "approved_revenue_brl": approved_revenue_brl,
+            "net_revenue_brl": net_revenue_brl,
+            "approved_revenue_brl": paid_gross_revenue_brl,
             "pending_revenue_brl": pending_revenue_brl,
             "approved_orders": approved_orders,
             "pending_orders": len(pending_purchases),
@@ -2640,7 +2720,7 @@ async def admin_dashboard(
             "paying_users": paying_users,
             "active_jobs": int(current_job_statuses["queued"] + current_job_statuses["processing"]),
             "credits_sold": int(
-                sum(purchase.credits_amount + purchase.bonus_credits for purchase in approved_purchases)
+                sum(purchase.credits_amount + purchase.bonus_credits for purchase in gross_paid_purchases)
             ),
             "credits_consumed": int(sum(dispatch.debited_credits for dispatch in delivered_dispatches)),
         },
@@ -2655,25 +2735,39 @@ async def admin_dashboard(
         "funnel": {
             "visited": len(visited_identities),
             "cta_clicked": len(cta_identities),
-            "registered": registered,
-            "verified": verified_users,
-            "first_generation": first_generation_users,
-            "exported": exported_users,
-            "checkout_started": checkout_users,
-            "paying": paying_users,
-            "second_generation": second_generation_users,
-            "verification_rate": verification_rate,
-            "payer_conversion_rate": payer_conversion_rate,
-            "cta_registration_rate": _round2((registered / len(cta_identities)) * 100) if cta_identities else 0.0,
-            "activation_rate": _round2((first_generation_users / verified_users) * 100) if verified_users else 0.0,
-            "export_payment_rate": _round2((paying_users / exported_users) * 100) if exported_users else 0.0,
-            "second_generation_rate": _round2((second_generation_users / first_generation_users) * 100)
-            if first_generation_users
+            "registered": len(registered_identities),
+            "verified": len(verified_identities),
+            "first_generation": len(first_generation_identities),
+            "exported": len(exported_identities),
+            "checkout_started": len(checkout_identities),
+            "paying": len(paying_identities),
+            "second_generation": len(second_generation_identities),
+            "verification_rate": _round2((len(verified_identities) / len(registered_identities)) * 100)
+            if registered_identities
+            else 0.0,
+            "payer_conversion_rate": _round2((len(paying_identities) / len(registered_identities)) * 100)
+            if registered_identities
+            else 0.0,
+            "cta_registration_rate": _round2((len(registered_identities) / len(cta_identities)) * 100)
+            if cta_identities
+            else 0.0,
+            "activation_rate": _round2((len(first_generation_identities) / len(verified_identities)) * 100)
+            if verified_identities
+            else 0.0,
+            "export_payment_rate": _round2((len(post_export_paying_identities) / len(exported_identities)) * 100)
+            if exported_identities
+            else 0.0,
+            "second_generation_rate": _round2(
+                (len(second_generation_identities) / len(first_generation_identities)) * 100
+            )
+            if first_generation_identities
             else 0.0,
             "analytics_enabled": settings.ANALYTICS_ENABLED,
-            "baseline_started_at": baseline_start.date().isoformat() if baseline_start else None,
+            "analytics_frontend_enabled": settings.ANALYTICS_FRONTEND_ENABLED,
+            "collection_flags_aligned": collection_flags_aligned,
+            "baseline_started_at": baseline_start.isoformat() if baseline_start else None,
             "baseline_days": baseline_days,
-            "onboarding_gate_ready": settings.ANALYTICS_ENABLED and baseline_days >= 14,
+            "onboarding_gate_ready": collection_flags_aligned and baseline_days >= 14,
         },
         "cohorts": {
             "weekly": grouped_cohorts(weekly_key),
@@ -2704,7 +2798,7 @@ async def admin_dashboard(
         },
         "package_mix": sorted(
             package_mix.values(),
-            key=lambda item: (float(item["approved_revenue_brl"]), int(item["orders"])),
+            key=lambda item: (float(item["net_revenue_brl"]), int(item["orders"])),
             reverse=True,
         ),
         "recent_activity": {
@@ -2730,6 +2824,7 @@ async def admin_dashboard(
                     "status": canonical_payment_state_or_invalid(purchase.status, purchase.payment_state),
                     "created_at": purchase.created_at.isoformat() if purchase.created_at else None,
                     "paid_at": purchase.paid_at.isoformat() if purchase.paid_at else None,
+                    "refunded_at": purchase.refunded_at.isoformat() if purchase.refunded_at else None,
                 }
                 for purchase in recent_purchases
             ],
@@ -2873,6 +2968,7 @@ async def admin_list_purchases(
                 "status": canonical_payment_state_or_invalid(p.status, p.payment_state),
                 "created_at": p.created_at.isoformat() if p.created_at else None,
                 "paid_at": p.paid_at.isoformat() if p.paid_at else None,
+                "refunded_at": p.refunded_at.isoformat() if p.refunded_at else None,
             }
             for p, email in rows.all()
         ],
@@ -3049,9 +3145,18 @@ async def admin_adjust_credits(
             new_balance=new_balance,
         )
     )
+    applied = new_balance - previous
+    if applied:
+        await append_server_event_safely(
+            db,
+            event_name="credit_balance_changed",
+            user=target,
+            properties={"reason": "admin", "delta": applied},
+            idempotency_key=f"admin-adjustment:{adjustment_id}:credit",
+            occurred_at=datetime.now(timezone.utc),
+        )
     await db.commit()
 
-    applied = new_balance - previous
     if applied:
         record_credit_metric("credit" if applied > 0 else "debit", abs(applied))
     logger.warning(

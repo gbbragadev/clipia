@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import uuid
+
 from sqlalchemy import func, select
 
+from app.auth.referrals import award_verified_referral
 from app.config import settings
-from app.db.models import AnalyticsEvent, Job, User
+from app.db.models import AnalyticsEvent, Job, ReferralCreditAward, User
 from app.payments.checkout_outbox import create_or_resume_checkout
 from app.payments.service import _apply_payment_event
 
@@ -175,3 +178,152 @@ async def test_checkout_and_payment_append_frozen_financial_events(
                 "total_credits": 100,
             }
     assert await db_session.scalar(select(func.count()).select_from(AnalyticsEvent)) == 3
+
+
+async def test_admin_adjustment_appends_credit_event_in_the_adjustment_transaction(
+    client,
+    db_session,
+    admin_user,
+    verified_user,
+    auth_headers,
+    monkeypatch,
+):
+    monkeypatch.setattr(settings, "ANALYTICS_ENABLED", True)
+
+    response = await client.post(
+        f"/api/v1/admin/users/{verified_user.id}/adjust-credits",
+        json={"delta": 18, "reason": "beta_invite_2026"},
+        headers=auth_headers(admin_user),
+    )
+
+    assert response.status_code == 200
+    event = await db_session.scalar(
+        select(AnalyticsEvent).where(
+            AnalyticsEvent.user_id == verified_user.id,
+            AnalyticsEvent.event_name == "credit_balance_changed",
+        )
+    )
+    assert event is not None
+    assert event.properties == {"reason": "admin", "delta": 18}
+
+
+async def test_verified_referral_appends_authoritative_referrer_credit_event(
+    client,
+    db_session,
+    verified_user,
+    monkeypatch,
+):
+    monkeypatch.setattr(settings, "ANALYTICS_ENABLED", True)
+    response = await client.post(
+        "/api/v1/auth/register",
+        json={
+            "email": "referred-analytics@example.com",
+            "name": "Referred Analytics",
+            "password": "Secret123",
+            "consent": True,
+            "referral_code": verified_user.referral_code,
+        },
+    )
+    assert response.status_code == 201
+    referred = await db_session.scalar(select(User).where(User.email == "referred-analytics@example.com"))
+    assert referred is not None and referred.verification_code is not None
+
+    verified = await client.post(
+        "/api/v1/auth/verify-email",
+        json={"email": referred.email, "code": referred.verification_code},
+    )
+
+    assert verified.status_code == 200
+    event = await db_session.scalar(
+        select(AnalyticsEvent).where(
+            AnalyticsEvent.user_id == verified_user.id,
+            AnalyticsEvent.event_name == "credit_balance_changed",
+        )
+    )
+    assert event is not None
+    assert event.properties == {"reason": "referral", "delta": 2}
+    award = await db_session.scalar(
+        select(ReferralCreditAward).where(ReferralCreditAward.referred_user_id == referred.id)
+    )
+    assert award is not None
+    assert award.referrer_user_id == verified_user.id
+    assert award.credits == 2
+
+
+async def test_referral_awards_are_idempotent_and_stop_at_ten_under_the_referrer_lock(
+    db_session,
+    verified_user,
+):
+    initial_balance = verified_user.credits
+    referred_users = [
+        User(
+            email=f"referral-limit-{index}@example.com",
+            name=f"Referral {index}",
+            password_hash="hashed",
+            credits=2,
+            email_verified=True,
+            referral_code=uuid.uuid4().hex[:8],
+            referred_by=verified_user.id,
+        )
+        for index in range(11)
+    ]
+    db_session.add_all(referred_users)
+    await db_session.commit()
+
+    applied = []
+    for referred in referred_users:
+        applied.append(await award_verified_referral(db_session, referred))
+        await db_session.commit()
+
+    assert applied == ([2] * 10) + [0]
+    assert await award_verified_referral(db_session, referred_users[0]) == 0
+    assert await db_session.scalar(select(func.count()).select_from(ReferralCreditAward)) == 10
+    db_session.expire_all()
+    assert (await db_session.get(User, verified_user.id)).credits == initial_balance + 20
+
+
+async def test_referral_award_failure_rolls_back_email_verification(
+    client,
+    db_session,
+    verified_user,
+    monkeypatch,
+):
+    initial_referrer_balance = verified_user.credits
+    registered = await client.post(
+        "/api/v1/auth/register",
+        json={
+            "email": "referral-rollback@example.com",
+            "name": "Referral Rollback",
+            "password": "Secret123",
+            "consent": True,
+            "referral_code": verified_user.referral_code,
+        },
+    )
+    assert registered.status_code == 201
+    referred = await db_session.scalar(select(User).where(User.email == "referral-rollback@example.com"))
+    assert referred is not None and referred.verification_code is not None
+    referred_id = referred.id
+    referrer_id = verified_user.id
+    code = referred.verification_code
+
+    async def fail_award(*_args, **_kwargs):
+        raise RuntimeError("referral persistence failed")
+
+    monkeypatch.setattr("app.auth.routes.award_verified_referral", fail_award)
+    response = await client.post(
+        "/api/v1/auth/verify-email",
+        json={"email": referred.email, "code": code},
+    )
+    assert response.status_code == 500
+
+    db_session.expire_all()
+    persisted_referred = await db_session.get(User, referred_id)
+    persisted_referrer = await db_session.get(User, referrer_id)
+    award = await db_session.scalar(
+        select(ReferralCreditAward).where(ReferralCreditAward.referred_user_id == referred_id)
+    )
+    assert persisted_referred is not None and persisted_referred.email_verified is False
+    assert persisted_referred.credits == 0
+    assert persisted_referred.verification_code == code
+    assert persisted_referrer is not None and persisted_referrer.credits == initial_referrer_balance
+    assert award is None

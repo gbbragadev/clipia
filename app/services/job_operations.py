@@ -364,6 +364,7 @@ async def begin_rerender(
 
     now = datetime.now(timezone.utc)
     job.rerender_operation_id = operation_id
+    job.legacy_rerender_task_id = None
     job.rerender_state = "debited"
     job.rerender_cost = cost
     job.rerender_pending_credits = snapshot
@@ -612,16 +613,84 @@ async def complete_locked_rerender(
     return True
 
 
-async def claim_legacy_rerender(session: AsyncSession, job_id: uuid.UUID | str) -> bool:
-    """Claim a pre-deploy task only when no durable operation can be confused with it."""
+async def claim_legacy_rerender(
+    session: AsyncSession,
+    job_id: uuid.UUID | str,
+    *,
+    cost: int,
+    task_id: str,
+) -> bool:
+    """Persist the Redis-only cost before a pre-deploy task starts rendering."""
+    if cost <= 0 or not task_id or len(task_id) > 255:
+        return False
     result = await session.execute(
         select(Job).where(Job.id == job_id).with_for_update().execution_options(populate_existing=True)
     )
     job = result.scalar_one_or_none()
-    if job is None or job.rerender_operation_id is not None or job.rerender_state != "idle":
+    if job is None or job.rerender_operation_id is not None:
+        return False
+    if job.rerender_state == "running":
+        return job.legacy_rerender_task_id == task_id and job.rerender_cost == cost
+    if job.rerender_state != "idle":
         return False
     job.rerender_state = "running"
+    job.rerender_cost = cost
+    job.legacy_rerender_task_id = task_id
+    job.rerender_debited_at = job.rerender_debited_at or datetime.now(timezone.utc)
     return True
+
+
+async def refund_legacy_rerender(session: AsyncSession, job_id: uuid.UUID | str) -> int:
+    """Refund and terminalize one claimed legacy rerender in the same transaction."""
+    result = await session.execute(
+        select(Job).where(Job.id == job_id).with_for_update().execution_options(populate_existing=True)
+    )
+    job = result.scalar_one_or_none()
+    if (
+        job is None
+        or job.rerender_operation_id is not None
+        or job.rerender_state != "running"
+        or job.rerender_cost <= 0
+    ):
+        return 0
+
+    refund_cost = int(job.rerender_cost)
+    await set_credit_ledger_context(
+        session,
+        origin="legacy_rerender_refund",
+        reason="legacy rerender failure refunded",
+        idempotency_key=f"legacy-rerender:{job.id}:refund",
+        job_id=job.id,
+        operation_id=job.id,
+    )
+    await session.execute(update(User).where(User.id == job.user_id).values(credits=User.credits + refund_cost))
+    job.pending_credits = float(job.pending_credits or 0.0) + refund_cost
+    job.rerender_state = "refunded"
+
+    analytics_user = await _analytics_user(session, job.user_id)
+    if analytics_user is not None:
+        refunded_at = datetime.now(timezone.utc)
+        await append_server_event_safely(
+            session,
+            event_name="generation_failed",
+            user=analytics_user,
+            properties={
+                "operation_kind": "rerender",
+                "generation_ordinal": "repeat",
+                "reason_code": "pipeline",
+            },
+            idempotency_key=f"legacy-rerender:{job.id}:failed",
+            occurred_at=refunded_at,
+        )
+        await append_server_event_safely(
+            session,
+            event_name="credit_balance_changed",
+            user=analytics_user,
+            properties={"reason": "rerender_refund", "delta": refund_cost},
+            idempotency_key=f"legacy-rerender:{job.id}:refund",
+            occurred_at=refunded_at,
+        )
+    return refund_cost
 
 
 async def finish_legacy_rerender(
@@ -630,8 +699,8 @@ async def finish_legacy_rerender(
     *,
     state: str,
 ) -> bool:
-    """Close a claimed legacy task without inferring a modern operation UUID."""
-    if state not in {"completed", "refunded"}:
+    """Complete a claimed legacy task; refunds use the atomic refund helper."""
+    if state != "completed":
         raise ValueError("Invalid legacy rerender terminal state")
     result = await session.execute(
         select(Job).where(Job.id == job_id).with_for_update().execution_options(populate_existing=True)

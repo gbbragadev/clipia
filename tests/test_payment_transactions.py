@@ -6,8 +6,9 @@ import stripe
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 
+from app.config import settings
 from app.db import models
-from app.db.models import CreditPurchase, User
+from app.db.models import AnalyticsEvent, CreditPurchase, User
 from app.payments.service import (
     create_checkout,
     create_checkout_stripe,
@@ -153,8 +154,46 @@ async def test_stripe_refund_before_paid_is_terminal_and_late_paid_does_not_cred
     refreshed = await db_session.get(CreditPurchase, purchase.id)
     assert [refunded.applied, paid.applied] == [True, False]
     assert refreshed.status == "refunded"
+    assert refreshed.refunded_at is not None
     assert refreshed.mp_payment_id == "pi_test_1"
     assert (await db_session.get(User, verified_user.id)).credits == initial
+
+
+@pytest.mark.asyncio
+async def test_refund_reports_only_the_balance_delta_actually_applied(
+    db_session,
+    purchase_factory,
+    verified_user,
+    monkeypatch,
+):
+    monkeypatch.setattr(settings, "ANALYTICS_ENABLED", True)
+    purchase = await purchase_factory(
+        provider="stripe",
+        status="approved",
+        payment_state="paid",
+        mp_payment_id="pi_partial_refund",
+    )
+    user = await db_session.get(User, verified_user.id)
+    user.credits = 3
+    await db_session.commit()
+    _patch_payment_intent(monkeypatch, purchase, "pi_partial_refund")
+
+    result = await process_webhook_stripe(
+        _refund_event(purchase, payment_intent="pi_partial_refund"),
+        db_session,
+    )
+
+    db_session.expire_all()
+    assert (result.applied, result.balance_delta, result.state) == (True, -3, "refunded")
+    assert (await db_session.get(User, verified_user.id)).credits == 0
+    credit_event = await db_session.scalar(
+        select(AnalyticsEvent).where(
+            AnalyticsEvent.event_name == "credit_balance_changed",
+            AnalyticsEvent.user_id == verified_user.id,
+        )
+    )
+    assert credit_event is not None
+    assert credit_event.properties == {"reason": "refund", "delta": -3}
 
 
 @pytest.mark.asyncio

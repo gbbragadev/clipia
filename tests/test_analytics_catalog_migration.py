@@ -62,3 +62,8 @@ def test_catalog_migration_expands_constraint_and_preserves_append_only(monkeypa
             _insert(connection, "00000000-0000-4000-8000-000000000014", "unknown", "server")
         with pytest.raises(sa.exc.DatabaseError, match="append-only"):
             connection.execute(sa.text("UPDATE analytics_events SET page = 'editor'"))
+
+        catalog.downgrade()
+        _insert(connection, "00000000-0000-4000-8000-000000000015", "payment_completed", "server")
+        with pytest.raises(sa.exc.IntegrityError):
+            _insert(connection, "00000000-0000-4000-8000-000000000016", "unknown", "server")

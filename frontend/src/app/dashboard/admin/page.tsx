@@ -99,7 +99,7 @@ export default function AdminDashboardPage() {
   ) : (
     <>
       <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        <StatCard title="Receita aprovada" value={formatCurrency(data.summary.approved_revenue_brl)} hint={`${data.summary.approved_orders} pedidos aprovados`} accent="#22c55e" />
+        <StatCard title="Receita liquida" value={formatCurrency(data.summary.net_revenue_brl)} hint={`${data.summary.approved_orders} pagamentos brutos / ${formatCurrency(data.summary.refunded_value_brl)} reembolsados`} accent="#22c55e" />
         <StatCard title="Receita pendente" value={formatCurrency(data.summary.pending_revenue_brl)} hint={`${data.summary.pending_orders} pagamentos em aberto`} accent="#f59e0b" />
         <StatCard title="Ticket médio" value={formatCurrency(data.summary.average_ticket_brl)} hint={`${data.summary.credits_sold} créditos vendidos`} accent="#38bdf8" />
         <StatCard title="Usuários novos" value={String(data.summary.new_users)} hint={`${data.summary.verified_users} verificados / ${data.summary.paying_users} pagantes`} accent="#3e9bff" />
@@ -114,7 +114,7 @@ export default function AdminDashboardPage() {
           <PanelHeader
             eyebrow="Receita"
             title="Faturamento por dia"
-            description="Compras aprovadas convertidas em receita realizada."
+            description="Pagamentos brutos por data de aprovacao; reembolsos aparecem separados no resumo."
           />
           <MiniBarChart data={data.timeseries.revenue_by_day} color="linear-gradient(180deg, #22c55e, #15803d)" formatter={(value) => formatCurrency(value)} />
         </div>
@@ -122,7 +122,7 @@ export default function AdminDashboardPage() {
           <PanelHeader
             eyebrow="Funil"
             title="Visita ate segundo video"
-            description="Funil autoritativo e gate de baseline da janela selecionada."
+            description="Funil autoritativo; o gate usa 14 dias corridos independentemente da janela selecionada."
           />
           <FunnelCard data={data.funnel} />
         </div>
@@ -172,7 +172,7 @@ export default function AdminDashboardPage() {
                       <p className="text-xs" style={{ color: 'var(--text-secondary)' }}>{item.orders} pedidos</p>
                     </div>
                     <div className="text-right">
-                      <p className="font-semibold">{formatCurrency(item.approved_revenue_brl)}</p>
+                      <p className="font-semibold">{formatCurrency(item.net_revenue_brl)}</p>
                       <p className="text-xs" style={{ color: 'var(--text-secondary)' }}>{item.credits_sold} creditos</p>
                     </div>
                   </div>

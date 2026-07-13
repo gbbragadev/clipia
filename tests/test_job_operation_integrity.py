@@ -26,6 +26,7 @@ def test_job_operation_model_and_migration_metadata_are_coherent():
         "generation_refunded_at",
         "cancel_requested_at",
         "rerender_operation_id",
+        "legacy_rerender_task_id",
         "rerender_state",
         "rerender_cost",
         "rerender_pending_credits",
@@ -352,13 +353,20 @@ async def test_worker_claim_before_route_dispatch_still_persists_dispatched_time
 
 @pytest.mark.asyncio
 async def test_legacy_rerender_claim_only_runs_without_a_new_operation(db_session, job_factory):
-    required = {"claim_legacy_rerender", "finish_legacy_rerender"}
+    required = {"claim_legacy_rerender", "finish_legacy_rerender", "refund_legacy_rerender"}
     assert required <= set(dir(job_operations))
     job = await job_factory(status="completed")
 
-    assert await job_operations.claim_legacy_rerender(db_session, job.id) is True
+    assert await job_operations.claim_legacy_rerender(db_session, job.id, cost=3, task_id="legacy-task-1") is True
     await db_session.commit()
-    assert await job_operations.claim_legacy_rerender(db_session, job.id) is False
+    persisted_job = await db_session.get(Job, job.id)
+    await db_session.refresh(persisted_job)
+    assert persisted_job.rerender_cost == 3
+    assert persisted_job.legacy_rerender_task_id == "legacy-task-1"
+    assert (
+        await job_operations.claim_legacy_rerender(db_session, job.id, cost=3, task_id="legacy-task-1") is True
+    ), "Celery redelivery with the same task id must resume after a worker crash"
+    assert await job_operations.claim_legacy_rerender(db_session, job.id, cost=3, task_id="duplicate-task") is False
     assert await job_operations.finish_legacy_rerender(db_session, job.id, state="completed") is True
     await db_session.commit()
 
@@ -366,7 +374,31 @@ async def test_legacy_rerender_claim_only_runs_without_a_new_operation(db_sessio
     persisted_job.rerender_operation_id = uuid.uuid4()
     persisted_job.rerender_state = "dispatched"
     await db_session.commit()
-    assert await job_operations.claim_legacy_rerender(db_session, job.id) is False
+    assert await job_operations.claim_legacy_rerender(db_session, job.id, cost=3, task_id="legacy-task-1") is False
+
+
+@pytest.mark.asyncio
+async def test_legacy_rerender_refund_is_one_atomic_db_transition(
+    db_session,
+    verified_user,
+    job_factory,
+):
+    job = await job_factory(status="completed", pending_credits=0)
+    initial_balance = (await db_session.get(User, verified_user.id)).credits
+
+    assert await job_operations.claim_legacy_rerender(db_session, job.id, cost=2, task_id="legacy-refund-task") is True
+    await db_session.commit()
+    assert await job_operations.refund_legacy_rerender(db_session, job.id) == 2
+    await db_session.commit()
+    assert await job_operations.refund_legacy_rerender(db_session, job.id) == 0
+
+    db_session.expire_all()
+    persisted_job = await db_session.get(Job, job.id)
+    persisted_user = await db_session.get(User, verified_user.id)
+    assert persisted_job.rerender_state == "refunded"
+    assert persisted_job.rerender_cost == 2
+    assert persisted_job.pending_credits == 2
+    assert persisted_user.credits == initial_balance + 2
 
 
 @pytest.mark.asyncio
@@ -654,6 +686,27 @@ def test_rerender_claim_infrastructure_failure_propagates_for_retry(monkeypatch)
 
     with pytest.raises(RuntimeError, match="database unavailable during claim"):
         worker_tasks._claim_rerender_operation("job-claim-db-down", str(uuid.uuid4()))
+
+
+def test_legacy_worker_redelivery_resumes_only_with_the_same_celery_task_id(tmp_path, monkeypatch):
+    env = create_test_env(tmp_path, monkeypatch)
+    job = create_job(env, status="completed")
+    env.fake_redis.hset(f"job:{job.id}", mapping={"rerender_cost": "2"})
+    db_engine_module = importlib.import_module("app.db.engine")
+    monkeypatch.setattr(db_engine_module, "worker_session", env.session_factory)
+
+    assert worker_tasks._claim_rerender_operation(str(job.id), None, task_id="celery-legacy-1") is True
+    assert worker_tasks._claim_rerender_operation(str(job.id), None, task_id="celery-legacy-1") is True
+    assert worker_tasks._claim_rerender_operation(str(job.id), None, task_id="celery-duplicate") is False
+
+    async def read_state():
+        async with env.session_factory() as session:
+            return await session.get(Job, job.id)
+
+    persisted = run(read_state())
+    assert persisted.rerender_state == "running"
+    assert persisted.rerender_cost == 2
+    assert persisted.legacy_rerender_task_id == "celery-legacy-1"
 
 
 @pytest.mark.parametrize("terminal_status", ["completed", "error"])

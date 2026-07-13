@@ -180,6 +180,7 @@ async def _apply_payment_event(
             elif transition == "refunded" and current_state in {"pending", "void", "paid"}:
                 for field, value in payment_state_values("refunded").items():
                     setattr(purchase, field, value)
+                purchase.refunded_at = datetime.now(timezone.utc)
                 purchase.mp_payment_id = normalized_payment_id
                 if normalized_checkout_id:
                     purchase.mp_preference_id = normalized_checkout_id
@@ -198,6 +199,13 @@ async def _apply_payment_event(
                 raise ValueError(f"Unsupported payment transition: {transition}")
 
             metric_user_id = purchase.user_id
+            balance_user: User | None = None
+            previous_balance = 0
+            if delta:
+                balance_user = await db.scalar(select(User).where(User.id == purchase.user_id).with_for_update())
+                if balance_user is None:
+                    raise ValueError(f"Purchase {purchase.id} references a missing user")
+                previous_balance = int(balance_user.credits)
             if delta > 0:
                 await set_credit_ledger_context(
                     db,
@@ -206,12 +214,14 @@ async def _apply_payment_event(
                     idempotency_key=f"payment:{purchase.id}:paid",
                     purchase_id=purchase.id,
                 )
-                await db.execute(
+                balance_result = await db.execute(
                     update(User)
                     .where(User.id == purchase.user_id)
                     .values(credits=User.credits + delta)
+                    .returning(User.credits)
                     .execution_options(synchronize_session=False)
                 )
+                delta = int(balance_result.scalar_one()) - previous_balance
             elif delta < 0:
                 await set_credit_ledger_context(
                     db,
@@ -220,7 +230,7 @@ async def _apply_payment_event(
                     idempotency_key=f"payment:{purchase.id}:refunded",
                     purchase_id=purchase.id,
                 )
-                await db.execute(
+                balance_result = await db.execute(
                     update(User)
                     .where(User.id == purchase.user_id)
                     .values(
@@ -229,13 +239,15 @@ async def _apply_payment_event(
                             else_=User.credits + delta,
                         )
                     )
+                    .returning(User.credits)
                     .execution_options(synchronize_session=False)
                 )
+                delta = int(balance_result.scalar_one()) - previous_balance
 
             if applied:
-                analytics_user = await db.get(User, purchase.user_id)
+                analytics_user = balance_user or await db.get(User, purchase.user_id)
                 if analytics_user is not None:
-                    event_at = purchase.paid_at or datetime.now(timezone.utc)
+                    event_at = purchase.refunded_at or purchase.paid_at or datetime.now(timezone.utc)
                     total_credits = purchase.credits_amount + purchase.bonus_credits
                     if result_state == "paid":
                         await append_server_event_safely(

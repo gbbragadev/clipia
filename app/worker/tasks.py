@@ -364,47 +364,17 @@ def _fail_job(job_id: str, error: str):
 
 
 def _refund_rerender_cost(job_id: str) -> bool:
-    """Devolve o custo exato do export (POST /render) e restaura pending_credits.
-
-    O rerender debita ceil(pending_credits) na rota e zera o pending. Em falha,
-    _refund_job_credit devolveria credit_cost (custo da GERACAO, valor errado) e
-    marcaria "failed" (bloqueando o editor). Aqui devolvemos o valor gravado em
-    rerender_cost no Redis e restauramos o pending p/ a re-tentativa cobrar de novo.
-    """
-    raw = _redis_hget(f"job:{job_id}", "rerender_cost")
+    """Refund a claimed legacy rerender and clear Redis only after the DB commit."""
     try:
-        cost = int(float(raw)) if raw else 0
-    except (TypeError, ValueError):
-        cost = 0
-    if cost <= 0:
-        return True
-    # zera ANTES de devolver: uma segunda passada pelo mesmo job nao refunda em dobro
-    _redis.hset(f"job:{job_id}", mapping={"rerender_cost": 0})
-    try:
-        from sqlalchemy import select, update
-
         from app.db.engine import worker_session as async_session
-        from app.db.models import Job, User
-        from app.services.credit_ledger import set_credit_ledger_context
+        from app.services.job_operations import refund_legacy_rerender
 
-        async def _refund():
+        async def _refund() -> int:
             async with async_session() as session:
-                result = await session.execute(select(Job).where(Job.id == job_id))
-                job = result.scalar_one_or_none()
-                if not job:
-                    return
-                await set_credit_ledger_context(
-                    session,
-                    origin="legacy_rerender_refund",
-                    reason="legacy rerender failure refunded",
-                    idempotency_key=f"legacy-rerender:{job.id}:refund",
-                    job_id=job.id,
-                    operation_id=job.id,
-                )
-                await session.execute(update(User).where(User.id == job.user_id).values(credits=User.credits + cost))
-                job.pending_credits = float(cost)
-                await session.commit()
-                logger.info("Refunded %d rerender credit(s) for job %s", cost, job_id)
+                refunded_cost = await refund_legacy_rerender(session, job_id)
+                if refunded_cost:
+                    await session.commit()
+                return refunded_cost
 
         try:
             asyncio.get_running_loop()
@@ -412,15 +382,16 @@ def _refund_rerender_cost(job_id: str) -> bool:
             pass
         else:
             raise RuntimeError("legacy rerender refund cannot run inside an active event loop")
-        asyncio.run(_refund())
+        refunded_cost = asyncio.run(_refund())
+        if refunded_cost:
+            _redis.hset(f"job:{job_id}", mapping={"rerender_cost": 0})
+            logger.info("Refunded %d legacy rerender credit(s) for job %s", refunded_cost, job_id)
         return True
     except Exception as e:  # noqa: BLE001
-        logger.error("Failed to refund rerender cost for job %s: %s", job_id, e)
-        # devolve o marcador p/ revisao manual nao perder o valor devido
-        _redis.hset(f"job:{job_id}", mapping={"rerender_cost": cost})
+        logger.error("Failed to refund legacy rerender cost for job %s: %s", job_id, e)
         _send_admin_alert(
             "ClipIA - refund de re-render requer reconciliacao",
-            f"Job {job_id}: refund de {cost} credito(s) falhou ({e}). Reconciliar o marcador; "
+            f"Job {job_id}: refund legado falhou ({e}). Reconciliar DB e marcador Redis; "
             "nao ajustar saldo manualmente sem confirmar o estado idempotente.",
         )
         return False
@@ -445,7 +416,17 @@ def _claim_rerender_operation(
     async def _claim() -> bool:
         async with async_session() as session:
             if parsed_operation_id is None:
-                claimed = await claim_legacy_rerender(session, job_id)
+                raw_cost = _redis_hget(f"job:{job_id}", "rerender_cost")
+                try:
+                    legacy_cost = int(float(raw_cost)) if raw_cost else 0
+                except (TypeError, ValueError):
+                    legacy_cost = 0
+                claimed = await claim_legacy_rerender(
+                    session,
+                    job_id,
+                    cost=legacy_cost,
+                    task_id=task_id or "",
+                )
             elif parsed_dispatch_id is not None and task_id is not None:
                 claimed = await claim_rerender_dispatch(
                     session,
@@ -602,23 +583,7 @@ def _publish_rerender_operation(
 
 def _refund_rerender_operation(job_id: str, operation_id: str | None) -> bool:
     if operation_id is None:
-        if not _refund_rerender_cost(job_id):
-            return False
-        from app.db.engine import worker_session as async_session
-        from app.services.job_operations import finish_legacy_rerender
-
-        async def _finish_legacy() -> bool:
-            async with async_session() as session:
-                finished = await finish_legacy_rerender(session, job_id, state="refunded")
-                if finished:
-                    await session.commit()
-                return finished
-
-        try:
-            return asyncio.run(_finish_legacy())
-        except Exception as exc:  # noqa: BLE001
-            logger.error("Failed to close legacy rerender operation for job %s: %s", job_id, exc)
-            return False
+        return _refund_rerender_cost(job_id)
 
     from app.db.engine import worker_session as async_session
     from app.services.job_operations import refund_rerender
@@ -2383,7 +2348,7 @@ def task_rerender_video(
     operation_output_path: str | None = None
     effective_task_id = broker_task_id or getattr(getattr(self, "request", None), "id", None)
     if dispatch_id is None:
-        if not _claim_rerender_operation(job_id, operation_id):
+        if not _claim_rerender_operation(job_id, operation_id, task_id=effective_task_id):
             return ""
     elif not _claim_rerender_operation(job_id, operation_id, dispatch_id, effective_task_id):
         raise Ignore()

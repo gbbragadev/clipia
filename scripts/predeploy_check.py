@@ -15,6 +15,7 @@ if str(ROOT) not in sys.path:
 from app.config import settings, validate_production_settings  # noqa: E402
 from app.db.engine import build_engine  # noqa: E402
 from app.main import create_app  # noqa: E402
+from app.redis_pool import get_redis  # noqa: E402
 
 
 class CheckFailure(Exception):
@@ -34,6 +35,7 @@ def main() -> int:
         ("Alembic files", check_alembic_files),
         ("Jobs index migration", check_jobs_index_migration),
         ("Database schema", check_database_schema),
+        ("Legacy rerender drain", check_no_legacy_rerenders),
     ]
 
     failures: list[str] = []
@@ -131,6 +133,52 @@ def check_jobs_index_migration() -> None:
 
 def check_database_schema() -> None:
     asyncio.run(_check_database_schema_async())
+
+
+def check_no_legacy_rerenders() -> None:
+    """Block a worker cutover while Redis-only rerenders can still be redelivered."""
+    database_ids = asyncio.run(_active_legacy_rerender_ids())
+    redis_ids: set[str] = set()
+    redis_client = get_redis()
+    try:
+        for raw_key in redis_client.scan_iter(match="job:*", count=200):
+            key = raw_key.decode() if isinstance(raw_key, bytes) else str(raw_key)
+            if key.endswith(":cancelled"):
+                continue
+            live = redis_client.hgetall(key)
+            operation_id = live.get("rerender_operation_id") or live.get(b"rerender_operation_id")
+            raw_cost = live.get("rerender_cost") or live.get(b"rerender_cost")
+            try:
+                cost = int(float(raw_cost)) if raw_cost else 0
+            except (TypeError, ValueError):
+                cost = 0
+            if cost > 0 and not operation_id:
+                redis_ids.add(key.removeprefix("job:"))
+    finally:
+        redis_client.close()
+
+    blocked = sorted(database_ids | redis_ids)
+    if blocked:
+        sample = ", ".join(blocked[:10])
+        raise CheckFailure(
+            "rerenders legados ativos; drene/terminalize antes de trocar workers "
+            f"(total={len(blocked)}, jobs={sample})"
+        )
+
+
+async def _active_legacy_rerender_ids() -> set[str]:
+    engine = build_engine(settings.DATABASE_URL)
+    try:
+        async with engine.connect() as conn:
+            rows = await conn.execute(
+                text(
+                    "SELECT id FROM jobs WHERE rerender_operation_id IS NULL "
+                    "AND rerender_state IN ('debited', 'dispatched', 'running')"
+                )
+            )
+            return {str(row[0]) for row in rows}
+    finally:
+        await engine.dispose()
 
 
 async def _check_database_schema_async() -> None:

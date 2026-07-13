@@ -198,6 +198,9 @@ class Settings(BaseSettings):
     RATE_LIMIT_GENERATE: str = "10/minute"
     RATE_LIMIT_DEFAULT: str = "60/minute"
     ANALYTICS_ENABLED: bool = False
+    # Operational attestation that the deployed Next.js bundle was built with
+    # NEXT_PUBLIC_ANALYTICS_ENABLED=true. The 14-day gate requires both flags.
+    ANALYTICS_FRONTEND_ENABLED: bool = False
     ANALYTICS_RATE_LIMIT: str = "30/minute"
     # Ledger append-only permanece em shadow ate sete reconciliacoes diarias
     # consecutivas sem diferenca. `enforce` e bloqueado no startup sem esse gate.

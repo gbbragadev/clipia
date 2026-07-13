@@ -90,4 +90,8 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    _replace_constraint(_CLIENT_EVENT_NAMES)
+    # Expand-only compatibility: a previous application version does not emit
+    # server events, but narrowing this constraint would make rollback fail as
+    # soon as any authoritative event exists. Keep the superset and only move
+    # Alembic's revision marker back.
+    return None

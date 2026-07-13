@@ -22,6 +22,9 @@ export interface AdminDashboardResponse {
   window_start: string
   window_end: string
   summary: {
+    paid_gross_revenue_brl: number
+    refunded_value_brl: number
+    net_revenue_brl: number
     approved_revenue_brl: number
     pending_revenue_brl: number
     approved_orders: number
@@ -57,6 +60,8 @@ export interface AdminDashboardResponse {
     export_payment_rate: number
     second_generation_rate: number
     analytics_enabled: boolean
+    analytics_frontend_enabled: boolean
+    collection_flags_aligned: boolean
     baseline_started_at: string | null
     baseline_days: number
     onboarding_gate_ready: boolean
@@ -84,6 +89,9 @@ export interface AdminDashboardResponse {
   package_mix: Array<{
     package_name: string
     orders: number
+    paid_gross_revenue_brl: number
+    refunded_value_brl: number
+    net_revenue_brl: number
     approved_revenue_brl: number
     credits_sold: number
   }>

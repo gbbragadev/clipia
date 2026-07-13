@@ -19,6 +19,7 @@ from app.auth.email import (
     send_verification_email,
     send_welcome_email,
 )
+from app.auth.referrals import award_verified_referral
 from app.auth.reset_tokens import consume_password_reset_token, invalidate_password_reset_tokens
 from app.auth.schemas import (
     ChangePasswordRequest,
@@ -263,40 +264,17 @@ async def verify_email(
                 idempotency_key=f"user:{user.id}:welcome-credit",
                 occurred_at=verified_at,
             )
+        referral_bonus = await award_verified_referral(db, user)
         await db.commit()
         await db.refresh(user)
-        record_credit_metric("credit", settings.WELCOME_CREDIT_BONUS)
+        if settings.WELCOME_CREDIT_BONUS > 0:
+            record_credit_metric("credit", settings.WELCOME_CREDIT_BONUS)
+        if referral_bonus > 0:
+            record_credit_metric("referral_bonus", referral_bonus)
 
         # Boas-vindas fire-and-forget: roda APOS a resposta (threadpool); falha de SMTP
         # e engolida dentro de send_welcome_email e nunca quebra a verificacao.
         background_tasks.add_task(send_welcome_email, user.email, user.name, user.credits)
-
-        # Credit referrer with 2 bonus credits (max 10 referrals per user)
-        MAX_REFERRAL_BONUS_COUNT = 10
-
-        if user.referred_by:
-            from sqlalchemy import func as sqla_func
-            from sqlalchemy import update as sql_update
-
-            # Count how many verified referrals already credited
-            referral_count = (
-                await db.execute(
-                    select(sqla_func.count(User.id)).where(
-                        User.referred_by == user.referred_by, User.email_verified.is_(True)
-                    )
-                )
-            ).scalar() or 0
-
-            if referral_count <= MAX_REFERRAL_BONUS_COUNT:
-                await set_credit_ledger_context(
-                    db,
-                    origin="referral_bonus",
-                    reason="verified referral bonus",
-                    idempotency_key=f"referral:{user.id}",
-                )
-                await db.execute(sql_update(User).where(User.id == user.referred_by).values(credits=User.credits + 2))
-                await db.commit()
-                record_credit_metric("referral_bonus", 2)
 
         return {"status": "verified", "credits": settings.WELCOME_CREDIT_BONUS}
 

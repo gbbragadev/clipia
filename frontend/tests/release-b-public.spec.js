@@ -394,6 +394,7 @@ test('landing cabe em 320, 390 e 393 px sem mascarar overflow global', async ({ 
 
     await page.getByRole('button', { name: 'Abrir menu' }).click()
     const menu = page.locator('#menu-mobile')
+    await expect(menu).toHaveCount(1)
     await expect(menu).toBeVisible()
     await expect(menu).toHaveCSS('overflow-y', 'auto')
 
@@ -446,6 +447,9 @@ test('landing cabe em 320, 390 e 393 px sem mascarar overflow global', async ({ 
     expect(menuMetrics.scrollHeight).toBeGreaterThan(menuMetrics.clientHeight)
 
     await page.getByRole('button', { name: 'Fechar menu' }).click()
+    await expect(page.getByRole('button', { name: 'Abrir menu' })).toBeVisible()
+    await expect(menu).toHaveCSS('max-height', '0px')
+    await expect(menu).toHaveCSS('opacity', '0')
     await page.setViewportSize({ width, height: 900 })
 
     const fan = page.getByRole('group', { name: 'Exemplos de videos em celulares' })
@@ -455,11 +459,43 @@ test('landing cabe em 320, 390 e 393 px sem mascarar overflow global', async ({ 
     expect(box.x, `showcase fan inicia fora da viewport em ${width}px`).toBeGreaterThanOrEqual(-1)
     expect(box.x + box.width, `showcase fan termina fora da viewport em ${width}px`).toBeLessThanOrEqual(width + 1)
 
-    const dimensions = await page.evaluate(() => ({
-      viewport: document.documentElement.clientWidth,
-      content: document.documentElement.scrollWidth,
-    }))
-    expect(dimensions.content, `overflow horizontal em ${width}px`).toBeLessThanOrEqual(dimensions.viewport)
+    const dimensions = await page.evaluate(() => {
+      const viewport = document.documentElement.clientWidth
+      const offenders = [...document.querySelectorAll('*')]
+        .map((element) => {
+          const rect = element.getBoundingClientRect()
+          return {
+            element: `${element.tagName.toLowerCase()}${element.id ? `#${element.id}` : ''}`,
+            className: typeof element.className === 'string' ? element.className.slice(0, 180) : '',
+            parentClassName:
+              typeof element.parentElement?.className === 'string'
+                ? element.parentElement.className.slice(0, 180)
+                : '',
+            left: Math.round(rect.left),
+            right: Math.round(rect.right),
+            width: Math.round(rect.width),
+          }
+        })
+        .filter(({ right, width: elementWidth }) => elementWidth > 0 && right > viewport + 1)
+        .sort((a, b) => a.right - b.right)
+        .slice(0, 12)
+      return {
+        viewport,
+        innerWidth: window.innerWidth,
+        bodyClientWidth: document.body.clientWidth,
+        bodyScrollWidth: document.body.scrollWidth,
+        content: document.documentElement.scrollWidth,
+        offenders,
+      }
+    })
+    expect(
+      dimensions.content,
+      `overflow horizontal em ${width}px; metricas=${JSON.stringify(dimensions)}`,
+    ).toBeLessThanOrEqual(dimensions.viewport)
+
+    // Force a document boundary between viewport cases so a closing menu
+    // transition from the previous width cannot overlap the next hydration.
+    await page.goto('about:blank')
   }
 })
 

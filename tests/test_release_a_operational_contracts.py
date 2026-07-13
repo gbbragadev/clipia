@@ -5,7 +5,7 @@ import pytest
 
 from app import observability
 from app.config import Settings, settings
-from scripts import validate_readiness
+from scripts import predeploy_check, validate_readiness
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
@@ -104,6 +104,45 @@ def test_build_provenance_defaults_are_non_secret_and_explicit():
     assert Settings.model_fields["GIT_SHA"].default == "unknown"
     assert Settings.model_fields["DEPLOYED_AT"].default == "unknown"
     assert Settings.model_fields["APP_VERSION"].default == project["project"]["version"]
+
+
+def test_predeploy_gate_requires_legacy_rerenders_to_be_drained(monkeypatch):
+    class FakeRedis:
+        def __init__(self, rows):
+            self.rows = rows
+            self.closed = False
+
+        def scan_iter(self, **_kwargs):
+            return iter(self.rows)
+
+        def hgetall(self, key):
+            return self.rows[key]
+
+        def close(self):
+            self.closed = True
+
+    async def no_database_rows():
+        return set()
+
+    monkeypatch.setattr(predeploy_check, "_active_legacy_rerender_ids", no_database_rows)
+    clean_redis = FakeRedis({})
+    monkeypatch.setattr(predeploy_check, "get_redis", lambda: clean_redis)
+    predeploy_check.check_no_legacy_rerenders()
+    assert clean_redis.closed is True
+
+    marker_redis = FakeRedis(
+        {
+            "job:legacy-active": {
+                "rerender_cost": "2",
+                "status": "rendering",
+                "rerender_operation_id": "",
+            }
+        }
+    )
+    monkeypatch.setattr(predeploy_check, "get_redis", lambda: marker_redis)
+    with pytest.raises(predeploy_check.CheckFailure, match="legacy-active"):
+        predeploy_check.check_no_legacy_rerenders()
+    assert marker_redis.closed is True
 
 
 async def _async_result(value):
