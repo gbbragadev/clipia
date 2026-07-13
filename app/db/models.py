@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, Float, ForeignKey, Integer, String, Text, func
+from sqlalchemy import DateTime, Float, ForeignKey, Index, Integer, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
@@ -97,6 +97,7 @@ class User(Base):
 
 class Job(Base):
     __tablename__ = "jobs"
+    __table_args__ = (Index("ix_jobs_rerender_state_debited_at", "rerender_state", "rerender_debited_at"),)
 
     id: Mapped[uuid.UUID] = mapped_column(GUID(), primary_key=True, default=uuid.uuid4)
     user_id: Mapped[uuid.UUID] = mapped_column(GUID(), ForeignKey("users.id"), nullable=False, index=True)
@@ -114,8 +115,17 @@ class Job(Base):
     editor_state: Mapped[dict | None] = mapped_column(JsonType, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    generation_dispatched_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    generation_refunded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    cancel_requested_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     exported_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     pending_credits: Mapped[float] = mapped_column(Float, default=0.0)
+    rerender_operation_id: Mapped[uuid.UUID | None] = mapped_column(GUID(), nullable=True)
+    rerender_state: Mapped[str] = mapped_column(String(20), default="idle", server_default="idle", nullable=False)
+    rerender_cost: Mapped[int] = mapped_column(Integer, default=0, server_default="0", nullable=False)
+    rerender_pending_credits: Mapped[float] = mapped_column(Float, default=0.0, server_default="0", nullable=False)
+    rerender_debited_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    rerender_dispatched_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     credit_cost: Mapped[int] = mapped_column(Integer, default=1)
     voice_provider: Mapped[str] = mapped_column(String(50), default="edge")
     voice_config: Mapped[dict | None] = mapped_column(JsonType, nullable=True)

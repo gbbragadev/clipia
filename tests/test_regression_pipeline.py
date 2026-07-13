@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, Mock, patch
+from unittest.mock import ANY, AsyncMock, MagicMock, Mock, patch
 
 from app.api import routes as api_routes
 from app.db.models import User
@@ -204,7 +204,7 @@ def test_credits_debit_1_for_edge(tmp_path, monkeypatch):
 
 def test_render_endpoint_unchanged(tmp_path, monkeypatch):
     env = create_test_env(tmp_path, monkeypatch)
-    job = create_job(env)
+    job = create_job(env, status="completed")
     (env.storage_dir / "jobs" / str(job.id)).mkdir(parents=True)
     delay_mock = Mock()
     monkeypatch.setattr("app.worker.tasks.task_rerender_video.delay", delay_mock)
@@ -215,7 +215,7 @@ def test_render_endpoint_unchanged(tmp_path, monkeypatch):
 
     response = run(_case())
     assert response["status"] == "rendering"
-    delay_mock.assert_called_once_with(str(job.id))
+    delay_mock.assert_called_once_with(str(job.id), ANY)
 
 
 def test_job_list_format_unchanged(tmp_path, monkeypatch):

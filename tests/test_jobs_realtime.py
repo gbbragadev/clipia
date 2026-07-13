@@ -6,6 +6,8 @@ o "completed" estale do pipeline original e o editor liberava o download da vers
 pre-edicao.
 """
 
+from unittest.mock import ANY
+
 import pytest
 
 
@@ -27,7 +29,7 @@ async def test_render_marks_redis_rendering_before_worker_starts(
         "POST /render deve marcar 'rendering' sincronamente; sem isso o poll do editor "
         "le 'completed' estale e libera o download da versao pre-edicao."
     )
-    app.state.rerender_task.delay.assert_called_once_with(str(job.id))
+    app.state.rerender_task.delay.assert_called_once_with(str(job.id), ANY)
 
     status = await client.get(f"/api/v1/jobs/{job.id}/status", headers=auth_headers(verified_user))
     assert status.status_code == 200

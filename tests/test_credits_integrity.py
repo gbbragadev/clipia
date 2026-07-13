@@ -1,3 +1,5 @@
+from unittest.mock import ANY
+
 import pytest
 
 from app.db.models import Job, User
@@ -111,7 +113,7 @@ async def test_ai_suggest_external_failure_does_not_charge(
 async def test_render_debits_pending_credits_once_and_resets_job(
     client, db_session, job_factory, verified_user, auth_headers, storage_dir, app
 ):
-    job = await job_factory(pending_credits=2.0)
+    job = await job_factory(status="completed", pending_credits=2.0)
     job_dir = storage_dir / "jobs" / str(job.id)
     job_dir.mkdir(parents=True)
 
@@ -123,7 +125,7 @@ async def test_render_debits_pending_credits_once_and_resets_job(
     refreshed_user = await db_session.get(User, verified_user.id)
     assert before - refreshed_user.credits == 2, "Render should debit the full pending-credit amount."
     assert refreshed_job.pending_credits == 0.0, "Render should clear pending credits after charging."
-    app.state.rerender_task.delay.assert_called_once_with(str(job.id))
+    app.state.rerender_task.delay.assert_called_once_with(str(job.id), ANY)
 
 
 @pytest.mark.asyncio

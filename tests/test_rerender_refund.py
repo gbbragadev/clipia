@@ -39,8 +39,9 @@ async def test_refund_rerender_cost_nao_perde_valor_se_db_falha(monkeypatch):
     monkeypatch.setattr(worker_tasks, "_send_admin_alert", lambda title, body: alerts.append((title, body)))
     worker_tasks._redis.hset("job:job-refund-x", mapping={"rerender_cost": 2})
 
-    worker_tasks._refund_rerender_cost("job-refund-x")
+    refunded = worker_tasks._refund_rerender_cost("job-refund-x")
 
+    assert refunded is False
     assert (
         worker_tasks._redis.hget("job:job-refund-x", "rerender_cost") == "2"
     ), "falha no refund deve restaurar o marcador para revisao manual"

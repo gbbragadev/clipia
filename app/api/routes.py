@@ -1,9 +1,9 @@
 import asyncio
 import json
 import logging
-import math
 import shutil
 import time
+import uuid
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -36,6 +36,15 @@ from app.models import (
 from app.observability import record_credit_metric
 from app.pricing import get_generation_credit_cost
 from app.redis_pool import get_redis
+from app.services.job_operations import (
+    InsufficientCredits,
+    InvalidJobOperation,
+    begin_rerender,
+    mark_generation_dispatched,
+    mark_rerender_dispatched,
+    refund_rerender,
+    request_generation_cancel,
+)
 from app.services.llm import complete_text, strip_code_fences
 from app.services.remotion import scene_sort_key
 from app.services.trends import fetch_trends, get_example_topics
@@ -361,6 +370,9 @@ async def generate(
             status_code=503,
             detail="Nao foi possivel iniciar a geracao agora. Seu credito foi estornado, tente novamente em instantes.",
         )
+
+    await mark_generation_dispatched(db, job.id)
+    await db.commit()
 
     if is_ai_video:
         # Telemetria de custo p/ medir gasto real (dono pediu): Seedance ~R$0,67/s.
@@ -1221,10 +1233,14 @@ Regras:
         result = {"suggestions": [], "general_feedback": raw}
 
     async with get_lock(f"job:{job.id}:pending_credits"):
-        refreshed_job = await db.get(Job, job.id)
-        refreshed_job.pending_credits = (refreshed_job.pending_credits or 0.0) + 0.5
+        pending_result = await db.execute(
+            update(Job)
+            .where(Job.id == job.id)
+            .values(pending_credits=func.coalesce(Job.pending_credits, 0.0) + 0.5)
+            .returning(Job.pending_credits)
+        )
+        pending_credits = float(pending_result.scalar_one())
         await db.commit()
-        pending_credits = refreshed_job.pending_credits
 
     result["pending_credits"] = pending_credits
     return result
@@ -1244,61 +1260,64 @@ async def render_video(
     """Re-render video with current editor state via FFmpeg+NVENC."""
     job = await get_owned_job(db, user, job_id)
     job_id = str(job.id)
-    async with get_lock(f"render:{job_id}"):
-        # Re-le o estado fresco DENTRO do lock: cada request concorrente carregou seu proprio
-        # job ANTES do lock, entao um render paralelo ja pode ter zerado o pending. commit encerra
-        # a transacao de leitura -> refresh enxerga o que o concorrente commitou (cobra so 1x).
-        await db.commit()
-        await db.refresh(job)
-        cost = math.ceil(job.pending_credits or 0.0)
-        if cost > 0:
-            # commit=False: debito e pending_credits=0 na MESMA transacao (erro no meio nao
-            # deixa credito cobrado com pending ainda acumulado, nem o inverso).
-            await _debit_credits(db, user.id, cost, commit=False)
-            job.pending_credits = 0.0
-            await db.commit()
-
     job_dir = Path(settings.STORAGE_DIR) / "jobs" / job_id
     if not job_dir.exists():
         raise not_found_error()
 
-    from app.worker.tasks import task_rerender_video
-
-    # Marca "rendering" ANTES de enfileirar: entre o POST e o worker (--pool=solo, fila
-    # pode estar ocupada) o Redis ainda diria "completed" do pipeline original e o poll
-    # do editor declararia o re-render concluido sem ele ter comecado (baixava a versao
-    # pre-edicao). Setar antes do .delay evita sobrescrever o progresso real do worker.
-    _redis.hset(
-        f"job:{job_id}",
-        mapping={
-            "status": "rendering",
-            "progress": 0.0,
-            "current_step": "queued",
-            "detail": "Re-render enfileirado...",
-            # o worker le isto p/ devolver o valor EXATO se o re-render falhar
-            # (credit_cost do job e o custo da geracao, nao do export)
-            "rerender_cost": cost,
-        },
-    )
-    try:
-        task_rerender_video.delay(job_id)
-    except Exception as e:  # noqa: BLE001 — enfileirar falhou (Celery/Redis down): estorna e reverte
-        if cost > 0 and await _refund_credits_safe(db, user.id, cost, "render/enqueue"):
-            job.pending_credits = float(cost)  # restaura p/ a re-tentativa cobrar de novo
+    async with get_lock(f"render:{job_id}"):
+        operation_id = uuid.uuid4()
+        try:
+            operation = await begin_rerender(
+                db,
+                job.id,
+                user.id,
+                operation_id=operation_id,
+            )
             await db.commit()
+        except InsufficientCredits as exc:
+            await db.rollback()
+            raise HTTPException(status_code=402, detail=ErrorMessages.INSUFFICIENT_CREDITS) from exc
+        except InvalidJobOperation as exc:
+            await db.rollback()
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+        # Generation cancellation is a separate operation. Only a valid,
+        # persisted rerender may clear a stale legacy generation flag.
+        _redis.delete(f"job:{job_id}:cancelled")
+
+        from app.worker.tasks import task_rerender_video
+
         _redis.hset(
             f"job:{job_id}",
             mapping={
-                "status": "completed",
-                "detail": "Re-render nao pode ser enfileirado; credito estornado.",
-                "rerender_cost": 0,
+                "status": "rendering",
+                "progress": 0.0,
+                "current_step": "queued",
+                "detail": "Re-render enfileirado...",
+                "rerender_cost": operation.cost,
             },
         )
-        logger.error("task_rerender_video.delay falhou job=%s: %s — credito estornado", job_id, e)
-        raise HTTPException(
-            status_code=503,
-            detail="Nao foi possivel iniciar o re-render agora. Seu credito foi estornado, tente novamente.",
-        )
+        try:
+            task_rerender_video.delay(job_id, str(operation_id))
+        except Exception as e:  # noqa: BLE001 - preserve the existing enqueue refund contract
+            await refund_rerender(db, job.id, operation_id)
+            await db.commit()
+            _redis.hset(
+                f"job:{job_id}",
+                mapping={
+                    "status": "completed",
+                    "detail": "Re-render nao pode ser enfileirado; credito estornado.",
+                    "rerender_cost": 0,
+                },
+            )
+            logger.error("task_rerender_video.delay falhou job=%s: %s - credito estornado", job_id, e)
+            raise HTTPException(
+                status_code=503,
+                detail="Nao foi possivel iniciar o re-render agora. Seu credito foi estornado, tente novamente.",
+            )
+
+        if await mark_rerender_dispatched(db, job.id, operation_id):
+            await db.commit()
 
     return {
         "status": "rendering",
@@ -1371,11 +1390,17 @@ async def cancel_job(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Retrieve job details."""
+    """Persist cancellation before signalling workers through Redis."""
     job = await get_owned_job(db, user, job_id)
     job_id = str(job.id)
 
-    _redis.set(f"job:{job_id}:cancelled", "true")
+    try:
+        await request_generation_cancel(db, job.id, user.id)
+    except InvalidJobOperation as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    await db.commit()
+
+    _redis.set(f"job:{job_id}:cancelled", "true", ex=24 * 60 * 60)
     _redis.hset(
         f"job:{job_id}",
         mapping={"status": "cancelling", "detail": "Cancelamento solicitado pelo usuario."},

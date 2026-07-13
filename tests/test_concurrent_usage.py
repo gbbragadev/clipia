@@ -98,7 +98,7 @@ async def test_concurrent_verify_email_only_credits_once_without_process_lock(
 async def test_concurrent_render_only_debits_pending_credits_once(
     client, db_session, job_factory, verified_user, auth_headers, storage_dir
 ):
-    job = await job_factory(pending_credits=2.0)
+    job = await job_factory(status="completed", pending_credits=2.0)
     job_dir = storage_dir / "jobs" / str(job.id)
     job_dir.mkdir(parents=True)
 
@@ -110,7 +110,9 @@ async def test_concurrent_render_only_debits_pending_credits_once(
     refreshed_user = await db_session.get(User, verified_user.id)
     refreshed_job = await db_session.get(Job, job.id)
 
-    assert success_count == 2, "Both render calls may return success once the first call clears pending credits."
+    conflict_count = sum(response.status_code == 409 for response in responses)
+    assert success_count == 1, "Only the request that creates the durable operation may succeed."
+    assert conflict_count == 1, "The competing render must be rejected while the first operation is active."
     assert refreshed_user.credits == 3, "Concurrent render should charge the pending amount only once."
     assert refreshed_job.pending_credits == 0.0, "Concurrent render should leave no pending credits behind."
 

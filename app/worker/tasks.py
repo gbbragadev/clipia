@@ -6,6 +6,7 @@ import smtplib
 import subprocess
 import threading
 import time
+import uuid
 from datetime import datetime, timedelta, timezone
 from email.mime.text import MIMEText
 from pathlib import Path
@@ -146,37 +147,26 @@ def _enqueue_dead_letter(job_id: str, error: str) -> None:
 
 def _refund_job_credit(job_id: str, status_value: str, error: str, cleanup_files: bool = False):
     """Persist final state and refund the original generation credit once."""
-    _update_job(job_id, status_value, error=error, detail=error)
-
     try:
-        from sqlalchemy import select, update
-
         from app.db.engine import worker_session as async_session  # NullPool: seguro com asyncio.run() por task
-        from app.db.models import Job, User
+        from app.services.job_operations import refund_generation
 
         async def _refund():
             async with async_session() as session:
-                result = await session.execute(select(Job).where(Job.id == job_id))
-                job = result.scalar_one_or_none()
-                if job:
-                    if cleanup_files:
-                        cleanup_job_dir(job_id)
-                        remove_path(get_output_dir() / f"{job_id}.mp4")
-                    if job.status in {"failed", "cancelled"}:
-                        job.status = status_value
-                        job.error = error
-                        await session.commit()
-                        return
-                    job.status = status_value
-                    job.error = error
-                    refund_amount = job.credit_cost or 1
-                    await session.execute(
-                        update(User).where(User.id == job.user_id).values(credits=User.credits + refund_amount)
-                    )
+                applied = await refund_generation(session, job_id, status=status_value, error=error)
+                if applied:
                     await session.commit()
-                    logger.info("Refunded %d credit(s) for %s job %s", refund_amount, status_value, job_id)
+                return applied
 
-        asyncio.run(_refund())
+        applied = asyncio.run(_refund())
+        if not applied:
+            return False
+        if cleanup_files:
+            cleanup_job_dir(job_id)
+            remove_path(get_output_dir() / f"{job_id}.mp4")
+        _update_job(job_id, status_value, error=error, detail=error)
+        logger.info("Refunded generation credit for %s job %s", status_value, job_id)
+        return True
     except Exception as e:
         logger.error("Failed to refund credit for job %s: %s", job_id, e)
         # Sem isto a falha era 100% silenciosa: o job ja esta "failed" no Redis, o
@@ -185,6 +175,7 @@ def _refund_job_credit(job_id: str, status_value: str, error: str, cleanup_files
             "ClipIA - refund FALHOU",
             f"Job {job_id}: credito da geracao nao foi devolvido ({e}). Reembolsar manualmente.",
         )
+        return False
 
 
 def _fail_job(job_id: str, error: str):
@@ -196,7 +187,7 @@ def _fail_job(job_id: str, error: str):
     _enqueue_dead_letter(job_id, error)
 
 
-def _refund_rerender_cost(job_id: str) -> None:
+def _refund_rerender_cost(job_id: str) -> bool:
     """Devolve o custo exato do export (POST /render) e restaura pending_credits.
 
     O rerender debita ceil(pending_credits) na rota e zera o pending. Em falha,
@@ -210,7 +201,7 @@ def _refund_rerender_cost(job_id: str) -> None:
     except (TypeError, ValueError):
         cost = 0
     if cost <= 0:
-        return
+        return True
     # zera ANTES de devolver: uma segunda passada pelo mesmo job nao refunda em dobro
     _redis.hset(f"job:{job_id}", mapping={"rerender_cost": 0})
     try:
@@ -230,7 +221,14 @@ def _refund_rerender_cost(job_id: str) -> None:
                 await session.commit()
                 logger.info("Refunded %d rerender credit(s) for job %s", cost, job_id)
 
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            pass
+        else:
+            raise RuntimeError("legacy rerender refund cannot run inside an active event loop")
         asyncio.run(_refund())
+        return True
     except Exception as e:  # noqa: BLE001
         logger.error("Failed to refund rerender cost for job %s: %s", job_id, e)
         # devolve o marcador p/ revisao manual nao perder o valor devido
@@ -239,6 +237,131 @@ def _refund_rerender_cost(job_id: str) -> None:
             "ClipIA - refund de re-render FALHOU",
             f"Job {job_id}: {cost} credito(s) do export nao foram devolvidos ({e}). Reembolsar manualmente.",
         )
+        return False
+
+
+def _claim_rerender_operation(job_id: str, operation_id: str | None) -> bool:
+    from app.db.engine import worker_session as async_session
+    from app.services.job_operations import claim_legacy_rerender, claim_rerender
+
+    try:
+        parsed_operation_id = uuid.UUID(operation_id) if operation_id is not None else None
+    except (TypeError, ValueError):
+        return False
+
+    async def _claim() -> bool:
+        async with async_session() as session:
+            if parsed_operation_id is None:
+                claimed = await claim_legacy_rerender(session, job_id)
+            else:
+                claimed = await claim_rerender(session, job_id, parsed_operation_id)
+            if claimed:
+                await session.commit()
+            return claimed
+
+    try:
+        return asyncio.run(_claim())
+    except Exception as exc:  # noqa: BLE001
+        logger.error("Failed to claim rerender operation for job %s: %s", job_id, exc)
+        return False
+
+
+def _publish_rerender_operation(
+    job_id: str,
+    operation_id: str | None,
+    output_path: str,
+    *,
+    engine: str,
+    duration: float,
+) -> str | None:
+    from app.db.engine import worker_session as async_session
+    from app.services.job_operations import complete_locked_rerender, lock_rerender_for_publication
+
+    try:
+        parsed_operation_id = uuid.UUID(operation_id) if operation_id is not None else None
+    except (TypeError, ValueError):
+        return None
+
+    async def _publish() -> str | None:
+        async with async_session() as session:
+            job = await lock_rerender_for_publication(session, job_id, parsed_operation_id)
+            if job is None:
+                return None
+
+            output_dir = get_output_dir()
+            final_path = str(output_dir / f"{job_id}.mp4")
+            final_src: str | None = None
+            try:
+                final_src = append_outro(output_path)
+                shutil.copy2(final_src, final_path)
+                _write_thumbnail(final_path, str(output_dir / f"{job_id}.jpg"))
+
+                telemetry = dict(job.telemetry or {})
+                rerenders = list(telemetry.get("rerenders") or [])[-9:]
+                rerenders.append(
+                    {
+                        "engine": engine,
+                        "duration_seconds": duration,
+                        "at": datetime.now(timezone.utc).isoformat(),
+                    }
+                )
+                telemetry["rerenders"] = rerenders
+                job.telemetry = telemetry
+                if not complete_locked_rerender(job, parsed_operation_id):
+                    return None
+                await session.commit()
+                return final_path
+            finally:
+                if final_src is not None and final_src != output_path:
+                    Path(final_src).unlink(missing_ok=True)
+
+    return asyncio.run(_publish())
+
+
+def _refund_rerender_operation(job_id: str, operation_id: str | None) -> bool:
+    if operation_id is None:
+        if not _refund_rerender_cost(job_id):
+            return False
+        from app.db.engine import worker_session as async_session
+        from app.services.job_operations import finish_legacy_rerender
+
+        async def _finish_legacy() -> bool:
+            async with async_session() as session:
+                finished = await finish_legacy_rerender(session, job_id, state="refunded")
+                if finished:
+                    await session.commit()
+                return finished
+
+        try:
+            return asyncio.run(_finish_legacy())
+        except Exception as exc:  # noqa: BLE001
+            logger.error("Failed to close legacy rerender operation for job %s: %s", job_id, exc)
+            return False
+
+    from app.db.engine import worker_session as async_session
+    from app.services.job_operations import refund_rerender
+
+    try:
+        parsed_operation_id = uuid.UUID(operation_id)
+    except (TypeError, ValueError):
+        return False
+
+    async def _refund() -> bool:
+        async with async_session() as session:
+            refunded = await refund_rerender(session, job_id, parsed_operation_id)
+            if refunded:
+                await session.commit()
+            return refunded
+
+    try:
+        return asyncio.run(_refund())
+    except Exception as exc:  # noqa: BLE001
+        logger.error("Failed to refund rerender operation for job %s: %s", job_id, exc)
+        _send_admin_alert(
+            "ClipIA - refund de re-render FALHOU",
+            f"Job {job_id}, operacao {operation_id}: refund DB falhou ({exc}). Reembolsar manualmente.",
+        )
+        return False
 
 
 def _is_cancelled(job_id: str) -> bool:
@@ -1145,10 +1268,8 @@ def task_finalize(self, video_path: str, job_id: str) -> str:
 
         # Save script to PostgreSQL for the editor (keep job dir for editing)
         try:
-            from sqlalchemy import update
-
             from app.db.engine import worker_session as async_session  # NullPool: seguro com asyncio.run() por task
-            from app.db.models import Job
+            from app.services.job_operations import finalize_generation
 
             job_dir = get_job_dir(job_id)
             script_path = job_dir / "script.json"
@@ -1161,23 +1282,29 @@ def task_finalize(self, video_path: str, job_id: str) -> str:
 
             async def _save_script():
                 async with async_session() as session:
-                    await session.execute(
-                        update(Job)
-                        .where(Job.id == job_id)
-                        .values(
-                            script=script_data,
-                            status="editable",
-                            video_url=final_path,
-                            telemetry=telemetry,
-                        )
+                    transition = await finalize_generation(
+                        session,
+                        job_id,
+                        script=script_data,
+                        video_url=final_path,
+                        telemetry=telemetry,
                     )
-                    await session.commit()
+                    if transition == "finalized":
+                        await session.commit()
+                    return transition
 
-            asyncio.run(_save_script())
+            transition = asyncio.run(_save_script())
+            if transition == "cancelled":
+                _cancel_job(job_id)
+                return ""
+            if transition != "finalized":
+                return ""
+            _redis.delete(f"job:{job_id}:cancelled")
             # So depois do commit (job realmente editavel): convite de volta 1x por job.
             _send_video_ready_email(job_id)
         except Exception as e:
-            logger.warning(f"Could not save script to DB: {e}")
+            logger.error("Could not save finalized job to DB: %s", e)
+            raise
 
         _update_job(job_id, "completed", None, 1.0, detail="Video final pronto para download.")
         return final_path
@@ -1190,14 +1317,15 @@ def task_finalize(self, video_path: str, job_id: str) -> str:
 
 
 @celery_app.task(name="rerender_video", bind=True, soft_time_limit=300, time_limit=360)
-def task_rerender_video(self, job_id: str) -> str:
+def task_rerender_video(self, job_id: str, operation_id: str | None = None) -> str:
     """Re-render the edited video for export.
 
     Hybrid engine: Remotion (fiel ao preview) by default, FFmpeg+NVENC as fallback
     via settings.RENDER_ENGINE. Runs in background — user never waits.
     """
+    operation_output_path: str | None = None
     try:
-        if _check_cancelled(job_id):
+        if not _claim_rerender_operation(job_id, operation_id):
             return ""
         rerender_t0 = time.monotonic()
         _update_job(job_id, "rendering", "preparing", 0.05, detail="Preparando arquivos para re-render...")
@@ -1271,7 +1399,9 @@ def task_rerender_video(self, job_id: str) -> str:
         if settings.RENDER_ENGINE == "remotion":
             from app.services.remotion import invoke_remotion_render
 
-            output_path = str(job_dir / "final_remotion.mp4")
+            operation_suffix = operation_id or "legacy"
+            output_path = str(job_dir / f"final_remotion_{operation_suffix}.mp4")
+            operation_output_path = output_path
             _update_job(job_id, "rendering", "encoding", 0.2, detail="Renderizando com Remotion...")
             logger.info(f"Starting Remotion re-render for job {job_id}")
             invoke_remotion_render(
@@ -1296,7 +1426,9 @@ def task_rerender_video(self, job_id: str) -> str:
                 if music_file.exists():
                     music_path = str(music_file)
 
-            output_path = str(job_dir / "final_edited.mp4")
+            operation_suffix = operation_id or "legacy"
+            output_path = str(job_dir / f"final_edited_{operation_suffix}.mp4")
+            operation_output_path = output_path
             _update_job(job_id, "rendering", "encoding", 0.2, detail="Re-renderizando video...")
             logger.info(f"Starting FFmpeg+NVENC re-render for job {job_id}")
 
@@ -1318,49 +1450,18 @@ def task_rerender_video(self, job_id: str) -> str:
             )
 
         _update_job(job_id, "rendering", "finalizing", 0.9, detail="Finalizando re-render...")
+        duration = round(time.monotonic() - rerender_t0, 1)
+        final_path = _publish_rerender_operation(
+            job_id,
+            operation_id,
+            output_path,
+            engine=settings.RENDER_ENGINE,
+            duration=duration,
+        )
+        if final_path is None:
+            return ""
 
-        # Copy to output dir (becomes downloadable version)
-        output_dir = get_output_dir()
-        final_path = str(output_dir / f"{job_id}.mp4")
-        final_src = append_outro(output_path)  # selo de marca tambem no export editado (no-op-safe)
-        shutil.copy2(final_src, final_path)
-        if final_src != output_path:
-            Path(final_src).unlink(missing_ok=True)
-        _write_thumbnail(final_path, str(output_dir / f"{job_id}.jpg"))
-
-        # Telemetria do export: os t:{step} do hash sao first-write-only (colidem com a
-        # geracao), entao o rerender mede a propria duracao e apenda em Job.telemetry
-        # para a aba Economia enxergar exports do editor.
-        try:
-            from sqlalchemy import select as sa_select
-            from sqlalchemy import update as sa_update
-
-            from app.db.engine import worker_session as async_session
-            from app.db.models import Job
-
-            duration = round(time.monotonic() - rerender_t0, 1)
-
-            async def _save_rerender_telemetry():
-                async with async_session() as session:
-                    result = await session.execute(sa_select(Job.telemetry).where(Job.id == job_id))
-                    tel = dict(result.scalar_one_or_none() or {})
-                    rerenders = list(tel.get("rerenders") or [])[-9:]  # ponytail: cap 10 exports por job
-                    rerenders.append(
-                        {
-                            "engine": settings.RENDER_ENGINE,
-                            "duration_seconds": duration,
-                            "at": datetime.now(timezone.utc).isoformat(),
-                        }
-                    )
-                    tel["rerenders"] = rerenders
-                    await session.execute(sa_update(Job).where(Job.id == job_id).values(telemetry=tel))
-                    await session.commit()
-
-            asyncio.run(_save_rerender_telemetry())
-        except Exception as tel_err:  # noqa: BLE001 — telemetria nunca falha o export
-            logger.warning("telemetria do rerender %s falhou: %s", job_id, tel_err)
-
-        # zera o marcador de custo: export entregue, nada a devolver
+        # zera o marcador de custo legado: export entregue, nada a devolver
         _redis.hset(f"job:{job_id}", mapping={"rerender_cost": 0})
         _update_job(job_id, "completed", None, 1.0, detail="Re-render concluido.")
         logger.info(f"Re-render completed for job {job_id}")
@@ -1369,7 +1470,8 @@ def task_rerender_video(self, job_id: str) -> str:
         # NAO usar _handle_soft_timeout: ele devolve credit_cost (custo da GERACAO) e
         # marca "failed", bloqueando um editor que continua utilizavel. O export devolve
         # o proprio custo e deixa o job em "error" (re-tentavel).
-        _refund_rerender_cost(job_id)
+        if not _refund_rerender_operation(job_id, operation_id):
+            raise
         _update_job(
             job_id,
             "error",
@@ -1379,7 +1481,8 @@ def task_rerender_video(self, job_id: str) -> str:
         _enqueue_dead_letter(job_id, "rerender_video soft timeout")
         raise
     except Exception as e:
-        _refund_rerender_cost(job_id)
+        if not _refund_rerender_operation(job_id, operation_id):
+            raise
         _update_job(
             job_id,
             "error",
@@ -1388,3 +1491,6 @@ def task_rerender_video(self, job_id: str) -> str:
         )
         logger.error(f"Re-render failed for job {job_id}: {e}")
         raise
+    finally:
+        if operation_output_path is not None:
+            Path(operation_output_path).unlink(missing_ok=True)
