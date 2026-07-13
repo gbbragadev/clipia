@@ -11,9 +11,9 @@ export const SITE = {
   tagline: "Do tema ao vídeo vertical com IA",
 };
 
-/** Link de cadastro com UTM padrão da landing (convenção do brief de marketing). */
+/** Link SSR seguro; o AbProvider acrescenta atribuicao externa sem sobrescreve-la. */
 export function signupUrl(content: string): string {
-  return `${SITE.signup}?utm_source=landing&utm_medium=organic&utm_campaign=landing-conversao&utm_content=${content}`;
+  return `${SITE.signup}?placement=${encodeURIComponent(content)}`;
 }
 
 export const CTA_LABEL = "Criar vídeo grátis";
@@ -21,7 +21,7 @@ export const CTA_LABEL = "Criar vídeo grátis";
 /** Claim de gratuidade — sem número fixo até a decisão de WELCOME_CREDIT_BONUS.
  * Pode ser sobrescrito em produção via public/ab/headlines.json (knobs.freeClaim). */
 export const FREE_CLAIM =
-  "Grátis para começar: você ganha créditos de boas-vindas ao confirmar o e-mail. Sem cartão.";
+  "Comece com 2 créditos grátis — até 2 vídeos com voz padrão. Sem cartão.";
 
 export const NAV_LINKS = [
   { label: "Antes e depois", href: "#prova" },
@@ -125,7 +125,7 @@ export const FACTS = [
   { icon: "edit", text: "Editor completo incluso" },
   { icon: "layers", text: "10 templates de vídeo" },
   { icon: "bolt", text: "Créditos não expiram" },
-  { icon: "card", text: "Pix ou cartão" },
+  { icon: "card", text: "Pix e cartão" },
   { icon: "globe", text: "100% no navegador" },
 ] as const;
 
@@ -202,7 +202,7 @@ export const CREDIT_COSTS = [
 ] as const;
 
 export interface CreditPackage {
-  id: string;
+  id: "starter" | "popular" | "professional";
   name: string;
   credits: number;
   priceBrl: number; // em reais
@@ -220,7 +220,7 @@ export const PACKAGES: CreditPackage[] = [
     blurb: "30 vídeos com voz padrão — um por dia, o mês inteiro",
     featured: true,
   },
-  { id: "pro", name: "Pro", credits: 100, priceBrl: 129.9, blurb: "Volume de canal — o menor preço por vídeo" },
+  { id: "professional", name: "Profissional", credits: 100, priceBrl: 129.9, blurb: "Volume de canal — o menor preço por vídeo" },
 ];
 
 export function formatBrl(value: number): string {
@@ -280,7 +280,7 @@ export const NICHES: Niche[] = [
 export const FAQ_ITEMS = [
   {
     q: "O que eu ganho ao criar a conta?",
-    a: "Créditos de boas-vindas ao confirmar o e-mail, sem cartão de crédito e sem compromisso. Cada vídeo com voz padrão consome 1 crédito.",
+    a: FREE_CLAIM,
   },
   {
     q: "Como funcionam os créditos?",

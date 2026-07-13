@@ -1,8 +1,8 @@
 {
-  "_doc": "Variantes de headline da landing + knobs de copy. Este arquivo é servido do disco em produção: editar aqui troca a copy SEM rebuild/redeploy. Trecho entre *asteriscos* fica coral. As chaves espelham AB_DEFAULTS em src/components/landing/lib/data.ts (fallback embutido). O CTA carrega utm_content=<secao>-<variante> para medir conversão por variante.",
+  "_doc": "Variantes de headline da landing + knobs de copy. Este arquivo é servido do disco em produção: editar aqui troca a copy SEM rebuild/redeploy. Trecho entre *asteriscos* fica coral. As chaves espelham AB_DEFAULTS em src/components/landing/lib/data.ts (fallback embutido). O CTA usa placement e ab_variant sem sobrescrever UTMs externas.",
   "knobs": {
     "showBonusBadge": true,
-    "freeClaim": "Grátis para começar: você ganha créditos de boas-vindas ao confirmar o e-mail. Sem cartão."
+    "freeClaim": "Comece com 2 créditos grátis — até 2 vídeos com voz padrão. Sem cartão."
   },
   "sections": {
     "hero": {

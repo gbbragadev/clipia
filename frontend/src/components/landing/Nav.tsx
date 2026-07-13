@@ -4,11 +4,13 @@ import { cn } from "@/components/landing/utils/cn";
 import Logo from "@/components/brand/Logo";
 import { Button } from "@/components/landing/ui/Button";
 import { Icon } from "@/components/landing/icons";
-import { CTA_LABEL, NAV_LINKS, SITE, signupUrl } from "@/components/landing/lib/data";
+import { CTA_LABEL, NAV_LINKS, SITE } from "@/components/landing/lib/data";
+import { useAb } from "@/components/landing/lib/ab";
 import { useAuth } from "@/contexts/AuthContext";
 
 export function Nav() {
   const { user } = useAuth();
+  const ab = useAb();
   const [scrolled, setScrolled] = useState(false);
   const [open, setOpen] = useState(false);
 
@@ -62,7 +64,7 @@ export function Nav() {
               <Button href={SITE.login} variant="ghost" size="sm">
                 Entrar
               </Button>
-              <Button href={signupUrl("nav")} variant="primary" size="sm" iconRight="arrowRight">
+              <Button href={ab.signup("nav")} variant="primary" size="sm" iconRight="arrowRight">
                 {CTA_LABEL}
               </Button>
             </>
@@ -109,7 +111,7 @@ export function Nav() {
               </Button>
             ) : (
               <>
-                <Button href={signupUrl("nav-mobile")} variant="primary" size="lg" fullWidth iconRight="arrowRight">
+                <Button href={ab.signup("nav-mobile")} variant="primary" size="lg" fullWidth iconRight="arrowRight">
                   {CTA_LABEL}
                 </Button>
                 <Button href={SITE.login} variant="secondary" size="md" fullWidth>

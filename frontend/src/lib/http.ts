@@ -4,6 +4,16 @@ export function notifySessionExpired(): void {
   window.dispatchEvent(new CustomEvent('clipia:session-expired'))
 }
 
+export class ApiError extends Error {
+  readonly status: number
+
+  constructor(status: number, message: string) {
+    super(message)
+    this.name = 'ApiError'
+    this.status = status
+  }
+}
+
 function friendlyStatusMessage(status: number, fallback: string): string {
   if (status === 429) return 'Muitas requisições em pouco tempo. Aguarde um instante e tente novamente.'
   if (status === 502 || status === 503 || status === 504)
@@ -76,7 +86,7 @@ export async function fetchJson<T>(
       // NÃO deslogar aqui: um 401 de um recurso específico (job, download, composition…) não significa
       // sessão expirada. A expiração real é detectada por getMe() (load + polling 5min do AuthContext).
       // Deslogar em qualquer 401 derrubava a sessão válida por falhas pontuais (BUG-R003).
-      throw new Error(await readApiError(response, fallbackMessage))
+      throw new ApiError(response.status, await readApiError(response, fallbackMessage))
     }
 
     // await dentro do try: sem ele, um corpo 200 com JSON invalido rejeitaria FORA

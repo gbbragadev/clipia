@@ -13,6 +13,7 @@ import { FAQ } from "@/components/landing/sections/FAQ";
 import { FinalCta } from "@/components/landing/sections/FinalCta";
 import { Footer } from "@/components/landing/sections/Footer";
 import { SITE } from "@/lib/site";
+import { AbProvider } from "@/components/landing/lib/ab";
 
 export const metadata: Metadata = {
   alternates: { canonical: SITE.url },
@@ -23,7 +24,8 @@ export const metadata: Metadata = {
 // como funciona → preço transparente → FAQ honesta → CTA final.
 export default function Home() {
   return (
-    <div id="top" className="min-h-screen bg-ink text-cloud antialiased">
+    <AbProvider>
+      <div id="top" className="min-h-screen bg-ink text-cloud antialiased">
       <script
         type="application/ld+json"
         dangerouslySetInnerHTML={{
@@ -54,6 +56,7 @@ export default function Home() {
       </main>
       <Footer />
       <StickyCta />
-    </div>
+      </div>
+    </AbProvider>
   );
 }

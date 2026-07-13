@@ -14,7 +14,7 @@ export const strings = {
     },
     register: {
       title: "Crie sua conta",
-      subtitle: "Verifique seu email e ganhe seus créditos de boas-vindas",
+      subtitle: "Comece com 2 créditos grátis — até 2 vídeos com voz padrão. Sem cartão.",
       name: "Nome",
       email: "Email",
       password: "Senha",

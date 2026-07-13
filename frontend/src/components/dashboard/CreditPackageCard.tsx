@@ -1,47 +1,33 @@
 'use client'
 
-import { useState } from 'react'
-import type { CreditPackage, PaymentProvider } from '@/lib/payments'
-import { createCheckout } from '@/lib/payments'
-import { useToast } from '@/components/ui/feedback'
+import type { CreditPackage } from '@/lib/payments'
+import { apiIdToSelectedPackage, selectedPackageLabel } from '@/lib/package-intent'
 
 interface CreditPackageCardProps {
   pkg: CreditPackage
   highlight?: boolean
   badge?: string
-  provider?: PaymentProvider
+  selected?: boolean
+  onSelect: () => void
 }
 
-export default function CreditPackageCard({ pkg, highlight, badge, provider = 'stripe' }: CreditPackageCardProps) {
-  const [loading, setLoading] = useState(false)
-  const { error: toastError } = useToast()
-
+export default function CreditPackageCard({ pkg, highlight, badge, selected = false, onSelect }: CreditPackageCardProps) {
   const totalCredits = pkg.credits + (pkg.bonus_credits ?? 0)
   const pricePerCredit = (pkg.price_brl / 100 / totalCredits).toFixed(2).replace('.', ',')
-
-  async function handleBuy() {
-    setLoading(true)
-    try {
-      const url = await createCheckout(pkg.id, provider)
-      window.location.href = url
-    } catch (err) {
-      toastError(
-        'Falha ao iniciar checkout',
-        err instanceof Error ? err.message : 'Tente novamente em instantes.',
-      )
-      setLoading(false)
-    }
-  }
+  const intent = apiIdToSelectedPackage(pkg.id)
+  const displayName = intent ? selectedPackageLabel(intent) : pkg.name
 
   return (
     <div
+      data-package-id={pkg.id}
+      aria-current={selected ? 'true' : undefined}
       className="relative flex flex-col items-center p-6 rounded-2xl transition-all duration-200"
       style={{
         background: 'var(--bg-surface)',
-        border: highlight ? '2px solid var(--accent-primary, #ff5638)' : '1px solid var(--border-subtle)',
+        border: selected || highlight ? '2px solid var(--accent-primary, #ff5638)' : '1px solid var(--border-subtle)',
       }}
     >
-      {badge && (
+      {(selected || badge) && (
         <span
           className="absolute -top-3 left-1/2 -translate-x-1/2 px-3 py-0.5 rounded-full text-xs font-semibold"
           style={{
@@ -49,12 +35,12 @@ export default function CreditPackageCard({ pkg, highlight, badge, provider = 's
             color: '#fff',
           }}
         >
-          {badge}
+          {selected ? 'Pacote preselecionado' : badge}
         </span>
       )}
 
       <h3 className="text-lg font-semibold mt-2" style={{ color: 'var(--text-primary)' }}>
-        {pkg.name}
+        {displayName}
       </h3>
 
       <div className="mt-4 text-center">
@@ -89,8 +75,9 @@ export default function CreditPackageCard({ pkg, highlight, badge, provider = 's
       </p>
 
       <button
-        onClick={handleBuy}
-        disabled={loading}
+        type="button"
+        onClick={onSelect}
+        disabled={selected}
         className="mt-6 w-full py-2.5 rounded-xl text-sm font-semibold transition-all duration-200 cursor-pointer disabled:opacity-50"
         style={{
           background: highlight
@@ -100,7 +87,7 @@ export default function CreditPackageCard({ pkg, highlight, badge, provider = 's
           border: highlight ? 'none' : '1px solid var(--border-subtle)',
         }}
       >
-        {loading ? 'Redirecionando...' : 'Comprar'}
+        {selected ? 'Selecionado' : `Escolher ${displayName}`}
       </button>
     </div>
   )

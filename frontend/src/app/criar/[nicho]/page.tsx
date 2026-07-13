@@ -10,6 +10,7 @@ import { CinematicSection } from "@/components/ui/CinematicSection";
 import { GlowCard } from "@/components/ui/GlowCard";
 import { getAllNicheSlugs, getNicheBySlug } from "@/lib/niches";
 import { getShowcaseVideosForNiche } from "@/lib/showcase";
+import { FREE_CLAIM } from "@/components/landing/lib/data";
 
 const BASE = "https://clipia.com.br";
 
@@ -80,7 +81,7 @@ export default async function NichoPage({
                 Ver mais exemplos
               </Link>
             </div>
-            <p className="mt-3 text-xs text-slate-400">Vídeos grátis ao criar a conta. Sem cartão de crédito.</p>
+            <p className="mt-3 text-xs text-slate-400">{FREE_CLAIM}</p>
           </div>
         </CinematicSection>
 
@@ -196,7 +197,7 @@ export default async function NichoPage({
               <h2 className="text-2xl md:text-3xl font-bold text-white mb-3">
                 Pronto para criar seu vídeo de {n.label.toLowerCase()}?
               </h2>
-              <p className="text-slate-400 mb-6">Vídeos grátis ao criar a conta. Sem cartão de crédito.</p>
+              <p className="text-slate-400 mb-6">{FREE_CLAIM}</p>
               <Link
                 href={ctaHref(n.slug)}
                 className="inline-block px-8 py-3.5 rounded-xl bg-gradient-to-r from-coral to-azure text-white font-bold hover:opacity-90 transition shadow-lg shadow-coral/25"

@@ -57,7 +57,7 @@ const sharedFaq = (): NicheFAQ[] => [
   },
   {
     question: 'Quanto custa para começar?',
-    answer: 'Você ganha créditos de boas-vindas ao criar a conta, sem cartão de crédito — cada crédito gera um vídeo completo. Depois, pacotes de créditos a partir de R$19,90, sem assinatura.',
+    answer: 'Comece com 2 créditos grátis — até 2 vídeos com voz padrão. Sem cartão. Depois, pacotes de créditos a partir de R$19,90, sem assinatura.',
   },
   {
     question: 'Posso usar os vídeos comercialmente?',

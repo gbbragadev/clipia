@@ -1,5 +1,6 @@
 import { strings } from '@/lib/strings';
 import { notifySessionExpired } from "./http";
+import type { SelectedPackage } from "./package-intent";
 
 const API_BASE = "";
 
@@ -52,6 +53,7 @@ export interface User {
   plan: string;
   email_verified: boolean;
   referral_code: string;
+  selected_package?: SelectedPackage | null;
 }
 
 export interface AuthResponse {
@@ -90,6 +92,7 @@ export interface RegisterPayload {
   utm_campaign?: string;
   turnstile_token?: string;
   consent?: boolean;
+  selected_package?: SelectedPackage;
 }
 
 export async function register(email: string, name: string, password: string, extra?: Omit<RegisterPayload, "email" | "name" | "password">): Promise<AuthResponse> {

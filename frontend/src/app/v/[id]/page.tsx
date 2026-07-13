@@ -4,6 +4,7 @@ import { notFound } from "next/navigation";
 import Logo from "@/components/brand/Logo";
 import { Button } from "@/components/landing/ui/Button";
 import showcase from "../../../../public/showcase/showcase.json";
+import { FREE_CLAIM } from "@/components/landing/lib/data";
 
 // Página pública de compartilhamento (loop viral): vídeo + "crie o seu".
 // Hoje serve os vídeos do showcase; vídeos de usuário entram quando existir
@@ -138,7 +139,7 @@ export default async function SharePage({
           </Button>
         </div>
         <p className="mt-3 text-[13px] text-mist-2">
-          Grátis para começar: créditos de boas-vindas ao confirmar o e-mail. Sem cartão.
+          {FREE_CLAIM}
         </p>
       </main>
 

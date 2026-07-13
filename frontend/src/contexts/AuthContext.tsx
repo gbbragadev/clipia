@@ -13,6 +13,7 @@ import {
   getToken,
   NetworkError,
 } from "@/lib/auth";
+import type { SelectedPackage } from "@/lib/package-intent";
 import { getStoredUTM, clearStoredUTM } from "@/hooks/useUTM";
 import { useToast } from "@/components/ui/feedback";
 
@@ -20,9 +21,9 @@ interface AuthContextType {
   user: User | null;
   loading: boolean;
   login: (email: string, password: string) => Promise<void>;
-  register: (email: string, name: string, password: string, turnstileToken?: string, consent?: boolean) => Promise<void>;
+  register: (email: string, name: string, password: string, turnstileToken?: string, consent?: boolean, selectedPackage?: SelectedPackage) => Promise<void>;
   logout: () => void;
-  refreshUser: () => Promise<void>;
+  refreshUser: () => Promise<User | null>;
 }
 
 const AuthContext = createContext<AuthContextType | null>(null);
@@ -103,9 +104,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
-  const register = useCallback(async (email: string, name: string, password: string, turnstileToken?: string, consent?: boolean) => {
+  const register = useCallback(async (email: string, name: string, password: string, turnstileToken?: string, consent?: boolean, selectedPackage?: SelectedPackage) => {
     const utm = getStoredUTM();
-    const res = await authRegister(email, name, password, { ...utm, turnstile_token: turnstileToken, consent });
+    const res = await authRegister(email, name, password, {
+      ...utm,
+      turnstile_token: turnstileToken,
+      consent,
+      selected_package: selectedPackage,
+    });
     // Intenção de nicho (/criar/[nicho] → utm_campaign=nicho-{slug}): sobrevive ao
     // cadastro para o dashboard aplicar template/estilo/tema recomendados UMA vez
     // após o OTP — quem chega buscando "drama histórico" não cai num form genérico.
@@ -135,7 +141,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     try {
       const me = await getMe();
       setUser(me);
-    } catch { /* silent */ }
+      return me;
+    } catch {
+      return null;
+    }
   }, []);
 
   return (

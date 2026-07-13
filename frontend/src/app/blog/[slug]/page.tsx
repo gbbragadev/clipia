@@ -7,6 +7,7 @@ import { JsonLd } from "@/components/StructuredData/JsonLd";
 import { blogPosts, getPostBySlug } from "@/lib/blog-posts";
 import { getArticleLinkProps } from "@/lib/markdown-links";
 import { canonicalUrl, SITE } from "@/lib/site";
+import { FREE_CLAIM } from "@/components/landing/lib/data";
 
 const ARTICLE_ELEMENTS = [
   "h2",
@@ -140,7 +141,7 @@ export default async function BlogPostPage({
               Pronto para criar seu primeiro vídeo?
             </h2>
             <p className="text-slate-400 mb-6">
-              Créditos grátis de boas-vindas. Sem cartão de crédito.
+              {FREE_CLAIM}
             </p>
             <Link
               href="/auth/register"
