@@ -44,6 +44,14 @@ def record_credit_metric(kind: str, amount: float) -> None:
         _CREDIT_TOTALS[kind] += amount
 
 
+def _metric_path(request: Request) -> str:
+    route = request.scope.get("route")
+    route_path = getattr(route, "path", None)
+    if isinstance(route_path, str) and route_path:
+        return route_path
+    return "__unmatched__"
+
+
 async def access_log_middleware(request: Request, call_next):
     request_id = request.headers.get("X-Request-ID") or str(uuid.uuid4())[:8]
     start = time.perf_counter()
@@ -51,7 +59,7 @@ async def access_log_middleware(request: Request, call_next):
 
     duration_ms = round((time.perf_counter() - start) * 1000, 2)
     path = request.url.path
-    record_request_metric(request.method, path, response.status_code)
+    record_request_metric(request.method, _metric_path(request), response.status_code)
 
     if path not in {"/health", "/health/deep"}:
         payload = {

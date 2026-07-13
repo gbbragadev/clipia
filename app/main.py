@@ -1,4 +1,5 @@
 import logging
+import secrets
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
@@ -10,6 +11,7 @@ from pydantic import ValidationError
 from slowapi import Limiter
 from slowapi.errors import RateLimitExceeded
 from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from app.analytics.routes import router as analytics_router
 from app.api.routes import router
@@ -35,6 +37,10 @@ def _get_cors_origins() -> list[str]:
     if raw == "*":
         return ["*"]
     return [o.strip() for o in raw.split(",") if o.strip()]
+
+
+def _get_trusted_hosts() -> list[str]:
+    return [host.strip() for host in settings.TRUSTED_HOSTS.split(",") if host.strip()]
 
 
 limiter = Limiter(key_func=client_ip, default_limits=[settings.RATE_LIMIT_DEFAULT])
@@ -71,14 +77,27 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         response = await call_next(request)
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["X-Frame-Options"] = "DENY"
-        response.headers["X-XSS-Protection"] = "1; mode=block"
-        response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+        response.headers["X-XSS-Protection"] = "0"
         response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+        response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
+        if settings.ENVIRONMENT == "production":
+            response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+            response.headers["Content-Security-Policy"] = (
+                "default-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
+            )
         return response
 
 
 def create_app() -> FastAPI:
-    app = FastAPI(title="ClipIA API", version=settings.APP_VERSION, lifespan=lifespan)
+    production = settings.ENVIRONMENT == "production"
+    app = FastAPI(
+        title="ClipIA API",
+        version=settings.APP_VERSION,
+        lifespan=lifespan,
+        docs_url=None if production else "/docs",
+        redoc_url=None if production else "/redoc",
+        openapi_url=None if production else "/openapi.json",
+    )
     app.state.limiter = limiter
     app.add_exception_handler(RateLimitExceeded, rate_limit_exceeded_handler)
     app.add_exception_handler(RequestValidationError, request_validation_exception_handler)
@@ -89,10 +108,14 @@ def create_app() -> FastAPI:
 
     app.add_middleware(SecurityHeadersMiddleware)
 
+    if production:
+        app.add_middleware(TrustedHostMiddleware, allowed_hosts=_get_trusted_hosts())
+
+    cors_origins = _get_cors_origins()
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=_get_cors_origins(),
-        allow_credentials=True,
+        allow_origins=cors_origins,
+        allow_credentials="*" not in cors_origins,
         allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
         allow_headers=["Content-Type", "Authorization", "X-Requested-With", "Idempotency-Key"],
         expose_headers=["Content-Range", "Accept-Ranges", "Content-Length"],
@@ -167,13 +190,22 @@ def create_app() -> FastAPI:
         description="Exposes application metrics for Prometheus scraping.",
         responses={200: {"description": "Metrics data in Prometheus format"}},
     )
-    async def metrics():
+    async def metrics(request: Request):
         """
         Prometheus metrics.
 
         Returns application metrics including request rates, latency, and resource usage
         in the standard Prometheus plain-text format.
         """
+        if production:
+            authorization = request.headers.get("Authorization", "")
+            scheme, _, token = authorization.partition(" ")
+            if scheme.lower() != "bearer" or not secrets.compare_digest(token, settings.METRICS_TOKEN):
+                return PlainTextResponse(
+                    "Unauthorized\n",
+                    status_code=401,
+                    headers={"WWW-Authenticate": "Bearer"},
+                )
         return PlainTextResponse(await render_metrics(), media_type="text/plain; version=0.0.4")
 
     return app

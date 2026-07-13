@@ -1,6 +1,7 @@
 import logging
 from pathlib import Path
 from typing import Literal
+from urllib.parse import urlsplit
 
 from pydantic_settings import BaseSettings
 
@@ -8,6 +9,8 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 
 
 class Settings(BaseSettings):
+    ENVIRONMENT: Literal["development", "test", "production"] = "development"
+
     # Proveniencia do build, injetada pelo pipeline/deploy. Defaults nao inventam
     # uma revisao ou horario quando o processo local nao recebeu esses metadados.
     APP_VERSION: str = "0.1.0"
@@ -199,6 +202,8 @@ class Settings(BaseSettings):
 
     # CORS
     CORS_ORIGINS: str = "http://localhost:3003"  # comma-separated, "*" for dev
+    TRUSTED_HOSTS: str = "localhost,127.0.0.1,testserver"
+    METRICS_TOKEN: str = ""
 
     # SMTP (email verification)
     SMTP_HOST: str = ""
@@ -227,6 +232,24 @@ def validate_production_settings(s: Settings) -> None:
     """Validate critical settings. Call on startup."""
     if s.JWT_SECRET in _WEAK_SECRETS or len(s.JWT_SECRET) < 32:
         raise ValueError("JWT_SECRET inseguro! Gere um com: openssl rand -hex 32")
+    if s.ENVIRONMENT == "production":
+        cors_origins = {origin.strip().rstrip("/") for origin in s.CORS_ORIGINS.split(",") if origin.strip()}
+        if "*" in cors_origins:
+            raise ValueError("CORS_ORIGINS nao pode conter '*' em producao")
+        trusted_hosts = {host.strip() for host in s.TRUSTED_HOSTS.split(",") if host.strip()}
+        if not trusted_hosts or "*" in trusted_hosts:
+            raise ValueError("TRUSTED_HOSTS deve listar hosts exatos em producao")
+        if len(s.METRICS_TOKEN) < 32:
+            raise ValueError("METRICS_TOKEN deve ter pelo menos 32 caracteres em producao")
+        if not s.FRONTEND_URL.startswith("https://"):
+            raise ValueError("FRONTEND_URL deve usar HTTPS em producao")
+        if not s.BACKEND_URL.startswith("https://"):
+            raise ValueError("BACKEND_URL deve usar HTTPS em producao")
+        if s.FRONTEND_URL.rstrip("/") not in cors_origins:
+            raise ValueError("CORS_ORIGINS deve incluir a origem exata de FRONTEND_URL")
+        backend_host = urlsplit(s.BACKEND_URL).hostname
+        if not backend_host or backend_host not in trusted_hosts:
+            raise ValueError("TRUSTED_HOSTS deve incluir o host exato de BACKEND_URL")
     warn_keys = ("OPEN_ROUTER_API_KEY", "PEXELS_API_KEY", "GROQ_API_KEY", "OPENAI_API_KEY", "ELEVENLABS_API_KEY")
     for key in warn_keys:
         if not getattr(s, key):

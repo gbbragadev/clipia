@@ -1,5 +1,21 @@
 import type { NextConfig } from "next";
 
+const contentSecurityPolicy = [
+  "default-src 'self'",
+  "base-uri 'self'",
+  "object-src 'none'",
+  "frame-ancestors 'none'",
+  "form-action 'self'",
+  "script-src 'self' 'unsafe-inline' https://challenges.cloudflare.com",
+  "style-src 'self' 'unsafe-inline'",
+  "img-src 'self' data: blob: https://images.pexels.com",
+  "font-src 'self' data:",
+  "media-src 'self' blob: https:",
+  "connect-src 'self' https://challenges.cloudflare.com",
+  "frame-src https://challenges.cloudflare.com",
+  "worker-src 'self' blob:",
+].join("; ");
+
 const nextConfig: NextConfig = {
   output: "standalone",
   // Build de verificação isolado: NEXT_DIST_DIR permite buildar/prever mudanças
@@ -18,17 +34,22 @@ const nextConfig: NextConfig = {
     ];
   },
   async headers() {
-    // Headers de seguranca espelham a politica do backend (app/main.py) + anti-clickjacking.
-    // CSP usa apenas frame-ancestors para nao quebrar os scripts/styles inline do Next/Remotion.
+    // Next e Remotion exigem bootstrap/style inline; todas as demais origens sao
+    // fechadas, exceto os assets e o Turnstile usados pelo produto.
     const securityHeaders = [
       { key: "X-Content-Type-Options", value: "nosniff" },
       { key: "X-Frame-Options", value: "DENY" },
-      { key: "X-XSS-Protection", value: "1; mode=block" },
-      { key: "Strict-Transport-Security", value: "max-age=31536000; includeSubDomains" },
+      { key: "X-XSS-Protection", value: "0" },
       { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
       { key: "Permissions-Policy", value: "camera=(), microphone=(), geolocation=()" },
-      { key: "Content-Security-Policy", value: "frame-ancestors 'none'" },
+      { key: "Content-Security-Policy", value: contentSecurityPolicy },
     ];
+    if (process.env.NODE_ENV === "production") {
+      securityHeaders.push({
+        key: "Strict-Transport-Security",
+        value: "max-age=31536000; includeSubDomains",
+      });
+    }
     return [
       {
         source: "/(.*)",

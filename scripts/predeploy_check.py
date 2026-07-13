@@ -12,9 +12,9 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from app.config import settings
-from app.db.engine import build_engine
-from app.main import create_app
+from app.config import settings, validate_production_settings  # noqa: E402
+from app.db.engine import build_engine  # noqa: E402
+from app.main import create_app  # noqa: E402
 
 
 class CheckFailure(Exception):
@@ -25,6 +25,7 @@ def main() -> int:
     checks = [
         ("JWT secret", check_jwt_secret),
         ("CORS", check_cors),
+        ("Production security", check_production_security),
         ("Database URL", check_database_url),
         ("Redis URL", check_redis_url),
         ("Error handlers", check_error_handlers),
@@ -60,6 +61,12 @@ def check_jwt_secret() -> None:
 def check_cors() -> None:
     if settings.CORS_ORIGINS.strip() == "*":
         raise CheckFailure("CORS_ORIGINS não pode ser '*'.")
+
+
+def check_production_security() -> None:
+    if settings.ENVIRONMENT != "production":
+        raise CheckFailure("ENVIRONMENT deve ser 'production' no gate de deploy.")
+    validate_production_settings(settings)
 
 
 def check_database_url() -> None:
