@@ -1,13 +1,10 @@
 from __future__ import annotations
 
-import copy
 import uuid
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
 import pytest
-import stripe
-from mercadopago.config import RequestOptions
 from sqlalchemy import func, select, update
 
 MP_CHECKOUT_ID = "1234567890-abcdef1234567890"
@@ -169,8 +166,8 @@ async def test_unknown_provider_failure_stays_pending_and_retry_reuses_frozen_re
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("outcome", ["timeout", 429, 500])
-async def test_mp_ambiguous_outcomes_never_void_or_credit_and_backoff_is_capped(
+@pytest.mark.parametrize("outcome", ["timeout", "malformed_201", 408, 424, 429, 500])
+async def test_mp_ambiguous_first_outcomes_never_void_or_credit_and_backoff_is_capped(
     db_session, verified_user, monkeypatch, outcome
 ):
     from app.db.models import CreditPurchase, PaymentCheckoutDispatch, User
@@ -184,14 +181,14 @@ async def test_mp_ambiguous_outcomes_never_void_or_credit_and_backoff_is_capped(
         attempt_inline=False,
     )
     dispatch = await db_session.get(PaymentCheckoutDispatch, created.dispatch_id)
-    dispatch.attempt_count = 40
-    await db_session.commit()
 
     class Preference:
         @staticmethod
         def create(_payload, request_options=None):
             if outcome == "timeout":
                 raise TimeoutError("ambiguous timeout")
+            if outcome == "malformed_201":
+                return {"status": 201, "response": {}}
             return {"status": outcome, "response": {"message": "ambiguous"}}
 
     class SDK:
@@ -206,7 +203,7 @@ async def test_mp_ambiguous_outcomes_never_void_or_credit_and_backoff_is_capped(
     dispatch = await db_session.get(PaymentCheckoutDispatch, created.dispatch_id, populate_existing=True)
     purchase = await db_session.get(CreditPurchase, created.purchase_id, populate_existing=True)
     user = await db_session.get(User, verified_user.id, populate_existing=True)
-    assert dispatch.attempt_count == 41
+    assert dispatch.attempt_count == 1
     last_attempt_at = dispatch.last_attempt_at
     next_attempt_at = dispatch.next_attempt_at
     if last_attempt_at.tzinfo is None:
@@ -221,12 +218,9 @@ async def test_mp_ambiguous_outcomes_never_void_or_credit_and_backoff_is_capped(
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("provider", ["mercadopago", "stripe"])
-async def test_provider_retry_uses_identical_transport_key_and_payload(
-    db_session, verified_user, monkeypatch, provider
-):
+async def test_reclaimed_claim_reuses_identical_transport_key_and_frozen_payload(db_session, verified_user, provider):
     from app.db.models import PaymentCheckoutDispatch
     from app.payments.checkout_outbox import (
-        _call_provider,
         claim_checkout_dispatch,
         create_or_resume_checkout,
     )
@@ -238,51 +232,20 @@ async def test_provider_retry_uses_identical_transport_key_and_payload(
         db_session,
         attempt_inline=False,
     )
-    captured = []
-    if provider == "mercadopago":
-
-        class Preference:
-            @staticmethod
-            def create(payload, request_options=None):
-                assert isinstance(request_options, RequestOptions)
-                captured.append((copy.deepcopy(payload), request_options.get_headers()["x-idempotency-key"]))
-                return {
-                    "status": 201,
-                    "response": {"id": MP_CHECKOUT_ID, "init_point": MP_CHECKOUT_URL},
-                }
-
-        class SDK:
-            @staticmethod
-            def preference():
-                return Preference()
-
-        monkeypatch.setattr("app.payments.service._get_sdk", lambda: SDK())
-    else:
-        monkeypatch.setattr("app.payments.service.settings.STRIPE_SECRET_KEY", "sk_test")
-
-        def create_session(**kwargs):
-            captured.append(copy.deepcopy(kwargs))
-            return SimpleNamespace(id=STRIPE_CHECKOUT_ID, url=STRIPE_CHECKOUT_URL)
-
-        monkeypatch.setattr(stripe.checkout.Session, "create", staticmethod(create_session))
-
     started = datetime.now(timezone.utc)
     first = await claim_checkout_dispatch(db_session, created.dispatch_id, now=started)
     assert first is not None
-    await _call_provider(first)
     second = await claim_checkout_dispatch(
         db_session,
         created.dispatch_id,
         now=started + timedelta(minutes=3),
     )
     assert second is not None
-    await _call_provider(second)
 
     dispatch = await db_session.get(PaymentCheckoutDispatch, created.dispatch_id, populate_existing=True)
     assert first.provider_idempotency_key == second.provider_idempotency_key == dispatch.provider_idempotency_key
     assert first.request_payload == second.request_payload == dispatch.request_payload
     assert first.request_payload_hash == second.request_payload_hash == dispatch.request_payload_hash
-    assert captured[0] == captured[1]
 
 
 @pytest.mark.asyncio

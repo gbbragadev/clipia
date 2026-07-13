@@ -19,7 +19,7 @@ from app.payments.snapshot import (
 )
 
 MP_PREFERENCE_ID = "202809963-a2201f8d-11cb-443f-adf6-de5a42eed67d"
-MP_CHECKOUT_URL = "https://www.mercadopago.com/mla/checkout/start?" f"pref_id={MP_PREFERENCE_ID}"
+MP_CHECKOUT_URL = f"https://www.mercadopago.com/mla/checkout/start?pref_id={MP_PREFERENCE_ID}"
 STRIPE_SESSION_ID = "cs_test_a11YYufWQzNY63zpQ6QSNRQhkUpVph4WRmzW0zWJO2znZKdVujZ0N0S22u"
 STRIPE_CHECKOUT_URL = f"https://checkout.stripe.com/c/pay/{STRIPE_SESSION_ID}"
 
@@ -166,7 +166,7 @@ async def test_stripe_checkout_sends_same_snapshot_to_session_and_payment_intent
         ("stripe", SimpleNamespace(id=STRIPE_SESSION_ID, url="")),
     ],
 )
-async def test_checkout_rejects_missing_provider_identity_or_url_and_terminalizes_purchase(
+async def test_checkout_quarantines_missing_provider_identity_or_url_without_voiding_purchase(
     test_db, db_session, verified_user, monkeypatch, provider, provider_result
 ):
     if provider == "mercadopago":
@@ -188,16 +188,22 @@ async def test_checkout_rejects_missing_provider_identity_or_url_and_terminalize
         monkeypatch.setattr(stripe.checkout.Session, "create", staticmethod(lambda **_kwargs: provider_result))
         checkout = create_checkout_stripe
 
-    with pytest.raises(ValueError, match="missing checkout identity or URL"):
+    with pytest.raises(CheckoutPending):
         await checkout(verified_user, "starter", db_session)
 
     async with test_db["session_factory"]() as verification_session:
         purchase = await verification_session.scalar(select(CreditPurchase))
+        dispatch = await verification_session.scalar(select(PaymentCheckoutDispatch))
         assert purchase is not None
         assert purchase.status == "pending"
-        assert purchase.payment_state == "void"
+        assert purchase.payment_state == "pending"
         assert purchase.mp_preference_id is None
         assert purchase.mp_payment_id is None
+        assert dispatch is not None
+        assert dispatch.state == "pending"
+        assert dispatch.provider_checkout_id is None
+        assert dispatch.checkout_url is None
+        assert dispatch.error_code == "provider_unavailable"
 
 
 @pytest.mark.asyncio
@@ -254,7 +260,7 @@ async def test_checkout_rejects_missing_provider_identity_or_url_and_terminalize
         ),
     ],
 )
-async def test_checkout_rejects_malformed_provider_identity_or_untrusted_redirect(
+async def test_checkout_quarantines_malformed_identity_or_untrusted_redirect_without_voiding_purchase(
     test_db, db_session, verified_user, monkeypatch, provider, provider_result
 ):
     if provider == "mercadopago":
@@ -276,16 +282,22 @@ async def test_checkout_rejects_malformed_provider_identity_or_untrusted_redirec
         monkeypatch.setattr(stripe.checkout.Session, "create", staticmethod(lambda **_kwargs: provider_result))
         checkout = create_checkout_stripe
 
-    with pytest.raises(ValueError, match="invalid checkout identity or URL"):
+    with pytest.raises(CheckoutPending):
         await checkout(verified_user, "starter", db_session)
 
     async with test_db["session_factory"]() as verification_session:
         purchase = await verification_session.scalar(select(CreditPurchase))
+        dispatch = await verification_session.scalar(select(PaymentCheckoutDispatch))
         assert purchase is not None
         assert purchase.status == "pending"
-        assert purchase.payment_state == "void"
+        assert purchase.payment_state == "pending"
         assert purchase.mp_preference_id is None
         assert purchase.mp_payment_id is None
+        assert dispatch is not None
+        assert dispatch.state == "pending"
+        assert dispatch.provider_checkout_id is None
+        assert dispatch.checkout_url is None
+        assert dispatch.error_code == "provider_unavailable"
 
 
 @pytest.mark.asyncio

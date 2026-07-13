@@ -1,4 +1,5 @@
 from datetime import datetime
+from typing import Literal
 from uuid import UUID
 
 from pydantic import BaseModel, Field
@@ -33,7 +34,7 @@ class CheckoutResponse(BaseModel):
 class CheckoutStatusResponse(BaseModel):
     purchase_id: UUID = Field(..., description="Internal purchase ID")
     dispatch_id: UUID = Field(..., description="Durable checkout dispatch ID")
-    state: str = Field(..., description="Checkout dispatch state")
+    state: Literal["pending", "ready", "failed", "cancelled"] = Field(..., description="Checkout dispatch state")
     checkout_url: str | None = Field(default=None, description="Safe provider URL when ready")
 
 

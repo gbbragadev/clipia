@@ -7,6 +7,7 @@ from unittest.mock import MagicMock
 
 import pytest
 import pytest_asyncio
+import stripe
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import event
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
@@ -97,6 +98,37 @@ def _isolate_worker_redis(monkeypatch):
     # teste; a fixture `app` re-patcha depois com a instancia compartilhada dela.
     monkeypatch.setattr(worker_tasks, "_redis", FakeRedis())
     monkeypatch.setattr(api_routes, "_redis", FakeRedis())
+
+
+@pytest.fixture(autouse=True)
+def _block_checkout_stripe_network(monkeypatch):
+    """Keep checkout tests offline while preserving legacy Session.create test doubles."""
+    from app.payments import checkout_outbox
+
+    def blocked_create(**_kwargs):
+        raise AssertionError("Stripe network is blocked in tests; install an explicit checkout double")
+
+    monkeypatch.setattr(stripe.checkout.Session, "create", staticmethod(blocked_create))
+
+    class NoNetworkRequestsClient:
+        def __init__(self, *, timeout):
+            self.timeout = timeout
+
+    class Sessions:
+        @staticmethod
+        def create(params, options=None):
+            return stripe.checkout.Session.create(**params, **(options or {}))
+
+        @staticmethod
+        def list(_params, _options=None):
+            raise AssertionError("Stripe list network is blocked in tests; install an explicit checkout double")
+
+    class NoNetworkStripeClient:
+        def __init__(self, _api_key, **_kwargs):
+            self.v1 = SimpleNamespace(checkout=SimpleNamespace(sessions=Sessions()))
+
+    monkeypatch.setattr(checkout_outbox.stripe, "RequestsClient", NoNetworkRequestsClient)
+    monkeypatch.setattr(checkout_outbox.stripe, "StripeClient", NoNetworkStripeClient)
 
 
 @pytest.fixture(autouse=True)

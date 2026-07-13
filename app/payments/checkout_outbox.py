@@ -8,10 +8,12 @@ import uuid
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+from decimal import Decimal, InvalidOperation
 from typing import Any
 
+import stripe
 from mercadopago.config import RequestOptions
-from sqlalchemy import or_, select, update
+from sqlalchemy import func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -23,6 +25,10 @@ from app.payments.states import canonical_payment_state, payment_state_values
 
 CHECKOUT_LEASE_DURATION = timedelta(minutes=2)
 MAX_RETRY_DELAY_SECONDS = 60 * 60
+MAX_CHECKOUT_ATTEMPTS = 8
+PROVIDER_REQUEST_TIMEOUT_SECONDS = 10.0
+STRIPE_REQUEST_TIMEOUT_SECONDS = PROVIDER_REQUEST_TIMEOUT_SECONDS
+STRIPE_RETRY_HORIZON = timedelta(hours=23)
 
 ProviderCall = Callable[["ClaimedCheckout"], Awaitable["ProviderCheckout"]]
 
@@ -48,6 +54,7 @@ class ClaimedCheckout:
     request_payload: str
     request_payload_hash: str
     attempt_count: int
+    created_at: datetime
 
 
 @dataclass(frozen=True)
@@ -59,6 +66,10 @@ class ProviderCheckout:
 
 class CheckoutIdempotencyConflict(Exception):
     """A client key was replayed for a different provider/package request."""
+
+
+class InvalidCheckoutIdempotencyKey(ValueError):
+    """The caller supplied an unsafe or unusable checkout idempotency key."""
 
 
 class CheckoutPending(Exception):
@@ -87,6 +98,15 @@ class _TransientProviderError(Exception):
         self.detail = detail
 
 
+class _ManualProviderError(Exception):
+    """Automatic recovery cannot prove a unique provider object safely."""
+
+    def __init__(self, code: str, detail: str):
+        super().__init__(detail)
+        self.code = code
+        self.detail = detail
+
+
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
@@ -107,8 +127,8 @@ def _normalize_request_key(user_id: uuid.UUID, request_key: str | None) -> str |
     if request_key is None:
         return None
     normalized = str(request_key).strip()
-    if not normalized or len(normalized) > 200 or any(ord(char) < 32 for char in normalized):
-        raise ValueError("Invalid idempotency key")
+    if not normalized or len(normalized) > 200 or any(ord(char) < 32 or ord(char) == 127 for char in normalized):
+        raise InvalidCheckoutIdempotencyKey("Invalid idempotency key")
     return _digest(f"{user_id}\0{normalized}")
 
 
@@ -263,7 +283,11 @@ async def create_or_resume_checkout(
     )
     freeze_purchase_snapshot(purchase)
     request_payload = _build_provider_payload(purchase, package)
-    now = _utcnow()
+    database_now = await db.scalar(select(func.now()))
+    if not isinstance(database_now, datetime):
+        await db.rollback()
+        raise RuntimeError("database clock is unavailable")
+    now = _aware_utc(database_now)
     dispatch = PaymentCheckoutDispatch(
         id=uuid.uuid4(),
         purchase_id=purchase.id,
@@ -318,12 +342,13 @@ async def _fail_locked_dispatch(
     code: str,
     detail: str,
     now: datetime,
+    void_purchase: bool = True,
 ) -> None:
     try:
         purchase_state = canonical_payment_state(purchase.status, purchase.payment_state)
     except ValueError:
         purchase_state = "pending"
-    if state == "failed" and purchase_state not in {"paid", "refunded"}:
+    if void_purchase and state == "failed" and purchase_state not in {"paid", "refunded"}:
         for field, value in payment_state_values("void").items():
             setattr(purchase, field, value)
     dispatch.state = state
@@ -345,9 +370,16 @@ async def claim_checkout_dispatch(
     *,
     now: datetime | None = None,
     lease_duration: timedelta = CHECKOUT_LEASE_DURATION,
-) -> ClaimedCheckout | None:
+) -> ClaimedCheckout | CheckoutOutcome | None:
     """Claim one due row with a committed PostgreSQL SKIP LOCKED lease."""
-    claimed_at = now or _utcnow()
+    if now is None:
+        database_now = await db.scalar(select(func.now()))
+        if not isinstance(database_now, datetime):
+            await db.rollback()
+            raise RuntimeError("database clock is unavailable")
+        claimed_at = _aware_utc(database_now)
+    else:
+        claimed_at = _aware_utc(now)
     statement = (
         select(PaymentCheckoutDispatch)
         .where(
@@ -386,17 +418,17 @@ async def claim_checkout_dispatch(
         purchase_state = canonical_payment_state(purchase.status, purchase.payment_state)
     except ValueError:
         purchase_state = "void"
-    if purchase_state == "void":
+    if purchase_state in {"paid", "refunded", "void"}:
         await _fail_locked_dispatch(
             purchase,
             dispatch,
             state="cancelled",
             code="purchase_terminal",
-            detail="purchase is terminal before checkout dispatch",
+            detail=f"purchase is {purchase_state} before checkout dispatch",
             now=claimed_at,
         )
         await db.commit()
-        return None
+        return _outcome(dispatch)
     if not _frozen_payload_is_valid(dispatch.request_payload, dispatch.request_payload_hash):
         await _fail_locked_dispatch(
             purchase,
@@ -407,7 +439,7 @@ async def claim_checkout_dispatch(
             now=claimed_at,
         )
         await db.commit()
-        return None
+        return _outcome(dispatch)
 
     token = uuid.uuid4()
     lease_until = claimed_at + lease_duration
@@ -428,6 +460,7 @@ async def claim_checkout_dispatch(
         request_payload=dispatch.request_payload,
         request_payload_hash=dispatch.request_payload_hash,
         attempt_count=dispatch.attempt_count,
+        created_at=dispatch.created_at,
     )
 
 
@@ -441,14 +474,14 @@ def _provider_status(exc: Exception) -> int | None:
 
 def _classify_provider_exception(exc: Exception) -> None:
     status = _provider_status(exc)
+    if isinstance(exc, (TimeoutError, ConnectionError, asyncio.TimeoutError)) or status in {408, 409, 424, 425}:
+        raise _TransientProviderError("provider_unavailable", "provider outcome is ambiguous") from exc
     if status == 429:
         raise _TransientProviderError("rate_limited", "provider rate limited checkout creation") from exc
     if status is not None and status >= 500:
         raise _TransientProviderError("provider_unavailable", "provider returned a server error") from exc
     if status is not None and 400 <= status < 500:
         raise _PermanentProviderError("provider_rejected", "provider rejected the frozen request") from exc
-    if isinstance(exc, (TimeoutError, ConnectionError, asyncio.TimeoutError)):
-        raise _TransientProviderError("provider_unavailable", "provider outcome is ambiguous") from exc
     raise exc
 
 
@@ -464,35 +497,287 @@ def _parse_expiry(value: object) -> datetime | None:
     return None
 
 
+def _aware_utc(value: datetime) -> datetime:
+    return value if value.tzinfo is not None else value.replace(tzinfo=timezone.utc)
+
+
+def _plain_provider_object(value: object) -> dict[str, Any]:
+    if isinstance(value, dict):
+        return dict(value)
+    if hasattr(value, "to_dict"):
+        converted = value.to_dict()
+        return dict(converted) if isinstance(converted, dict) else {}
+    try:
+        return dict(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return dict(vars(value)) if hasattr(value, "__dict__") else {}
+
+
+def _exact_metadata(actual: object, expected: object) -> bool:
+    if not isinstance(actual, dict) or not isinstance(expected, dict):
+        return False
+    return {str(key): str(value) for key, value in actual.items()} == {
+        str(key): str(value) for key, value in expected.items()
+    }
+
+
+def _mp_items_match(actual: object, expected: object) -> bool:
+    if (
+        not isinstance(actual, list)
+        or not isinstance(expected, list)
+        or len(actual) != 1
+        or len(expected) != 1
+        or not isinstance(actual[0], dict)
+        or not isinstance(expected[0], dict)
+    ):
+        return False
+    actual_item = actual[0]
+    expected_item = expected[0]
+    for field in ("id", "title", "currency_id"):
+        if str(actual_item.get(field) or "") != str(expected_item.get(field) or ""):
+            return False
+    try:
+        actual_quantity = int(actual_item.get("quantity"))
+        expected_quantity = int(expected_item.get("quantity"))
+        actual_price = Decimal(str(actual_item.get("unit_price")))
+        expected_price = Decimal(str(expected_item.get("unit_price")))
+    except (InvalidOperation, TypeError, ValueError):
+        return False
+    return actual_quantity == expected_quantity and actual_price == expected_price
+
+
+def _mp_request_options(*, idempotency_key: str | None = None) -> RequestOptions:
+    headers = {"x-idempotency-key": idempotency_key} if idempotency_key is not None else None
+    return RequestOptions(
+        access_token=settings.MP_ACCESS_TOKEN,
+        connection_timeout=PROVIDER_REQUEST_TIMEOUT_SECONDS,
+        custom_headers=headers,
+        max_retries=0,
+    )
+
+
+def _mp_status(result: object) -> int | None:
+    if not isinstance(result, dict):
+        return None
+    value = result.get("status")
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _raise_for_ambiguous_result(status: int | None, *, action: str) -> None:
+    if status == 429:
+        raise _TransientProviderError("rate_limited", f"provider rate limited checkout {action}")
+    if status in {408, 409, 424, 425} or (status is not None and status >= 500):
+        raise _TransientProviderError("provider_unavailable", f"provider checkout {action} is ambiguous")
+
+
+async def _reconcile_mercadopago_preference(
+    preference: object,
+    claim: ClaimedCheckout,
+    payload: dict[str, Any],
+) -> ProviderCheckout:
+    expected_reference = str(payload.get("external_reference") or "")
+    request_options = _mp_request_options()
+    try:
+        search_result = await asyncio.to_thread(
+            preference.search,  # type: ignore[attr-defined]
+            {"external_reference": expected_reference},
+            request_options,
+        )
+    except Exception as exc:
+        try:
+            _classify_provider_exception(exc)
+        except _PermanentProviderError as classified:
+            raise _ManualProviderError(
+                "provider_unavailable", "provider preference search requires review"
+            ) from classified
+        raise
+
+    search_status = _mp_status(search_result)
+    _raise_for_ambiguous_result(search_status, action="search")
+    search_response = search_result.get("response") if isinstance(search_result, dict) else None
+    if search_status != 200 or not isinstance(search_response, dict):
+        raise _ManualProviderError("provider_unavailable", "provider preference search requires review")
+    elements = search_response.get("elements")
+    if not isinstance(elements, list):
+        raise _ManualProviderError("provider_unavailable", "provider preference search returned malformed results")
+    if not elements:
+        raise _TransientProviderError("provider_unavailable", "provider preference is not visible yet")
+    if len(elements) != 1:
+        raise _ManualProviderError("provider_unavailable", "multiple provider preferences require manual review")
+
+    candidate = _plain_provider_object(elements[0])
+    preference_id = str(candidate.get("id") or "").strip()
+    if not preference_id:
+        raise _ManualProviderError("provider_unavailable", "provider preference identity is missing")
+    try:
+        get_result = await asyncio.to_thread(
+            preference.get,  # type: ignore[attr-defined]
+            preference_id,
+            request_options,
+        )
+    except Exception as exc:
+        try:
+            _classify_provider_exception(exc)
+        except _PermanentProviderError as classified:
+            raise _ManualProviderError(
+                "provider_unavailable", "provider preference lookup requires review"
+            ) from classified
+        raise
+
+    get_status = _mp_status(get_result)
+    _raise_for_ambiguous_result(get_status, action="lookup")
+    response = get_result.get("response") if isinstance(get_result, dict) else None
+    if get_status != 200 or not isinstance(response, dict):
+        raise _ManualProviderError("provider_unavailable", "provider preference lookup requires review")
+
+    checkout_id = str(response.get("id") or "").strip()
+    checkout_url = str(response.get("init_point") or response.get("sandbox_init_point") or "").strip()
+    from app.payments import service as payment_service
+
+    if (
+        checkout_id != preference_id
+        or str(response.get("external_reference") or "") != expected_reference
+        or not _exact_metadata(response.get("metadata"), payload.get("metadata"))
+        or not _mp_items_match(response.get("items"), payload.get("items"))
+        or not payment_service._valid_checkout_response("mercadopago", checkout_id, checkout_url)
+    ):
+        raise _ManualProviderError("provider_unavailable", "provider preference does not match the frozen request")
+    return ProviderCheckout(
+        checkout_id=checkout_id,
+        checkout_url=checkout_url,
+        expires_at=_parse_expiry(response.get("date_of_expiration")),
+    )
+
+
+def _stripe_session_match(payload: dict[str, Any], candidate: object) -> ProviderCheckout | None:
+    from app.payments import service as payment_service
+
+    session = _plain_provider_object(candidate)
+    line_items = payload.get("line_items")
+    if not isinstance(line_items, list) or len(line_items) != 1 or not isinstance(line_items[0], dict):
+        return None
+    price_data = line_items[0].get("price_data")
+    if not isinstance(price_data, dict):
+        return None
+    checkout_id = str(session.get("id") or "").strip()
+    checkout_url = str(session.get("url") or "").strip()
+    if (
+        str(session.get("client_reference_id") or "") != str(payload.get("client_reference_id") or "")
+        or not _exact_metadata(session.get("metadata"), payload.get("metadata"))
+        or session.get("amount_total") != price_data.get("unit_amount")
+        or str(session.get("currency") or "").lower() != str(price_data.get("currency") or "").lower()
+        or not payment_service._valid_checkout_response("stripe", checkout_id, checkout_url)
+    ):
+        return None
+    return ProviderCheckout(
+        checkout_id=checkout_id,
+        checkout_url=checkout_url,
+        expires_at=_parse_expiry(session.get("expires_at")),
+    )
+
+
+def _stripe_session_references_purchase(payload: dict[str, Any], candidate: object) -> bool:
+    session = _plain_provider_object(candidate)
+    expected_reference = str(payload.get("client_reference_id") or "")
+    expected_metadata = payload.get("metadata")
+    actual_metadata = session.get("metadata")
+    expected_purchase_id = (
+        str(expected_metadata.get("purchase_id") or "") if isinstance(expected_metadata, dict) else ""
+    )
+    actual_purchase_id = str(actual_metadata.get("purchase_id") or "") if isinstance(actual_metadata, dict) else ""
+    return (bool(expected_reference) and str(session.get("client_reference_id") or "") == expected_reference) or (
+        bool(expected_purchase_id) and actual_purchase_id == expected_purchase_id
+    )
+
+
+async def _reconcile_stripe_session(
+    sessions: object,
+    claim: ClaimedCheckout,
+    payload: dict[str, Any],
+) -> ProviderCheckout | None:
+    now = _utcnow()
+    created_at = _aware_utc(claim.created_at)
+    created_lower_bound = int((created_at - timedelta(minutes=5)).timestamp())
+    created_upper_bound = int((now + timedelta(minutes=5)).timestamp())
+    try:
+        result = await asyncio.to_thread(
+            sessions.list,  # type: ignore[attr-defined]
+            {
+                "created": {"gte": created_lower_bound, "lte": created_upper_bound},
+                "limit": 100,
+            },
+            {"max_network_retries": 0},
+        )
+    except Exception as exc:
+        try:
+            _classify_provider_exception(exc)
+        except _PermanentProviderError as classified:
+            raise _ManualProviderError("provider_unavailable", "Stripe session lookup requires review") from classified
+        raise
+
+    result_data = result.get("data") if isinstance(result, dict) else getattr(result, "data", None)
+    has_more = result.get("has_more") if isinstance(result, dict) else getattr(result, "has_more", False)
+    if not isinstance(result_data, list):
+        try:
+            result_data = list(result_data)
+        except (TypeError, ValueError):
+            raise _ManualProviderError("provider_unavailable", "Stripe session lookup returned malformed results")
+    matches: list[ProviderCheckout] = []
+    mismatched_purchase = False
+    for candidate in result_data:
+        match = _stripe_session_match(payload, candidate)
+        if match is not None:
+            matches.append(match)
+        elif _stripe_session_references_purchase(payload, candidate):
+            mismatched_purchase = True
+    if has_more:
+        raise _ManualProviderError("provider_unavailable", "Stripe session lookup is incomplete")
+    if len(matches) > 1:
+        raise _ManualProviderError("provider_unavailable", "multiple Stripe sessions require manual review")
+    if mismatched_purchase:
+        raise _ManualProviderError("provider_unavailable", "Stripe session does not match the frozen request")
+    return matches[0] if matches else None
+
+
 async def _call_provider(claim: ClaimedCheckout) -> ProviderCheckout:
-    """Call the provider once; the outbox, not an SDK, owns retry accounting."""
+    """Create once or reconcile a retry without assuming provider idempotency forever."""
     from app.payments import service as payment_service
 
     payload = json.loads(claim.request_payload)
     if claim.provider == "mercadopago":
-        request_options = RequestOptions(
-            access_token=settings.MP_ACCESS_TOKEN,
-            custom_headers={"x-idempotency-key": claim.provider_idempotency_key},
-            max_retries=0,
-        )
+        sdk = payment_service._get_sdk()
+        preference = sdk.preference()
+        if claim.attempt_count > 1:
+            return await _reconcile_mercadopago_preference(preference, claim, payload)
+        request_options = _mp_request_options(idempotency_key=claim.provider_idempotency_key)
         try:
-            sdk = payment_service._get_sdk()
-            result = await asyncio.to_thread(sdk.preference().create, payload, request_options)
+            result = await asyncio.to_thread(preference.create, payload, request_options)
         except Exception as exc:  # provider exceptions require fail-safe classification
             _classify_provider_exception(exc)
-        status = result.get("status") if isinstance(result, dict) else None
-        if status == 429 or (isinstance(status, int) and status >= 500):
-            code = "rate_limited" if status == 429 else "provider_unavailable"
-            raise _TransientProviderError(code, "provider outcome is ambiguous")
-        if status != 201 or not isinstance(result.get("response"), dict):
+        status = _mp_status(result)
+        _raise_for_ambiguous_result(status, action="creation")
+        if status != 201:
             raise _PermanentProviderError("provider_rejected", "provider rejected the frozen request")
+        if not isinstance(result.get("response"), dict):
+            raise _TransientProviderError(
+                "provider_unavailable",
+                "provider accepted checkout creation but returned an ambiguous response",
+            )
         response = result["response"]
         checkout_id = str(response.get("id") or "").strip()
         checkout_url = str(response.get("init_point") or response.get("sandbox_init_point") or "").strip()
         if not checkout_id or not checkout_url:
-            raise _PermanentProviderError(
-                "invalid_response",
-                "Provider response missing checkout identity or URL",
+            raise _TransientProviderError(
+                "provider_unavailable",
+                "provider accepted checkout creation but omitted identity or URL",
+            )
+        if not payment_service._valid_checkout_response("mercadopago", checkout_id, checkout_url):
+            raise _TransientProviderError(
+                "provider_unavailable",
+                "provider accepted checkout creation but returned an untrusted identity or URL",
             )
         return ProviderCheckout(
             checkout_id=checkout_id,
@@ -502,27 +787,50 @@ async def _call_provider(claim: ClaimedCheckout) -> ProviderCheckout:
 
     if not settings.STRIPE_SECRET_KEY:
         raise _PermanentProviderError("config_invalid", "Stripe is not configured")
-    payment_service._init_stripe()
+    client = stripe.StripeClient(
+        settings.STRIPE_SECRET_KEY,
+        max_network_retries=0,
+        http_client=stripe.RequestsClient(timeout=STRIPE_REQUEST_TIMEOUT_SECONDS),
+    )
+    sessions = client.v1.checkout.sessions
+    if claim.attempt_count > 1:
+        recovered = await _reconcile_stripe_session(sessions, claim, payload)
+        if recovered is not None:
+            return recovered
+        age = _utcnow() - _aware_utc(claim.created_at)
+        if age >= STRIPE_RETRY_HORIZON or claim.attempt_count >= MAX_CHECKOUT_ATTEMPTS:
+            raise _ManualProviderError(
+                "provider_unavailable",
+                "Stripe session was not found inside the safe idempotency horizon",
+            )
     try:
         session = await asyncio.to_thread(
-            lambda: payment_service.stripe.checkout.Session.create(
-                **payload,
-                idempotency_key=claim.provider_idempotency_key,
-            )
+            sessions.create,
+            payload,
+            {
+                "max_network_retries": 0,
+                "idempotency_key": claim.provider_idempotency_key,
+            },
         )
     except Exception as exc:  # provider exceptions require fail-safe classification
         _classify_provider_exception(exc)
-    checkout_id = str(getattr(session, "id", "") or "").strip()
-    checkout_url = str(getattr(session, "url", "") or "").strip()
+    session_data = _plain_provider_object(session)
+    checkout_id = str(session_data.get("id") or "").strip()
+    checkout_url = str(session_data.get("url") or "").strip()
     if not checkout_id or not checkout_url:
-        raise _PermanentProviderError(
-            "invalid_response",
-            "Provider response missing checkout identity or URL",
+        raise _TransientProviderError(
+            "provider_unavailable",
+            "provider accepted checkout creation but omitted identity or URL",
+        )
+    if not payment_service._valid_checkout_response("stripe", checkout_id, checkout_url):
+        raise _TransientProviderError(
+            "provider_unavailable",
+            "provider accepted checkout creation but returned an untrusted identity or URL",
         )
     return ProviderCheckout(
         checkout_id=checkout_id,
         checkout_url=checkout_url,
-        expires_at=_parse_expiry(getattr(session, "expires_at", None)),
+        expires_at=_parse_expiry(session_data.get("expires_at")),
     )
 
 
@@ -539,13 +847,26 @@ async def _schedule_retry(
     detail: str,
     now: datetime | None = None,
 ) -> bool:
-    retry_at = (now or _utcnow()) + _retry_delay(claim.attempt_count)
+    effective_now = now or _utcnow()
+    lease_boundary = effective_now if now is not None else func.now()
+    if claim.attempt_count >= MAX_CHECKOUT_ATTEMPTS:
+        return await _terminalize_claim(
+            db,
+            claim,
+            state="failed",
+            code=code,
+            detail=f"automatic retry budget exhausted; manual reconciliation required ({detail})",
+            now=now,
+            void_purchase=False,
+        )
+    retry_at = effective_now + _retry_delay(claim.attempt_count)
     result = await db.execute(
         update(PaymentCheckoutDispatch)
         .where(
             PaymentCheckoutDispatch.id == claim.dispatch_id,
             PaymentCheckoutDispatch.state == "pending",
             PaymentCheckoutDispatch.publisher_token == claim.publisher_token,
+            PaymentCheckoutDispatch.publisher_lease_until > lease_boundary,
         )
         .values(
             next_attempt_at=retry_at,
@@ -566,8 +887,11 @@ async def _terminalize_claim(
     state: str,
     code: str,
     detail: str,
+    now: datetime | None = None,
+    void_purchase: bool = True,
 ) -> bool:
-    now = _utcnow()
+    effective_now = now or _utcnow()
+    lease_boundary = effective_now if now is not None else func.now()
     dispatch = (
         await db.execute(
             select(PaymentCheckoutDispatch)
@@ -575,6 +899,7 @@ async def _terminalize_claim(
                 PaymentCheckoutDispatch.id == claim.dispatch_id,
                 PaymentCheckoutDispatch.state == "pending",
                 PaymentCheckoutDispatch.publisher_token == claim.publisher_token,
+                PaymentCheckoutDispatch.publisher_lease_until > lease_boundary,
             )
             .with_for_update()
             .execution_options(populate_existing=True)
@@ -592,7 +917,8 @@ async def _terminalize_claim(
         state=state,
         code=code,
         detail=detail,
-        now=now,
+        now=effective_now,
+        void_purchase=void_purchase,
     )
     await db.commit()
     return True
@@ -624,23 +950,17 @@ async def finalize_checkout_dispatch(
     dispatch = (
         await db.execute(
             select(PaymentCheckoutDispatch)
-            .where(PaymentCheckoutDispatch.id == claim.dispatch_id)
+            .where(
+                PaymentCheckoutDispatch.id == claim.dispatch_id,
+                PaymentCheckoutDispatch.state == "pending",
+                PaymentCheckoutDispatch.publisher_token == claim.publisher_token,
+                PaymentCheckoutDispatch.publisher_lease_until > func.now(),
+            )
             .with_for_update()
             .execution_options(populate_existing=True)
         )
     ).scalar_one_or_none()
-    if (
-        dispatch is None
-        or dispatch.state != "pending"
-        or dispatch.publisher_token != claim.publisher_token
-        or dispatch.publisher_lease_until is None
-    ):
-        await db.rollback()
-        return False
-    lease_until = dispatch.publisher_lease_until
-    if lease_until.tzinfo is None:
-        lease_until = lease_until.replace(tzinfo=timezone.utc)
-    if lease_until <= now:
+    if dispatch is None:
         await db.rollback()
         return False
 
@@ -756,18 +1076,30 @@ async def dispatch_checkout(
 ) -> CheckoutOutcome | None:
     """Claim, call outside a transaction, and finalize/retry with token CAS."""
     try:
-        claim = await claim_checkout_dispatch(db, dispatch_id)
+        claimed = await claim_checkout_dispatch(db, dispatch_id)
     except Exception:
         await db.rollback()
         return await _current_outcome(db, dispatch_id) if dispatch_id is not None else None
-    if claim is None:
+    if claimed is None:
         return await _current_outcome(db, dispatch_id) if dispatch_id is not None else None
+    if isinstance(claimed, CheckoutOutcome):
+        return claimed
+    claim = claimed
 
     call = provider_call or _call_provider
     try:
         provider_checkout = await call(claim)
     except _PermanentProviderError as exc:
         await _terminalize_claim(db, claim, state="failed", code=exc.code, detail=exc.detail)
+    except _ManualProviderError as exc:
+        await _terminalize_claim(
+            db,
+            claim,
+            state="failed",
+            code=exc.code,
+            detail=exc.detail,
+            void_purchase=False,
+        )
     except _TransientProviderError as exc:
         await _schedule_retry(db, claim, code=exc.code, detail=exc.detail)
     except Exception:

@@ -4,10 +4,11 @@ import json
 import logging
 import time
 from json import JSONDecodeError
+from typing import Annotated
 from uuid import UUID
 
 import stripe
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from fastapi.responses import JSONResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -96,11 +97,24 @@ async def list_packages(user: User = Depends(get_current_user)):
     response_model=CheckoutResponse,
     summary="Checkout package",
     description="Creates a checkout URL to buy credits.",
-    responses={200: {"description": "Checkout URL"}},
+    responses={
+        200: {"description": "Checkout URL"},
+        202: {
+            "description": "Checkout creation is pending durable reconciliation",
+            "model": CheckoutStatusResponse,
+        },
+    },
 )
 async def checkout(
     req: CheckoutRequest,
-    request: Request,
+    idempotency_key: Annotated[
+        str | None,
+        Header(
+            alias="Idempotency-Key",
+            max_length=200,
+            description="Client retry key scoped to the authenticated user",
+        ),
+    ] = None,
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -114,9 +128,10 @@ async def checkout(
         CheckoutFailed,
         CheckoutIdempotencyConflict,
         CheckoutPending,
+        InvalidCheckoutIdempotencyKey,
     )
 
-    request_key = request.headers.get("idempotency-key")
+    request_key = idempotency_key
     try:
         if req.provider == "stripe":
             if request_key is None:
@@ -149,6 +164,8 @@ async def checkout(
         )
     except CheckoutIdempotencyConflict:
         raise HTTPException(status_code=409, detail="idempotency_key_conflict")
+    except InvalidCheckoutIdempotencyKey:
+        raise HTTPException(status_code=400, detail="invalid_idempotency_key")
     except CheckoutFailed as exc:
         logger.error("Checkout (%s) failed permanently: %s", req.provider, exc)
         raise HTTPException(

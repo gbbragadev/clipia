@@ -17,13 +17,17 @@ from app.db.base import Base
 from app.db.models import CreditPurchase, PaymentCheckoutDispatch, ProcessedPaymentEvent, User
 from app.payments.checkout_outbox import (
     ProviderCheckout,
+    _schedule_retry,
+    _terminalize_claim,
     claim_checkout_dispatch,
     create_or_resume_checkout,
     dispatch_checkout,
     finalize_checkout_dispatch,
+    reconcile_checkout_dispatches,
 )
 from app.payments.service import process_webhook_stripe
 from app.payments.snapshot import build_snapshot_metadata
+from app.payments.states import payment_state_values
 
 _ADMIN_DSN = os.getenv(
     "POSTGRES_PAYMENT_TEST_ADMIN_DSN",
@@ -55,7 +59,7 @@ async def postgres_checkout_sessions():
     finally:
         await engine.dispose()
         await admin.execute(
-            "SELECT pg_terminate_backend(pid) FROM pg_stat_activity " "WHERE datname = $1 AND pid <> pg_backend_pid()",
+            "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = $1 AND pid <> pg_backend_pid()",
             database_name,
         )
         await admin.execute(f'DROP DATABASE "{database_name}"')
@@ -360,3 +364,94 @@ async def test_postgres_webhook_paid_refund_and_finalizer_race_converges_identit
             )
             == 2
         )
+
+
+@pytest.mark.asyncio
+async def test_postgres_expired_publisher_cannot_mutate_reclaimed_dispatch(postgres_checkout_sessions):
+    sessions = postgres_checkout_sessions
+    _user, created = await _seed_pending(sessions)
+    claimed_at = datetime.now(timezone.utc)
+    async with sessions() as first_session:
+        first = await claim_checkout_dispatch(
+            first_session,
+            created.dispatch_id,
+            now=claimed_at,
+            lease_duration=timedelta(seconds=1),
+        )
+    assert first is not None
+
+    async with sessions() as second_session:
+        second = await claim_checkout_dispatch(
+            second_session,
+            created.dispatch_id,
+            now=claimed_at + timedelta(seconds=2),
+        )
+    assert second is not None
+    assert second.publisher_token != first.publisher_token
+
+    async with sessions() as stale_retry:
+        assert (
+            await _schedule_retry(
+                stale_retry,
+                first,
+                code="provider_unavailable",
+                detail="stale retry",
+                now=claimed_at + timedelta(seconds=3),
+            )
+            is False
+        )
+    async with sessions() as stale_terminal:
+        assert (
+            await _terminalize_claim(
+                stale_terminal,
+                first,
+                state="failed",
+                code="provider_rejected",
+                detail="stale terminalizer",
+                now=claimed_at + timedelta(seconds=3),
+            )
+            is False
+        )
+    async with sessions() as verify:
+        persisted = await verify.get(PaymentCheckoutDispatch, created.dispatch_id)
+        assert persisted.state == "pending"
+        assert persisted.publisher_token == second.publisher_token
+
+
+@pytest.mark.asyncio
+async def test_postgres_reconciler_consumes_poison_and_terminal_rows_before_valid_due_row(
+    postgres_checkout_sessions,
+):
+    sessions = postgres_checkout_sessions
+    _poison_user, poison = await _seed_pending(sessions)
+    _paid_user, paid = await _seed_pending(sessions)
+    _valid_user, valid = await _seed_pending(sessions)
+    due = datetime.now(timezone.utc)
+    async with sessions() as prepare:
+        poison_dispatch = await prepare.get(PaymentCheckoutDispatch, poison.dispatch_id)
+        poison_dispatch.request_payload = poison_dispatch.request_payload.replace("starter", "tampered")
+        poison_dispatch.next_attempt_at = due - timedelta(seconds=3)
+        paid_dispatch = await prepare.get(PaymentCheckoutDispatch, paid.dispatch_id)
+        paid_dispatch.next_attempt_at = due - timedelta(seconds=2)
+        valid_dispatch = await prepare.get(PaymentCheckoutDispatch, valid.dispatch_id)
+        valid_dispatch.next_attempt_at = due - timedelta(seconds=1)
+        await prepare.execute(
+            update(CreditPurchase).where(CreditPurchase.id == paid.purchase_id).values(**payment_state_values("paid"))
+        )
+        await prepare.commit()
+    provider_calls = 0
+
+    async def provider(_claim):
+        nonlocal provider_calls
+        provider_calls += 1
+        checkout_id = f"{_CHECKOUT_ID}{provider_calls}"
+        return ProviderCheckout(checkout_id, f"https://checkout.stripe.com/c/pay/{checkout_id}")
+
+    counts = await reconcile_checkout_dispatches(sessions, limit=3, provider_call=provider)
+
+    assert counts == {"ready": 1, "pending": 0, "failed": 1, "cancelled": 1}
+    assert provider_calls == 1
+    async with sessions() as verify:
+        assert (await verify.get(CreditPurchase, poison.purchase_id)).payment_state == "void"
+        assert (await verify.get(CreditPurchase, paid.purchase_id)).payment_state == "paid"
+        assert (await verify.get(PaymentCheckoutDispatch, valid.dispatch_id)).state == "ready"
