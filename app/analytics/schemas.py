@@ -127,6 +127,15 @@ class FeedbackSubmittedProperties(StrictModel):
     context: Literal["first_export", "general"]
 
 
+class OnboardingStepViewedProperties(StrictModel):
+    step: Literal["package_confirmation", "goal_niche", "first_video", "progress", "result", "feedback"]
+    entry: Literal["direct", "package", "niche"]
+
+
+class EditorOpenedProperties(StrictModel):
+    entry: Literal["generation_complete", "dashboard", "viewer"]
+
+
 class ClientEventBase(StrictModel):
     event_id: UUID4
     event_name: str
@@ -218,6 +227,16 @@ class FeedbackSubmittedEvent(ClientEventBase):
     properties: FeedbackSubmittedProperties
 
 
+class OnboardingStepViewedEvent(ClientEventBase):
+    event_name: Literal["onboarding_step_viewed"]
+    properties: OnboardingStepViewedProperties
+
+
+class EditorOpenedEvent(ClientEventBase):
+    event_name: Literal["editor_opened"]
+    properties: EditorOpenedProperties
+
+
 ClientEvent = Annotated[
     LandingViewedEvent
     | HeroCtaClickedEvent
@@ -231,9 +250,99 @@ ClientEvent = Annotated[
     | CreditsLowEvent
     | UserReturnedEvent
     | ReferralSharedEvent
-    | FeedbackSubmittedEvent,
+    | FeedbackSubmittedEvent
+    | OnboardingStepViewedEvent
+    | EditorOpenedEvent,
     Field(discriminator="event_name"),
 ]
+
+
+class UserRegisteredProperties(StrictModel):
+    selected_package: Package | None = None
+    niche: Niche | None = None
+
+
+class EmailVerifiedProperties(StrictModel):
+    welcome_credits: int = Field(ge=0, le=100)
+
+
+class GenerationRequestedProperties(StrictModel):
+    operation_kind: Literal["generation", "rerender"]
+    credit_cost: int = Field(ge=0, le=100)
+    generation_ordinal: Literal["first", "second", "repeat"]
+
+
+class GenerationTerminalProperties(StrictModel):
+    operation_kind: Literal["generation", "rerender"]
+    generation_ordinal: Literal["first", "second", "repeat"]
+
+
+class GenerationFailedProperties(GenerationTerminalProperties):
+    reason_code: Literal["pipeline", "provider", "cancelled", "persistence", "unknown"]
+
+
+class VideoExportedProperties(StrictModel):
+    export_ordinal: Literal["first", "repeat"]
+
+
+class CheckoutProperties(StrictModel):
+    provider: Literal["mercadopago", "stripe"]
+    package: Package
+    total_credits: int = Field(gt=0, le=10_000)
+
+
+class CreditBalanceChangedProperties(StrictModel):
+    reason: Literal[
+        "welcome",
+        "purchase",
+        "refund",
+        "generation_debit",
+        "generation_refund",
+        "rerender_debit",
+        "rerender_refund",
+        "admin",
+        "referral",
+        "other",
+    ]
+    delta: int = Field(ge=-10_000, le=10_000)
+
+    @field_validator("delta")
+    @classmethod
+    def reject_zero_delta(cls, value: int) -> int:
+        if value == 0:
+            raise ValueError("delta must be non-zero")
+        return value
+
+
+class SecondGenerationRequestedProperties(StrictModel):
+    credit_cost: int = Field(ge=0, le=100)
+
+
+ServerEventName = Literal[
+    "user_registered",
+    "email_verified",
+    "generation_requested",
+    "generation_completed",
+    "generation_failed",
+    "video_exported",
+    "checkout_started",
+    "payment_completed",
+    "credit_balance_changed",
+    "second_generation_requested",
+]
+
+SERVER_EVENT_PROPERTY_MODELS: dict[str, type[StrictModel]] = {
+    "user_registered": UserRegisteredProperties,
+    "email_verified": EmailVerifiedProperties,
+    "generation_requested": GenerationRequestedProperties,
+    "generation_completed": GenerationTerminalProperties,
+    "generation_failed": GenerationFailedProperties,
+    "video_exported": VideoExportedProperties,
+    "checkout_started": CheckoutProperties,
+    "payment_completed": CheckoutProperties,
+    "credit_balance_changed": CreditBalanceChangedProperties,
+    "second_generation_requested": SecondGenerationRequestedProperties,
+}
 
 
 class AnalyticsBatch(StrictModel):

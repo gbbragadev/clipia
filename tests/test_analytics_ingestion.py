@@ -88,6 +88,16 @@ VALID_CLIENT_EVENTS = [
         {"channel": "whatsapp", "placement": "after_export"},
     ),
     ("feedback_submitted", "editor", {"score": 5, "context": "first_export"}),
+    (
+        "onboarding_step_viewed",
+        "dashboard",
+        {"step": "first_video", "entry": "direct"},
+    ),
+    (
+        "editor_opened",
+        "editor",
+        {"entry": "generation_complete"},
+    ),
 ]
 
 
@@ -152,7 +162,7 @@ async def test_analytics_accepts_the_complete_client_event_catalog(
     response = await client.post("/api/v1/analytics/events", json={"events": events})
 
     assert response.status_code == 202
-    assert response.json() == {"accepted": 13, "duplicates": 0, "enabled": True}
+    assert response.json() == {"accepted": 15, "duplicates": 0, "enabled": True}
     stored_names = set(await db_session.scalars(select(AnalyticsEvent.event_name)))
     assert stored_names == {event_name for event_name, _, _ in VALID_CLIENT_EVENTS}
 

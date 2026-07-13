@@ -120,6 +120,6 @@ def test_postgres_reset_token_is_consumed_exactly_once_and_migration_round_trips
 
         assert asyncio.run(inspect_state()) == ("f3a4b5c6d7e8", False, False)
         command.upgrade(config, "head")
-        assert asyncio.run(inspect_state()) == ("b5c6d7e8f9a0", True, True)
+        assert asyncio.run(inspect_state()) == ("c6d7e8f9a0b1", True, True)
     finally:
         asyncio.run(_drop_database(database_name))

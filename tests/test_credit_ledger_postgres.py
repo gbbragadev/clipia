@@ -182,6 +182,6 @@ def test_postgres_credit_ledger_shadow_enforce_and_migration_round_trip(monkeypa
         assert asyncio.run(inspect_downgrade()) == ("a4b5c6d7e8f9", False, False)
         command.upgrade(config, "head")
         revision, table_exists, trigger_exists = asyncio.run(inspect_downgrade())
-        assert (revision, table_exists, trigger_exists) == ("b5c6d7e8f9a0", True, True)
+        assert (revision, table_exists, trigger_exists) == ("c6d7e8f9a0b1", True, True)
     finally:
         asyncio.run(_drop_database(database_name))

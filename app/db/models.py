@@ -361,7 +361,11 @@ class AnalyticsEvent(Base):
             "event_name IN ('landing_viewed', 'hero_cta_clicked', 'example_played', "
             "'example_completed', 'pricing_viewed', 'pricing_package_selected', "
             "'support_opened', 'signup_started', 'credits_viewed', 'credits_low', "
-            "'user_returned', 'referral_shared', 'feedback_submitted')",
+            "'user_returned', 'referral_shared', 'feedback_submitted', "
+            "'onboarding_step_viewed', 'editor_opened', 'user_registered', "
+            "'email_verified', 'generation_requested', 'generation_completed', "
+            "'generation_failed', 'video_exported', 'checkout_started', "
+            "'payment_completed', 'credit_balance_changed', 'second_generation_requested')",
             name="ck_analytics_event_name",
         ),
         CheckConstraint("schema_version = 1", name="ck_analytics_schema_version"),
