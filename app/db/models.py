@@ -295,6 +295,26 @@ class AnalyticsEvent(Base):
     payload_hash: Mapped[str] = mapped_column(String(64), nullable=False)
 
 
+class PasswordResetToken(Base):
+    """One-time reset capability; only the JWT identifier is persisted."""
+
+    __tablename__ = "password_reset_tokens"
+    __table_args__ = (
+        CheckConstraint("expires_at > issued_at", name="ck_password_reset_token_expiry"),
+        Index("ix_password_reset_tokens_user_used", "user_id", "used_at"),
+    )
+
+    jti: Mapped[uuid.UUID] = mapped_column(GUID(), primary_key=True)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        GUID(),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    issued_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
 class User(Base):
     __tablename__ = "users"
     __table_args__ = (
@@ -330,6 +350,8 @@ class User(Base):
     # LGPD: comprovante de consentimento expresso no cadastro (Termos + Política de Privacidade).
     consented_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     consent_ip: Mapped[str | None] = mapped_column(String(45), nullable=True)
+    consent_terms_version: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    consent_privacy_version: Mapped[str | None] = mapped_column(String(20), nullable=True)
 
     jobs: Mapped[list["Job"]] = relationship(back_populates="user")
     purchases: Mapped[list["CreditPurchase"]] = relationship(back_populates="user")

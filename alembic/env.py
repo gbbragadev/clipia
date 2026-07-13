@@ -10,6 +10,7 @@ from app.db.models import (  # noqa: F401
     AnalyticsEvent,
     CreditPurchase,
     Job,
+    PasswordResetToken,
     PaymentCheckoutDispatch,
     User,
     WaitlistEntry,

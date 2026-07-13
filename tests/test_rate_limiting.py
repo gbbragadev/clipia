@@ -11,7 +11,12 @@ async def test_auth_register_limit_blocks_sixth_request(client_factory):
             responses.append(
                 await client.post(
                     "/api/v1/auth/register",
-                    json={"email": f"user{idx}@example.com", "name": f"User {idx}", "password": "Secret123"},
+                    json={
+                        "email": f"user{idx}@example.com",
+                        "name": f"User {idx}",
+                        "password": "Secret123",
+                        "consent": True,
+                    },
                 )
             )
 

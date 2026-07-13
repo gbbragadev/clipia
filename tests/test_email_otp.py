@@ -13,7 +13,7 @@ async def test_register_creates_pending_user_and_verify_grants_two_credits(clien
     monkeypatch.setattr("app.auth.routes.settings.WELCOME_CREDIT_BONUS", 2)
     register = await client.post(
         "/api/v1/auth/register",
-        json={"email": "otp@example.com", "name": "Otp User", "password": "Secret123"},
+        json={"email": "otp@example.com", "name": "Otp User", "password": "Secret123", "consent": True},
     )
     assert register.status_code == 201, "Registration should succeed for OTP flow."
 
@@ -60,7 +60,7 @@ async def test_verify_email_adds_welcome_bonus_to_existing_balance(client, db_se
 async def test_register_rejects_disposable_email(client, db_session):
     response = await client.post(
         "/api/v1/auth/register",
-        json={"email": "farmer@mailinator.com", "name": "Farm", "password": "Secret123"},
+        json={"email": "farmer@mailinator.com", "name": "Farm", "password": "Secret123", "consent": True},
     )
     assert response.status_code == 400, "Disposable email domains must be rejected (anti-farming)."
     user = await db_session.scalar(select(User).where(User.email == "farmer@mailinator.com"))
@@ -120,7 +120,7 @@ async def test_register_blocks_when_captcha_rejected(client, db_session, monkeyp
     monkeypatch.setattr("app.auth.routes.verify_turnstile", _reject)
     response = await client.post(
         "/api/v1/auth/register",
-        json={"email": "bot@example.com", "name": "Bot", "password": "Secret123"},
+        json={"email": "bot@example.com", "name": "Bot", "password": "Secret123", "consent": True},
     )
     assert response.status_code == 400, "Cadastro deve ser bloqueado quando o captcha reprova."
     assert "anti-bot" in response.json()["detail"].lower()

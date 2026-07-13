@@ -1,13 +1,13 @@
+import uuid
 from datetime import datetime, timedelta, timezone
 
 import pytest
 from jose import jwt
-from sqlalchemy import select
 
 from app.auth import routes as auth_routes
 from app.auth.service import create_access_token, hash_password, verify_password
 from app.config import settings
-from app.db.models import User
+from app.db.models import PasswordResetToken, User
 
 
 def _ensure_utc(dt):
@@ -34,8 +34,12 @@ async def test_forgot_password_updates_code_and_sends_email(client, db_session, 
 
     refreshed = await db_session.get(User, user.id)
     assert refreshed.verification_code != "111111", "Forgot-password should replace the previous code."
-    assert refreshed.verification_code and len(refreshed.verification_code) == 6, "Forgot-password should generate a six-digit code."
-    assert refreshed.verification_expires and _ensure_utc(refreshed.verification_expires) > datetime.now(timezone.utc), "Reset code should have a future expiry."
+    assert (
+        refreshed.verification_code and len(refreshed.verification_code) == 6
+    ), "Forgot-password should generate a six-digit code."
+    assert refreshed.verification_expires and _ensure_utc(refreshed.verification_expires) > datetime.now(
+        timezone.utc
+    ), "Reset code should have a future expiry."
 
 
 @pytest.mark.asyncio
@@ -50,7 +54,7 @@ async def test_forgot_password_with_missing_email_is_not_leaky(client):
 
 
 @pytest.mark.asyncio
-async def test_verify_reset_code_returns_reset_token(client, user_factory):
+async def test_verify_reset_code_returns_reset_token(client, db_session, user_factory):
     user = await user_factory(
         email="verify-reset@example.com",
         password_hash=hash_password("oldsecret"),
@@ -70,6 +74,11 @@ async def test_verify_reset_code_returns_reset_token(client, user_factory):
     decoded = jwt.decode(body["reset_token"], settings.JWT_SECRET, algorithms=[settings.JWT_ALGORITHM])
     assert decoded["sub"] == str(user.id), "Reset token should belong to the matching user."
     assert decoded["purpose"] == "reset", "Reset token must be marked with purpose=reset."
+    assert decoded["jti"]
+    stored = await db_session.get(PasswordResetToken, uuid.UUID(decoded["jti"]))
+    assert stored is not None
+    assert stored.user_id == user.id
+    assert stored.used_at is None
 
 
 @pytest.mark.asyncio
@@ -132,6 +141,15 @@ async def test_reset_password_with_valid_token_changes_password_and_clears_otp(c
     assert refreshed.verification_code is None, "Reset password should clear the OTP."
     assert refreshed.verification_expires is None, "Reset password should clear the OTP expiry."
 
+    replay = await client.post(
+        "/api/v1/auth/reset-password",
+        json={"reset_token": reset_token, "new_password": "Anothersecret2"},
+    )
+    assert replay.status_code == 400
+    token_jti = jwt.decode(reset_token, settings.JWT_SECRET, algorithms=[settings.JWT_ALGORITHM])["jti"]
+    stored_token = await db_session.get(PasswordResetToken, uuid.UUID(token_jti))
+    assert stored_token is not None and stored_token.used_at is not None
+
     login_new = await client.post(
         "/api/v1/auth/login",
         json={"email": user.email, "password": "Newsecret1"},
@@ -177,3 +195,49 @@ async def test_reset_password_rejects_expired_and_wrong_purpose_tokens(client, u
 
     assert expired.status_code == 400, "Expired reset tokens should be rejected."
     assert wrong_purpose.status_code == 400, "Tokens without purpose=reset should be rejected."
+
+
+@pytest.mark.asyncio
+async def test_change_password_invalidates_all_outstanding_reset_tokens(
+    client,
+    db_session,
+    verified_user,
+    auth_headers,
+):
+    now = datetime.now(timezone.utc)
+    token_jti = uuid.uuid4()
+    token = jwt.encode(
+        {
+            "sub": str(verified_user.id),
+            "purpose": "reset",
+            "jti": str(token_jti),
+            "iat": now,
+            "exp": now + timedelta(minutes=10),
+        },
+        settings.JWT_SECRET,
+        algorithm=settings.JWT_ALGORITHM,
+    )
+    db_session.add(
+        PasswordResetToken(
+            jti=token_jti,
+            user_id=verified_user.id,
+            issued_at=now,
+            expires_at=now + timedelta(minutes=10),
+        )
+    )
+    await db_session.commit()
+
+    changed = await client.post(
+        "/api/v1/auth/change-password",
+        headers=auth_headers(verified_user),
+        json={"current_password": "supersecret", "new_password": "Changedsecret1"},
+    )
+    rejected = await client.post(
+        "/api/v1/auth/reset-password",
+        json={"reset_token": token, "new_password": "Resetsecret2"},
+    )
+
+    assert changed.status_code == 200
+    assert rejected.status_code == 400
+    stored = await db_session.get(PasswordResetToken, token_jti)
+    assert stored is not None and stored.used_at is not None

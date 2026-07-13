@@ -8,7 +8,7 @@ from app.db.models import User
 async def test_register_accepts_unicode_name_and_lowercases_email(client, db_session):
     response = await client.post(
         "/api/v1/auth/register",
-        json={"email": "TeSt@Example.com", "name": "José 🚀", "password": "Secret123"},
+        json={"email": "TeSt@Example.com", "name": "José 🚀", "password": "Secret123", "consent": True},
     )
 
     assert response.status_code == 201, "Registration should accept Unicode names."
@@ -20,11 +20,11 @@ async def test_register_accepts_unicode_name_and_lowercases_email(client, db_ses
 async def test_register_rejects_blank_space_email_and_short_password(client):
     bad_email = await client.post(
         "/api/v1/auth/register",
-        json={"email": " bad email ", "name": "User", "password": "Secret123"},
+        json={"email": " bad email ", "name": "User", "password": "Secret123", "consent": True},
     )
     short_password = await client.post(
         "/api/v1/auth/register",
-        json={"email": "user@example.com", "name": "User", "password": "12345"},
+        json={"email": "user@example.com", "name": "User", "password": "12345", "consent": True},
     )
 
     assert bad_email.status_code == 422, "Invalid email formats should be rejected."

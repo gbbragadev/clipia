@@ -1,7 +1,7 @@
 import asyncio
 import secrets
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, status
 from slowapi import Limiter
@@ -18,6 +18,7 @@ from app.auth.email import (
     send_verification_email,
     send_welcome_email,
 )
+from app.auth.reset_tokens import consume_password_reset_token, invalidate_password_reset_tokens
 from app.auth.schemas import (
     ChangePasswordRequest,
     DeleteAccountRequest,
@@ -36,7 +37,7 @@ from app.auth.service import create_access_token, create_reset_token, decode_res
 from app.auth.turnstile import verify_turnstile
 from app.config import settings
 from app.db.engine import get_db
-from app.db.models import CreditPurchase, Job, User
+from app.db.models import CreditPurchase, Job, PasswordResetToken, User
 from app.observability import record_credit_metric
 from app.payments.states import canonical_payment_state
 from app.utils.locks import get_lock
@@ -87,11 +88,9 @@ async def register(request: Request, body: RegisterRequest, db: AsyncSession = D
                 referrer_id = referrer.id
 
         code = generate_otp()
-        # LGPD: registra comprovante de consentimento expresso (timestamp + IP) para auditoria.
-        # A obrigatoriedade do aceite e enforcecida no frontend (checkbox); o backend registra
-        # o comprovante quando o consentimento e declarado.
-        consented_at = datetime.now(timezone.utc) if body.consent else None
-        consent_ip = client_ip(request) if body.consent else None
+        # O backend exige o aceite e congela as versoes legais vigentes para auditoria.
+        consented_at = datetime.now(timezone.utc)
+        consent_ip = client_ip(request)
         user = User(
             email=body.email,
             name=body.name,
@@ -108,6 +107,8 @@ async def register(request: Request, body: RegisterRequest, db: AsyncSession = D
             referred_by=referrer_id,
             consented_at=consented_at,
             consent_ip=consent_ip,
+            consent_terms_version=settings.TERMS_VERSION,
+            consent_privacy_version=settings.PRIVACY_VERSION,
         )
         db.add(user)
         await db.commit()
@@ -279,6 +280,8 @@ async def forgot_password(request: Request, body: ForgotPasswordRequest, db: Asy
         user = result.scalar_one_or_none()
 
         if user is not None:
+            now = datetime.now(timezone.utc)
+            await invalidate_password_reset_tokens(db, user_id=user.id, used_at=now)
             code = generate_otp()
             user.verification_code = code
             user.verification_expires = otp_expiry()
@@ -322,10 +325,23 @@ async def verify_reset_code(request: Request, body: VerifyResetCodeRequest, db: 
                 raise HTTPException(status_code=429, detail="Muitas tentativas. Solicite um novo codigo.")
             raise HTTPException(status_code=400, detail=f"Codigo incorreto. {remaining} tentativa(s) restante(s).")
 
+        now = datetime.now(timezone.utc)
+        jti = uuid.uuid4()
+        expires_at = now + timedelta(minutes=10)
+        db.add(
+            PasswordResetToken(
+                jti=jti,
+                user_id=user.id,
+                issued_at=now,
+                expires_at=expires_at,
+            )
+        )
+        user.verification_code = None
+        user.verification_expires = None
         user.otp_attempts = 0
         await db.commit()
 
-        return {"status": "verified", "reset_token": create_reset_token(str(user.id))}
+        return {"status": "verified", "reset_token": create_reset_token(str(user.id), jti, now)}
 
 
 @router.post(
@@ -341,26 +357,33 @@ async def reset_password(request: Request, body: ResetPasswordRequest, db: Async
     if not payload:
         raise HTTPException(status_code=400, detail="Token de redefinicao invalido ou expirado")
 
-    user_id = payload.get("sub")
-    if not user_id:
+    try:
+        user_id = uuid.UUID(str(payload.get("sub")))
+        jti = uuid.UUID(str(payload.get("jti")))
+    except (TypeError, ValueError):
         raise HTTPException(status_code=400, detail="Token de redefinicao invalido ou expirado")
 
-    result = await db.execute(select(User).where(User.id == user_id))
+    result = await db.execute(select(User).where(User.id == user_id).with_for_update())
     user = result.scalar_one_or_none()
     if not user:
         raise HTTPException(status_code=400, detail="Token de redefinicao invalido ou expirado")
 
-    # Invalidate token if already used
-    token_iat = payload.get("iat")
-    if token_iat and user.password_reset_at:
-        token_time = datetime.fromtimestamp(token_iat, tz=timezone.utc)
-        if token_time < user.password_reset_at:
-            raise HTTPException(status_code=400, detail="Token de redefinicao invalido ou expirado")
+    now = datetime.now(timezone.utc)
+    consumed = await consume_password_reset_token(
+        db,
+        user_id=user.id,
+        jti=jti,
+        used_at=now,
+    )
+    if not consumed:
+        await db.rollback()
+        raise HTTPException(status_code=400, detail="Token de redefinicao invalido ou expirado")
 
     user.password_hash = hash_password(body.new_password)
     user.verification_code = None
     user.verification_expires = None
-    user.password_reset_at = datetime.now(timezone.utc)
+    user.password_reset_at = now
+    await invalidate_password_reset_tokens(db, user_id=user.id, used_at=now)
     await db.commit()
 
     return {"status": "password_reset"}
@@ -431,6 +454,9 @@ async def change_password(
         raise HTTPException(status_code=400, detail="Senha atual incorreta")
 
     user.password_hash = hash_password(body.new_password)
+    now = datetime.now(timezone.utc)
+    user.password_reset_at = now
+    await invalidate_password_reset_tokens(db, user_id=user.id, used_at=now)
     await db.commit()
     return {"status": "password_changed"}
 
@@ -461,6 +487,9 @@ async def delete_account(
     user.verification_code = None
     user.verification_expires = None
     user.password_hash = hash_password(secrets.token_urlsafe(32))
+    now = datetime.now(timezone.utc)
+    user.password_reset_at = now
+    await invalidate_password_reset_tokens(db, user_id=user.id, used_at=now)
     await db.commit()
 
     await asyncio.to_thread(send_account_deleted_email, original_email, original_name)

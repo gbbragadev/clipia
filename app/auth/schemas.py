@@ -1,4 +1,5 @@
 import re
+from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -42,8 +43,8 @@ class RegisterRequest(BaseModel):
     turnstile_token: str | None = Field(
         default=None, max_length=2048, description="Cloudflare Turnstile token (anti-bot)"
     )
-    consent: bool | None = Field(
-        default=None,
+    consent: Literal[True] = Field(
+        ...,
         description="LGPD: aceite expresso dos Termos e Política de Privacidade no cadastro (registrado para auditoria).",
     )
 

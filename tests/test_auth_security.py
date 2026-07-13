@@ -10,7 +10,7 @@ from app.db.models import User
 
 @pytest.mark.asyncio
 async def test_register_duplicate_email_returns_409(client):
-    payload = {"email": "dup@example.com", "name": "Dup", "password": "Secret123"}
+    payload = {"email": "dup@example.com", "name": "Dup", "password": "Secret123", "consent": True}
     first = await client.post("/api/v1/auth/register", json=payload)
     second = await client.post("/api/v1/auth/register", json=payload)
 
@@ -22,7 +22,7 @@ async def test_register_duplicate_email_returns_409(client):
 async def test_register_normalizes_email_and_hashes_password(client, db_session):
     response = await client.post(
         "/api/v1/auth/register",
-        json={"email": "  TEST@Example.COM ", "name": "User", "password": "Secret123"},
+        json={"email": "  TEST@Example.COM ", "name": "User", "password": "Secret123", "consent": True},
     )
 
     assert response.status_code == 201, "Registration with normalized email should succeed."
@@ -45,11 +45,29 @@ async def test_register_records_lgpd_consent_audit_trail(client, db_session):
     assert user is not None
     assert user.consented_at is not None, "Deve registrar timestamp do consentimento."
     assert user.consent_ip, "Deve registrar IP do consentimento."
+    assert user.consent_terms_version == settings.TERMS_VERSION
+    assert user.consent_privacy_version == settings.PRIVACY_VERSION
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("consent_payload", [{}, {"consent": False}, {"consent": None}])
+async def test_register_requires_explicit_current_legal_consent(client, consent_payload):
+    response = await client.post(
+        "/api/v1/auth/register",
+        json={
+            "email": f"no-consent-{len(consent_payload)}-{consent_payload.get('consent')}@example.com",
+            "name": "No Consent",
+            "password": "Secret123",
+            **consent_payload,
+        },
+    )
+
+    assert response.status_code == 422
 
 
 @pytest.mark.asyncio
 async def test_login_wrong_password_and_missing_user_share_401(client):
-    register = {"email": "login@example.com", "name": "Login", "password": "Secret123"}
+    register = {"email": "login@example.com", "name": "Login", "password": "Secret123", "consent": True}
     await client.post("/api/v1/auth/register", json=register)
 
     wrong_password = await client.post(

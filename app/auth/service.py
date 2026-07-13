@@ -1,7 +1,8 @@
+import uuid
 from datetime import datetime, timedelta, timezone
 
 import bcrypt
-from jose import jwt, JWTError
+from jose import JWTError, jwt
 
 from app.config import settings
 
@@ -20,9 +21,16 @@ def create_access_token(user_id: str) -> str:
     return jwt.encode(payload, settings.JWT_SECRET, algorithm=settings.JWT_ALGORITHM)
 
 
-def create_reset_token(user_id: str) -> str:
-    expire = datetime.now(timezone.utc) + timedelta(minutes=10)
-    payload = {"sub": user_id, "purpose": "reset", "exp": expire}
+def create_reset_token(user_id: str, jti: uuid.UUID, issued_at: datetime | None = None) -> str:
+    issued_at = issued_at or datetime.now(timezone.utc)
+    expire = issued_at + timedelta(minutes=10)
+    payload = {
+        "sub": user_id,
+        "purpose": "reset",
+        "jti": str(jti),
+        "iat": issued_at,
+        "exp": expire,
+    }
     return jwt.encode(payload, settings.JWT_SECRET, algorithm=settings.JWT_ALGORITHM)
 
 
@@ -38,8 +46,11 @@ def decode_access_token(token: str) -> str | None:
 def decode_reset_token(token: str) -> dict | None:
     try:
         payload = jwt.decode(token, settings.JWT_SECRET, algorithms=[settings.JWT_ALGORITHM])
-        if payload.get("purpose") != "reset":
+        if payload.get("purpose") != "reset" or not payload.get("sub"):
+            return None
+        jti = uuid.UUID(str(payload.get("jti")))
+        if jti.version != 4:
             return None
         return payload
-    except JWTError:
+    except (JWTError, TypeError, ValueError):
         return None
