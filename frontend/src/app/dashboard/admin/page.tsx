@@ -368,11 +368,11 @@ function FunnelCard({ data }: { data: AdminDashboardResponse['funnel'] }) {
     { label: 'Cliques no CTA', value: data.cta_clicked, tone: '#818cf8' },
     { label: 'Cadastrados', value: data.registered, tone: '#60a5fa' },
     { label: 'Verificados', value: data.verified, tone: '#f59e0b' },
-    { label: 'Primeira geracao', value: data.first_generation, tone: '#fb923c' },
+    { label: 'Primeira geracao solicitada', value: data.first_generation, tone: '#fb923c' },
     { label: 'Exportaram', value: data.exported, tone: '#f472b6' },
     { label: 'Iniciaram checkout', value: data.checkout_started, tone: '#2dd4bf' },
     { label: 'Pagantes', value: data.paying, tone: '#22c55e' },
-    { label: 'Segundo video', value: data.second_generation, tone: '#10b981' },
+    { label: 'Segundo video solicitado', value: data.second_generation, tone: '#10b981' },
   ]
   const max = Math.max(...stages.map((stage) => stage.value), 1)
 
