@@ -48,6 +48,7 @@ from app.services.audio_uploads import (
     read_limited_audio,
     write_limited_audio,
 )
+from app.services.credit_ledger import set_credit_ledger_context
 from app.services.dispatch_outbox import DispatchPayload, create_dispatch, publish_dispatch
 from app.services.job_operations import (
     InsufficientCredits,
@@ -162,7 +163,16 @@ def _ensure_storage_ready() -> None:
         raise HTTPException(status_code=503, detail=ErrorMessages.DISK_FULL)
 
 
-async def _debit_credits(db: AsyncSession, user_id, cost: int, commit: bool = True) -> None:
+async def _debit_credits(
+    db: AsyncSession,
+    user_id,
+    cost: int,
+    commit: bool = True,
+    *,
+    action: str = "paid_operation",
+    operation_id: uuid.UUID | None = None,
+    job_id: uuid.UUID | None = None,
+) -> uuid.UUID | None:
     """Debito atomico de creditos (mesmo padrao da rota /generate).
 
     Faz UPDATE ... WHERE credits >= cost (sem read-modify-write) para evitar race/saldo negativo.
@@ -171,7 +181,16 @@ async def _debit_credits(db: AsyncSession, user_id, cost: int, commit: bool = Tr
     na MESMA transacao — um erro no meio nao deixa credito cobrado sem o efeito aplicado).
     """
     if cost <= 0:
-        return
+        return operation_id
+    ledger_operation_id = operation_id or uuid.uuid4()
+    await set_credit_ledger_context(
+        db,
+        origin=f"{action}_debit",
+        reason=f"{action} reserved",
+        idempotency_key=f"{action}:{ledger_operation_id}:debit",
+        job_id=job_id,
+        operation_id=ledger_operation_id,
+    )
     result = await db.execute(
         update(User)
         .where(User.id == user_id, User.email_verified.is_(True), User.credits >= cost)
@@ -187,29 +206,68 @@ async def _debit_credits(db: AsyncSession, user_id, cost: int, commit: bool = Tr
     if commit:
         await db.commit()
     record_credit_metric("debit", cost)
+    return ledger_operation_id
 
 
-async def _refund_credits(db: AsyncSession, user_id, cost: int) -> None:
+async def _refund_credits(
+    db: AsyncSession,
+    user_id,
+    cost: int,
+    *,
+    action: str,
+    operation_id: uuid.UUID,
+    job_id: uuid.UUID | None = None,
+) -> None:
     """Devolve creditos quando uma operacao paga falha depois do debito. No-op se cost <= 0."""
     if cost <= 0:
         return
+    await set_credit_ledger_context(
+        db,
+        origin=f"{action}_refund",
+        reason=f"failed {action} refunded",
+        idempotency_key=f"{action}:{operation_id}:refund",
+        job_id=job_id,
+        operation_id=operation_id,
+    )
     await db.execute(update(User).where(User.id == user_id).values(credits=User.credits + cost))
     await db.commit()
     record_credit_metric("credit", cost)
 
 
-async def _refund_credits_safe(db: AsyncSession, user_id, cost: int, action: str) -> bool:
+async def _refund_credits_safe(
+    db: AsyncSession,
+    user_id,
+    cost: int,
+    action: str,
+    operation_id: uuid.UUID,
+    *,
+    job_id: uuid.UUID | None = None,
+) -> bool:
     """Refund que NUNCA levanta: uma excecao aqui substituiria o erro ORIGINAL da acao
     paga (o cliente veria 500 generico em vez da causa real) e deixaria o estorno perdido
     em silencio. Sessao suja ganha um rollback+retry; falhou de vez -> CRITICAL + alerta
     admin com os dados do estorno manual (mesmo contrato do worker, d23c0ec)."""
     try:
-        await _refund_credits(db, user_id, cost)
+        await _refund_credits(
+            db,
+            user_id,
+            cost,
+            action=action,
+            operation_id=operation_id,
+            job_id=job_id,
+        )
         return True
     except Exception:  # noqa: BLE001
         try:
             await db.rollback()
-            await _refund_credits(db, user_id, cost)
+            await _refund_credits(
+                db,
+                user_id,
+                cost,
+                action=action,
+                operation_id=operation_id,
+                job_id=job_id,
+            )
             return True
         except Exception:  # noqa: BLE001
             logger.critical(
@@ -580,6 +638,14 @@ async def generate(
             refine_extra = int(refine_pending)
             credit_cost = base_credit_cost + refine_extra
             debit_values = {"credits": User.credits - credit_cost}
+            await set_credit_ledger_context(
+                db,
+                origin="generation_debit",
+                reason="generation operation reserved",
+                idempotency_key=f"generation:{job_uuid}:debit",
+                job_id=job_uuid,
+                operation_id=job_uuid,
+            )
             if refine_extra > 0:
                 debit_values.update(
                     script_refine_pending=User.script_refine_pending - refine_extra,
@@ -920,11 +986,18 @@ async def design_voice(
     from app.services.elevenlabs_provider import ElevenLabsProvider
 
     cost = settings.CREDIT_COST_VOICE_DESIGN
-    await _debit_credits(db, user.id, cost)
+    operation_id = uuid.uuid4()
+    await _debit_credits(
+        db,
+        user.id,
+        cost,
+        action="design_voice",
+        operation_id=operation_id,
+    )
     try:
         voice_id = await ElevenLabsProvider().design_voice(req.name, req.description, req.text)
     except Exception as e:  # noqa: BLE001
-        await _refund_credits_safe(db, user.id, cost, "design_voice")
+        await _refund_credits_safe(db, user.id, cost, "design_voice", operation_id)
         logger.warning("Voice Design falhou: %s", e)
         raise HTTPException(status_code=502, detail=f"Não foi possível criar a voz: {e}")
     return {"voice_id": voice_id, "name": req.name}
@@ -1231,12 +1304,19 @@ async def clone_voice(
     from app.services.elevenlabs_provider import ElevenLabsProvider
 
     cost = settings.CREDIT_COST_VOICE_CLONE
-    await _debit_credits(db, user.id, cost)
+    operation_id = uuid.uuid4()
+    await _debit_credits(
+        db,
+        user.id,
+        cost,
+        action="clone_voice",
+        operation_id=operation_id,
+    )
     provider = ElevenLabsProvider()
     try:
         voice_id = await provider.clone_voice(name, audio_bytes, description)
     except Exception as e:  # noqa: BLE001
-        await _refund_credits_safe(db, user.id, cost, "clone_voice")
+        await _refund_credits_safe(db, user.id, cost, "clone_voice", operation_id)
         logger.warning("Voice clone falhou: %s", e)
         raise HTTPException(status_code=502, detail=f"Não foi possível clonar a voz: {e}")
 
@@ -1560,7 +1640,15 @@ async def regenerate_tts(
         from app.services.elevenlabs_provider import ElevenLabsProvider
 
         cost = int(CREDIT_TARIFFS.dialogue)
-        await _debit_credits(db, user.id, cost)
+        operation_id = uuid.uuid4()
+        await _debit_credits(
+            db,
+            user.id,
+            cost,
+            action="regenerate_tts",
+            operation_id=operation_id,
+            job_id=job.id,
+        )
         provider = ElevenLabsProvider()
         try:
             await provider.synthesize(
@@ -1569,7 +1657,14 @@ async def regenerate_tts(
                 voice_id=req.voice_id or "",
             )
         except Exception as e:  # noqa: BLE001
-            await _refund_credits_safe(db, user.id, cost, "regenerate_tts")
+            await _refund_credits_safe(
+                db,
+                user.id,
+                cost,
+                "regenerate_tts",
+                operation_id,
+                job_id=job.id,
+            )
             logger.warning("Regenerate TTS (ElevenLabs) falhou: %s", e)
             raise HTTPException(status_code=502, detail=f"Não foi possível regenerar a narração: {e}")
     else:
@@ -1929,7 +2024,15 @@ async def reset_job(
     async with get_lock(f"reset:{job_id}"):
         # commit=False: debito + reset do job na MESMA transacao (erro entre eles nao
         # deixa o credito cobrado com o editor_state intacto).
-        await _debit_credits(db, user.id, 1, commit=False)
+        await _debit_credits(
+            db,
+            user.id,
+            1,
+            commit=False,
+            action="job_reset",
+            operation_id=uuid.uuid4(),
+            job_id=job.id,
+        )
         job.pending_credits = 0.0
         job.editor_state = None
         await db.commit()
@@ -2718,12 +2821,21 @@ async def admin_adjust_credits(
         await db.rollback()
         raise HTTPException(status_code=409, detail="insufficient_credits")
 
+    adjustment_id = uuid.uuid4()
+    await set_credit_ledger_context(
+        db,
+        origin="admin_adjustment",
+        reason=req.reason.strip(),
+        idempotency_key=f"admin-adjustment:{adjustment_id}",
+        operation_id=adjustment_id,
+    )
     balance_result = await db.execute(
         update(User).where(User.id == target.id).values(credits=User.credits + req.delta).returning(User.credits)
     )
     new_balance = int(balance_result.scalar_one())
     db.add(
         CreditAdjustment(
+            id=adjustment_id,
             admin_user_id=admin_user.id,
             target_user_id=target.id,
             delta=req.delta,

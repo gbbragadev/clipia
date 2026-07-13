@@ -385,6 +385,7 @@ def _refund_rerender_cost(job_id: str) -> bool:
 
         from app.db.engine import worker_session as async_session
         from app.db.models import Job, User
+        from app.services.credit_ledger import set_credit_ledger_context
 
         async def _refund():
             async with async_session() as session:
@@ -392,6 +393,14 @@ def _refund_rerender_cost(job_id: str) -> bool:
                 job = result.scalar_one_or_none()
                 if not job:
                     return
+                await set_credit_ledger_context(
+                    session,
+                    origin="legacy_rerender_refund",
+                    reason="legacy rerender failure refunded",
+                    idempotency_key=f"legacy-rerender:{job.id}:refund",
+                    job_id=job.id,
+                    operation_id=job.id,
+                )
                 await session.execute(update(User).where(User.id == job.user_id).values(credits=User.credits + cost))
                 job.pending_credits = float(cost)
                 await session.commit()
@@ -1443,6 +1452,31 @@ async def _drain_refine_balance_outbox_async() -> dict[str, int]:
     return {"projected": projected, "remaining": remaining}
 
 
+async def _reconcile_credit_ledger_async() -> dict:
+    """Record the daily shadow comparison without repairing either side."""
+    from app.db.engine import worker_session as async_session
+    from app.services.credit_ledger import reconcile_credit_ledger
+
+    async with async_session() as session:
+        result = await reconcile_credit_ledger(session)
+        await session.commit()
+    if not result["is_clean"]:
+        logger.critical(
+            "Credit ledger divergence: users=%d mismatches=%d max_abs_difference=%d",
+            result["user_count"],
+            result["mismatch_count"],
+            result["max_abs_difference"],
+        )
+        _send_admin_alert(
+            "ClipIA - divergencia no ledger de creditos",
+            "A reconciliacao append-only detectou "
+            f"{result['mismatch_count']} usuario(s) divergentes; "
+            f"diferenca absoluta maxima={result['max_abs_difference']}. "
+            "O modo enforce permanece bloqueado.",
+        )
+    return result
+
+
 async def _prepare_refine_balance_rollback_async() -> dict[str, int]:
     """Verify Redis and atomically hand authority to the ba03321 binary."""
     from sqlalchemy import func, or_, select
@@ -1718,6 +1752,11 @@ def reconcile_payment_checkout_dispatches() -> dict[str, int]:
 @celery_app.task(name="drain_refine_balance_outbox")
 def drain_refine_balance_outbox() -> dict[str, int]:
     return asyncio.run(_drain_refine_balance_outbox_async())
+
+
+@celery_app.task(name="reconcile_credit_ledger")
+def reconcile_credit_ledger_task() -> dict:
+    return asyncio.run(_reconcile_credit_ledger_async())
 
 
 @celery_app.task(name="cleanup_orphan_files")

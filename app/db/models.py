@@ -2,6 +2,7 @@ import uuid
 from datetime import datetime
 
 from sqlalchemy import (
+    DDL,
     CheckConstraint,
     DateTime,
     Float,
@@ -11,6 +12,7 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    event,
     func,
     text,
 )
@@ -231,6 +233,123 @@ class CreditAdjustment(Base):
     previous_balance: Mapped[int] = mapped_column(Integer, nullable=False)
     new_balance: Mapped[int] = mapped_column(Integer, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class CreditLedgerEntry(Base):
+    """Append-only shadow ledger for every signed User.credits mutation."""
+
+    __tablename__ = "credit_ledger_entries"
+    __table_args__ = (
+        CheckConstraint("delta <> 0", name="ck_credit_ledger_delta_nonzero"),
+        CheckConstraint("balance_after >= 0", name="ck_credit_ledger_balance_nonnegative"),
+        UniqueConstraint("idempotency_key", name="uq_credit_ledger_idempotency_key"),
+        Index("ix_credit_ledger_user_created", "user_id", "created_at"),
+        Index("ix_credit_ledger_origin_created", "origin", "created_at"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(GUID(), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(GUID(), ForeignKey("users.id", ondelete="RESTRICT"), nullable=False)
+    delta: Mapped[int] = mapped_column(Integer, nullable=False)
+    origin: Mapped[str] = mapped_column(String(50), nullable=False)
+    purchase_id: Mapped[uuid.UUID | None] = mapped_column(GUID(), nullable=True)
+    job_id: Mapped[uuid.UUID | None] = mapped_column(GUID(), nullable=True)
+    operation_id: Mapped[uuid.UUID | None] = mapped_column(GUID(), nullable=True)
+    reason: Mapped[str] = mapped_column(String(255), nullable=False)
+    idempotency_key: Mapped[str] = mapped_column(String(255), nullable=False)
+    balance_after: Mapped[int] = mapped_column(Integer, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+class CreditLedgerReconciliationRun(Base):
+    """Durable evidence for the seven-clean-days shadow-to-enforce gate."""
+
+    __tablename__ = "credit_ledger_reconciliation_runs"
+    __table_args__ = (
+        CheckConstraint("mode IN ('shadow', 'enforce')", name="ck_credit_ledger_run_mode"),
+        CheckConstraint("user_count >= 0", name="ck_credit_ledger_run_user_count"),
+        CheckConstraint("mismatch_count >= 0", name="ck_credit_ledger_run_mismatch_count"),
+        CheckConstraint("max_abs_difference >= 0", name="ck_credit_ledger_run_max_difference"),
+        Index("ix_credit_ledger_runs_created", "created_at"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(GUID(), primary_key=True, default=uuid.uuid4)
+    mode: Mapped[str] = mapped_column(String(10), nullable=False)
+    user_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    mismatch_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    max_abs_difference: Mapped[int] = mapped_column(Integer, nullable=False)
+    is_clean: Mapped[bool] = mapped_column(nullable=False)
+    details: Mapped[dict] = mapped_column(JsonType, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+_SQLITE_LEDGER_TRIGGER_DDLS = (
+    DDL(
+        """
+        CREATE TRIGGER credit_ledger_users_insert
+        AFTER INSERT ON users
+        WHEN NEW.credits <> 0
+        BEGIN
+            INSERT INTO credit_ledger_entries (
+                id, user_id, delta, origin, reason, idempotency_key,
+                balance_after, created_at
+            ) VALUES (
+                lower(hex(randomblob(4))) || '-' || lower(hex(randomblob(2))) || '-' ||
+                lower(hex(randomblob(2))) || '-' || lower(hex(randomblob(2))) || '-' ||
+                lower(hex(randomblob(6))), NEW.id, NEW.credits, 'user_insert',
+                'initial nonzero balance',
+                'shadow:' || lower(hex(randomblob(16))), NEW.credits, CURRENT_TIMESTAMP
+            );
+        END
+        """
+    ).execute_if(dialect="sqlite"),
+    DDL(
+        """
+        CREATE TRIGGER credit_ledger_users_update
+        AFTER UPDATE OF credits ON users
+        WHEN NEW.credits <> OLD.credits
+        BEGIN
+            INSERT INTO credit_ledger_entries (
+                id, user_id, delta, origin, reason, idempotency_key,
+                balance_after, created_at
+            ) VALUES (
+                lower(hex(randomblob(4))) || '-' || lower(hex(randomblob(2))) || '-' ||
+                lower(hex(randomblob(2))) || '-' || lower(hex(randomblob(2))) || '-' ||
+                lower(hex(randomblob(6))), NEW.id, NEW.credits - OLD.credits,
+                'unclassified', 'unclassified projection mutation',
+                'shadow:' || lower(hex(randomblob(16))), NEW.credits, CURRENT_TIMESTAMP
+            );
+        END
+        """
+    ).execute_if(dialect="sqlite"),
+    DDL(
+        """
+        CREATE TRIGGER credit_ledger_entries_no_update
+        BEFORE UPDATE ON credit_ledger_entries
+        BEGIN
+            SELECT RAISE(ABORT, 'credit_ledger_entries is append-only');
+        END
+        """
+    ).execute_if(dialect="sqlite"),
+    DDL(
+        """
+        CREATE TRIGGER credit_ledger_entries_no_delete
+        BEFORE DELETE ON credit_ledger_entries
+        BEGIN
+            SELECT RAISE(ABORT, 'credit_ledger_entries is append-only');
+        END
+        """
+    ).execute_if(dialect="sqlite"),
+)
+
+for _ledger_trigger_ddl in _SQLITE_LEDGER_TRIGGER_DDLS:
+    event.listen(CreditLedgerEntry.__table__, "after_create", _ledger_trigger_ddl)
+
+for _trigger_name in ("credit_ledger_users_insert", "credit_ledger_users_update"):
+    event.listen(
+        CreditLedgerEntry.__table__,
+        "before_drop",
+        DDL(f"DROP TRIGGER IF EXISTS {_trigger_name}").execute_if(dialect="sqlite"),
+    )
 
 
 class AnalyticsEvent(Base):

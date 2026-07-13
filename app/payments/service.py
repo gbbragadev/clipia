@@ -20,6 +20,7 @@ from app.observability import record_credit_metric
 from app.payments.schemas import CREDIT_PACKAGES  # noqa: F401 - compatibility export
 from app.payments.snapshot import validate_snapshot_metadata
 from app.payments.states import canonical_payment_state, payment_state_values
+from app.services.credit_ledger import set_credit_ledger_context
 from app.utils.locks import get_lock
 
 logger = logging.getLogger(__name__)
@@ -196,6 +197,13 @@ async def _apply_payment_event(
 
             metric_user_id = purchase.user_id
             if delta > 0:
+                await set_credit_ledger_context(
+                    db,
+                    origin="payment_credit",
+                    reason="validated paid purchase credited",
+                    idempotency_key=f"payment:{purchase.id}:paid",
+                    purchase_id=purchase.id,
+                )
                 await db.execute(
                     update(User)
                     .where(User.id == purchase.user_id)
@@ -203,6 +211,13 @@ async def _apply_payment_event(
                     .execution_options(synchronize_session=False)
                 )
             elif delta < 0:
+                await set_credit_ledger_context(
+                    db,
+                    origin="payment_refund",
+                    reason="terminally refunded purchase debited",
+                    idempotency_key=f"payment:{purchase.id}:refunded",
+                    purchase_id=purchase.id,
+                )
                 await db.execute(
                     update(User)
                     .where(User.id == purchase.user_id)

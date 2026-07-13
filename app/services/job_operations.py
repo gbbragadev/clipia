@@ -9,6 +9,7 @@ from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import Job, JobDispatch, User
+from app.services.credit_ledger import set_credit_ledger_context
 from app.services.refine_balance import adjust_refine_balance
 
 
@@ -176,7 +177,16 @@ async def refund_generation(
     refine_refund = dispatch.refine_debited if dispatch is not None else float(job.refine_credit_cost or 0)
     if refund_amount < 0 or refine_refund < 0:
         return False
-    await session.execute(update(User).where(User.id == job.user_id).values(credits=User.credits + refund_amount))
+    if refund_amount > 0:
+        await set_credit_ledger_context(
+            session,
+            origin="generation_refund",
+            reason="undelivered generation refunded",
+            idempotency_key=f"generation:{job.id}:refund",
+            job_id=job.id,
+            operation_id=job.id,
+        )
+        await session.execute(update(User).where(User.id == job.user_id).values(credits=User.credits + refund_amount))
     if refine_refund:
         await adjust_refine_balance(session, job.user_id, float(refine_refund))
     job.status = status
@@ -285,6 +295,14 @@ async def begin_rerender(
     snapshot = float(job.pending_credits or 0.0)
     cost = ceil(snapshot)
     if cost > 0:
+        await set_credit_ledger_context(
+            session,
+            origin="rerender_debit",
+            reason="rerender operation reserved",
+            idempotency_key=f"rerender:{operation_id}:debit",
+            job_id=job.id,
+            operation_id=operation_id,
+        )
         debit = await session.execute(
             update(User)
             .where(User.id == user_id, User.email_verified.is_(True), User.credits >= cost)
@@ -403,6 +421,14 @@ async def refund_rerender(
     if refund_cost < 0 or pending_snapshot < 0:
         return False
     if refund_cost > 0:
+        await set_credit_ledger_context(
+            session,
+            origin="rerender_refund",
+            reason="undelivered rerender refunded",
+            idempotency_key=f"rerender:{operation_id}:refund",
+            job_id=job.id,
+            operation_id=operation_id,
+        )
         await session.execute(update(User).where(User.id == job.user_id).values(credits=User.credits + refund_cost))
     await session.execute(
         update(Job)

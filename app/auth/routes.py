@@ -40,6 +40,7 @@ from app.db.engine import get_db
 from app.db.models import CreditPurchase, Job, PasswordResetToken, User
 from app.observability import record_credit_metric
 from app.payments.states import canonical_payment_state
+from app.services.credit_ledger import set_credit_ledger_context
 from app.utils.locks import get_lock
 from app.utils.ratelimit import client_ip
 
@@ -187,6 +188,12 @@ async def verify_email(
                 raise HTTPException(status_code=429, detail="Muitas tentativas. Solicite um novo codigo.")
             raise HTTPException(status_code=400, detail=f"Codigo incorreto. {remaining} tentativa(s) restante(s).")
 
+        await set_credit_ledger_context(
+            db,
+            origin="welcome_bonus",
+            reason="verified email welcome bonus",
+            idempotency_key=f"welcome:{user.id}",
+        )
         transition = (
             update(User)
             .where(User.id == user.id, User.email_verified.is_(False))
@@ -229,6 +236,12 @@ async def verify_email(
             ).scalar() or 0
 
             if referral_count <= MAX_REFERRAL_BONUS_COUNT:
+                await set_credit_ledger_context(
+                    db,
+                    origin="referral_bonus",
+                    reason="verified referral bonus",
+                    idempotency_key=f"referral:{user.id}",
+                )
                 await db.execute(sql_update(User).where(User.id == user.referred_by).values(credits=User.credits + 2))
                 await db.commit()
                 record_credit_metric("referral_bonus", 2)
@@ -479,6 +492,12 @@ async def delete_account(
     original_email = user.email
     original_name = user.name
 
+    await set_credit_ledger_context(
+        db,
+        origin="account_closure",
+        reason="anonymized account forfeited remaining credits",
+        idempotency_key=f"account-closure:{user.id}",
+    )
     user.name = "Deleted User"
     user.email = f"deleted_{user.id.hex}@removed.clipia.com.br"
     user.plan = "deleted"

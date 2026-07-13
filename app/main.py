@@ -51,6 +51,12 @@ async def lifespan(app: FastAPI):
     from app.config import validate_production_settings
 
     validate_production_settings(settings)
+    if settings.CREDIT_LEDGER_MODE == "enforce":
+        from app.db.engine import async_session
+        from app.services.credit_ledger import assert_credit_ledger_mode_ready
+
+        async with async_session() as session:
+            await assert_credit_ledger_mode_ready(session)
     yield
     await engine.dispose()
 

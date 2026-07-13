@@ -37,7 +37,7 @@ def _insert_event(connection, event_id: str) -> None:
 def test_analytics_migration_is_single_head_and_append_only_on_sqlite(monkeypatch):
     migration = _load_migration()
     assert migration.down_revision == "e1f2a3b4c5d6"
-    assert ScriptDirectory.from_config(Config("alembic.ini")).get_heads() == ["a4b5c6d7e8f9"]
+    assert ScriptDirectory.from_config(Config("alembic.ini")).get_heads() == ["b5c6d7e8f9a0"]
 
     engine = sa.create_engine("sqlite:///:memory:")
     metadata = sa.MetaData()

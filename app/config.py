@@ -199,6 +199,9 @@ class Settings(BaseSettings):
     RATE_LIMIT_DEFAULT: str = "60/minute"
     ANALYTICS_ENABLED: bool = False
     ANALYTICS_RATE_LIMIT: str = "30/minute"
+    # Ledger append-only permanece em shadow ate sete reconciliacoes diarias
+    # consecutivas sem diferenca. `enforce` e bloqueado no startup sem esse gate.
+    CREDIT_LEDGER_MODE: Literal["shadow", "enforce"] = "shadow"
 
     # CORS
     CORS_ORIGINS: str = "http://localhost:3003"  # comma-separated, "*" for dev
