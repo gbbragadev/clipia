@@ -80,7 +80,7 @@ async def refund_generation(
     if (
         job is None
         or job.generation_refunded_at is not None
-        or job.status not in {"queued", "processing", "cancelling"}
+        or job.status not in {"queued", "processing", "cancelling", "finalizing"}
         or job.video_url is not None
         or job.completed_at is not None
     ):
@@ -92,6 +92,26 @@ async def refund_generation(
     job.error = error
     job.generation_refunded_at = datetime.now(timezone.utc)
     return True
+
+
+async def claim_generation_finalize(session: AsyncSession, job_id: uuid.UUID | str) -> str:
+    """Claim final publication before any canonical generation artifact is produced."""
+    result = await session.execute(
+        select(Job).where(Job.id == job_id).with_for_update().execution_options(populate_existing=True)
+    )
+    job = result.scalar_one_or_none()
+    if job is None:
+        return "missing"
+    if job.video_url is not None or job.completed_at is not None or job.status in {"editable", "completed"}:
+        return "delivered"
+    if job.status == "cancelling" or job.cancel_requested_at is not None or job.generation_refunded_at is not None:
+        return "cancelled"
+    if job.status == "finalizing":
+        return "in_progress"
+    if job.status not in {"queued", "processing"}:
+        return "ignored"
+    job.status = "finalizing"
+    return "claimed"
 
 
 async def finalize_generation(
@@ -110,7 +130,7 @@ async def finalize_generation(
     if job is None:
         return "missing"
     if (
-        job.status in {"queued", "processing"}
+        job.status == "finalizing"
         and job.cancel_requested_at is None
         and job.generation_refunded_at is None
         and job.video_url is None
@@ -178,10 +198,12 @@ async def mark_rerender_dispatched(session: AsyncSession, job_id: uuid.UUID | st
         select(Job).where(Job.id == job_id).with_for_update().execution_options(populate_existing=True)
     )
     job = result.scalar_one_or_none()
-    if job is None or job.rerender_operation_id != operation_id or job.rerender_state != "debited":
+    if job is None or job.rerender_operation_id != operation_id or job.rerender_state not in {"debited", "running"}:
         return False
-    job.rerender_state = "dispatched"
-    job.rerender_dispatched_at = datetime.now(timezone.utc)
+    if job.rerender_state == "debited":
+        job.rerender_state = "dispatched"
+    if job.rerender_dispatched_at is None:
+        job.rerender_dispatched_at = datetime.now(timezone.utc)
     return True
 
 
@@ -193,6 +215,8 @@ async def claim_rerender(session: AsyncSession, job_id: uuid.UUID | str, operati
     job = result.scalar_one_or_none()
     if job is None or job.rerender_operation_id != operation_id or job.rerender_state not in {"debited", "dispatched"}:
         return False
+    if job.rerender_dispatched_at is None:
+        job.rerender_dispatched_at = datetime.now(timezone.utc)
     job.rerender_state = "running"
     return True
 

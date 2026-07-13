@@ -9,8 +9,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
+from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api import routes as api_routes
 from app.db.models import Job, User
 from app.services import job_operations
 from app.worker import tasks as worker_tasks
@@ -324,6 +326,31 @@ async def test_rerender_refund_is_one_shot_restores_fraction_and_stale_operation
 
 
 @pytest.mark.asyncio
+async def test_worker_claim_before_route_dispatch_still_persists_dispatched_timestamp(
+    db_session, verified_user, job_factory
+):
+    job = await job_factory(status="completed")
+    operation_id = uuid.uuid4()
+    await job_operations.begin_rerender(
+        db_session,
+        job.id,
+        verified_user.id,
+        operation_id=operation_id,
+    )
+    await db_session.commit()
+
+    assert await job_operations.claim_rerender(db_session, job.id, operation_id) is True
+    await db_session.commit()
+    assert await job_operations.mark_rerender_dispatched(db_session, job.id, operation_id) is True
+    await db_session.commit()
+
+    persisted_job = await db_session.get(Job, job.id)
+    await db_session.refresh(persisted_job)
+    assert persisted_job.rerender_state == "running"
+    assert persisted_job.rerender_dispatched_at is not None
+
+
+@pytest.mark.asyncio
 async def test_legacy_rerender_claim_only_runs_without_a_new_operation(db_session, job_factory):
     required = {"claim_legacy_rerender", "finish_legacy_rerender"}
     assert required <= set(dir(job_operations))
@@ -371,10 +398,18 @@ async def test_render_route_persists_operation_clears_legacy_cancel_and_rejects_
     assert persisted_job.pending_credits == 0.0
     assert persisted_user.credits == 3
     assert app.state.fake_redis.get(f"job:{job.id}:cancelled") is None
+    live = app.state.fake_redis.hgetall(f"job:{job.id}")
+    assert live["rerender_operation_id"] == str(persisted_job.rerender_operation_id)
     app.state.rerender_task.delay.assert_called_once_with(
         str(job.id),
         str(persisted_job.rerender_operation_id),
     )
+
+
+def test_render_and_cancel_openapi_document_invalid_state_conflicts(app):
+    schema = app.openapi()
+    assert "409" in schema["paths"]["/api/v1/jobs/{job_id}/render"]["post"]["responses"]
+    assert "409" in schema["paths"]["/api/v1/jobs/{job_id}/cancel"]["post"]["responses"]
 
 
 @pytest.mark.asyncio
@@ -493,6 +528,48 @@ def test_rerender_worker_stale_operation_exits_before_redis_or_filesystem(tmp_pa
 
     assert result == ""
     assert updates == []
+
+
+def test_rerender_claim_infrastructure_failure_propagates_for_retry(monkeypatch):
+    async def database_unavailable(*_args, **_kwargs):
+        raise RuntimeError("database unavailable during claim")
+
+    monkeypatch.setattr(job_operations, "claim_rerender", database_unavailable)
+
+    with pytest.raises(RuntimeError, match="database unavailable during claim"):
+        worker_tasks._claim_rerender_operation("job-claim-db-down", str(uuid.uuid4()))
+
+
+@pytest.mark.parametrize("terminal_status", ["completed", "error"])
+def test_old_rerender_terminal_cannot_overwrite_new_operation_redis(monkeypatch, terminal_status):
+    assert hasattr(worker_tasks, "_update_rerender_terminal")
+    old_operation_id = uuid.uuid4()
+    new_operation_id = uuid.uuid4()
+    job_id = "job-terminal-race"
+    redis_key = f"job:{job_id}"
+    worker_tasks._redis.hset(
+        redis_key,
+        mapping={
+            "rerender_operation_id": str(new_operation_id),
+            "status": "rendering",
+            "detail": "new operation",
+        },
+    )
+
+    updated = worker_tasks._update_rerender_terminal(
+        job_id,
+        str(old_operation_id),
+        status=terminal_status,
+        error="old operation error" if terminal_status == "error" else "",
+        detail="old operation terminal",
+    )
+
+    assert updated is False
+    assert worker_tasks._redis.hgetall(redis_key) == {
+        "rerender_operation_id": str(new_operation_id),
+        "status": "rendering",
+        "detail": "new operation",
+    }
 
 
 def test_rerender_worker_ignores_generation_cancel_and_completes_matching_operation(tmp_path, monkeypatch):
@@ -626,6 +703,62 @@ def test_rerender_stale_after_claim_cannot_publish_output_or_telemetry(tmp_path,
     assert not (job_dir / f"final_remotion_{old_operation_id}.mp4").exists()
 
 
+def test_rerender_prepares_video_and_thumbnail_before_publication_row_lock(tmp_path, monkeypatch):
+    env = create_test_env(tmp_path, monkeypatch)
+    job = create_job(env, status="completed")
+    operation_id = uuid.uuid4()
+    operation_output = tmp_path / "operation.mp4"
+    operation_output.write_bytes(b"rendered")
+    output_dir = env.storage_dir / "output"
+    output_dir.mkdir()
+
+    async def begin_and_claim():
+        async with env.session_factory() as session:
+            await job_operations.begin_rerender(
+                session,
+                job.id,
+                env.verified_user.id,
+                operation_id=operation_id,
+            )
+            await job_operations.claim_rerender(session, job.id, operation_id)
+            await session.commit()
+
+    run(begin_and_claim())
+    db_engine_module = importlib.import_module("app.db.engine")
+    monkeypatch.setattr(db_engine_module, "worker_session", env.session_factory)
+    monkeypatch.setattr(worker_tasks, "get_output_dir", lambda: output_dir)
+    events: list[str] = []
+    original_lock = job_operations.lock_rerender_for_publication
+
+    async def recording_lock(*args, **kwargs):
+        events.append("lock")
+        return await original_lock(*args, **kwargs)
+
+    def recording_outro(path):
+        events.append("append_outro")
+        return path
+
+    def recording_thumbnail(_video_path, thumb_path):
+        events.append("thumbnail")
+        Path(thumb_path).write_bytes(b"thumb")
+
+    monkeypatch.setattr(job_operations, "lock_rerender_for_publication", recording_lock)
+    monkeypatch.setattr(worker_tasks, "append_outro", recording_outro)
+    monkeypatch.setattr(worker_tasks, "_write_thumbnail", recording_thumbnail)
+
+    published = worker_tasks._publish_rerender_operation(
+        str(job.id),
+        str(operation_id),
+        str(operation_output),
+        engine="remotion",
+        duration=1.0,
+    )
+
+    assert published is not None
+    assert events.index("append_outro") < events.index("lock")
+    assert events.index("thumbnail") < events.index("lock")
+
+
 def _prepare_finalize_env(tmp_path, monkeypatch, *, status: str):
     env = create_test_env(tmp_path, monkeypatch)
     job = create_job(env, status=status, credit_cost=3)
@@ -676,6 +809,73 @@ def test_finalize_that_loses_db_race_to_cancel_never_delivers(tmp_path, monkeypa
     assert env.fake_redis.hgetall(f"job:{job.id}").get("status") != "completed"
 
 
+@pytest.mark.asyncio
+async def test_finalize_claim_blocks_late_cancel(db_session, verified_user, job_factory):
+    assert hasattr(job_operations, "claim_generation_finalize")
+    job = await job_factory(status="processing")
+    claimed = await job_operations.claim_generation_finalize(db_session, job.id)
+    await db_session.commit()
+    with pytest.raises(job_operations.InvalidJobOperation):
+        await job_operations.request_generation_cancel(db_session, job.id, verified_user.id)
+
+    assert claimed == "claimed"
+    persisted_job = await db_session.get(Job, job.id)
+    await db_session.refresh(persisted_job)
+    assert persisted_job.status == "finalizing"
+
+
+def test_finalize_ignored_job_removes_stale_downloadable_artifacts(tmp_path, monkeypatch):
+    env, job, source, output_dir = _prepare_finalize_env(tmp_path, monkeypatch, status="failed")
+    canonical_video = output_dir / f"{job.id}.mp4"
+    canonical_thumbnail = output_dir / f"{job.id}.jpg"
+    canonical_video.write_bytes(b"stale-video")
+    canonical_thumbnail.write_bytes(b"stale-thumbnail")
+
+    result = worker_tasks.task_finalize.run.__func__(object(), str(source), str(job.id))
+
+    async def try_download():
+        async with env.session_factory() as session:
+            return await api_routes.download_job(str(job.id), user=env.verified_user, db=session)
+
+    assert result == ""
+    assert not canonical_video.exists()
+    assert not canonical_thumbnail.exists()
+    with pytest.raises(HTTPException) as exc_info:
+        run(try_download())
+    assert exc_info.value.status_code == 404
+
+
+def test_generation_finalize_prepares_artifacts_before_final_publication_lock(tmp_path, monkeypatch):
+    env, job, source, output_dir = _prepare_finalize_env(tmp_path, monkeypatch, status="processing")
+    events: list[str] = []
+    original_finalize = job_operations.finalize_generation
+
+    def recording_outro(path):
+        events.append("append_outro")
+        return path
+
+    def recording_thumbnail(_video_path, thumb_path):
+        events.append("thumbnail")
+        Path(thumb_path).write_bytes(b"thumb")
+
+    async def recording_finalize(*args, **kwargs):
+        events.append("lock")
+        assert list(output_dir.glob(f".{job.id}.*.prepared.mp4"))
+        assert list(output_dir.glob(f".{job.id}.*.prepared.jpg"))
+        assert not (output_dir / f"{job.id}.mp4").exists()
+        return await original_finalize(*args, **kwargs)
+
+    monkeypatch.setattr(worker_tasks, "append_outro", recording_outro)
+    monkeypatch.setattr(worker_tasks, "_write_thumbnail", recording_thumbnail)
+    monkeypatch.setattr(job_operations, "finalize_generation", recording_finalize)
+
+    published = worker_tasks.task_finalize.run.__func__(object(), str(source), str(job.id))
+
+    assert published.endswith(f"{job.id}.mp4")
+    assert events.index("append_outro") < events.index("lock")
+    assert events.index("thumbnail") < events.index("lock")
+
+
 def test_finalize_success_commits_delivery_then_clears_cancel_flag(tmp_path, monkeypatch):
     env, job, source, _output_dir = _prepare_finalize_env(tmp_path, monkeypatch, status="processing")
     deleted: list[str] = []
@@ -702,7 +902,7 @@ def test_finalize_success_commits_delivery_then_clears_cancel_flag(tmp_path, mon
 
 
 def test_finalize_db_failure_never_publishes_completed(tmp_path, monkeypatch):
-    env, job, source, _output_dir = _prepare_finalize_env(tmp_path, monkeypatch, status="processing")
+    env, job, source, output_dir = _prepare_finalize_env(tmp_path, monkeypatch, status="processing")
 
     async def db_failure(*_args, **_kwargs):
         raise RuntimeError("database unavailable")
@@ -713,6 +913,7 @@ def test_finalize_db_failure_never_publishes_completed(tmp_path, monkeypatch):
         worker_tasks.task_finalize.run.__func__(object(), str(source), str(job.id))
 
     assert env.fake_redis.hgetall(f"job:{job.id}").get("status") != "completed"
+    assert not (output_dir / f"{job.id}.mp4").exists()
 
 
 @pytest.mark.asyncio

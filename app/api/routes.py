@@ -1250,7 +1250,7 @@ Regras:
     "/jobs/{job_id}/render",
     summary="Render video",
     description="Starts render job.",
-    responses={200: {"description": "Render queued"}},
+    responses={200: {"description": "Render queued"}, 409: {"description": "Job cannot be rendered"}},
 )
 async def render_video(
     job_id: str,
@@ -1295,6 +1295,7 @@ async def render_video(
                 "current_step": "queued",
                 "detail": "Re-render enfileirado...",
                 "rerender_cost": operation.cost,
+                "rerender_operation_id": str(operation_id),
             },
         )
         try:
@@ -1383,7 +1384,7 @@ async def job_status(
     "/jobs/{job_id}/cancel",
     summary="Cancel job",
     description="Cancels an ongoing job.",
-    responses={200: {"description": "Cancel initiated"}},
+    responses={200: {"description": "Cancel initiated"}, 409: {"description": "Job cannot be cancelled"}},
 )
 async def cancel_job(
     job_id: str,

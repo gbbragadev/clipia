@@ -80,3 +80,36 @@ As 13 warnings são o `DeprecationWarning` já existente do SlowAPI sobre `async
 - Não houve broker Redis/Celery real nem migration smoke contra PostgreSQL publicado.
 - Publicação de arquivo e commit DB não podem ser uma transação única. O row lock impede outra operação válida de iniciar durante a publicação, mas uma falha de commit depois do copy canônico ainda exige a futura reconciliação da Task 1C2.
 - Compensation/reconciler/watchdog de enqueue/debito ficaram explicitamente fora desta tarefa, conforme o brief.
+
+## Revisão final corretiva
+
+A revisão final posterior ao commit `5b14570` encontrou seis lacunas de concorrência/publicação. Elas foram corrigidas por TDD em um commit separado, sem incorporar compensation, reconciler ou watchdog da Task 1C2.
+
+### Correções
+
+- O hash Redis passa a registrar `rerender_operation_id`. Estados terminais de rerender são publicados por Lua atômico somente quando o UUID ainda é o atual; o fallback com lock existe apenas para fakes/legado sem `eval`.
+- O interleaving worker-before-route preserva `rerender_dispatched_at`: o claim preenche o timestamp se necessário, e o ack tardio da rota aceita `running` sem regredir o estado.
+- Falhas de infraestrutura no claim do worker propagam para a task/Celery. Apenas UUID inválido ou mismatch legítimo retornam `False`.
+- A geração adquire uma claim persistente `finalizing` antes de criar artefatos canônicos. Cancelamentos tardios são rejeitados, retries concorrentes observam `in_progress`, e cancel/refund/estado ignorado removem MP4 e thumbnail stale.
+- Geração e rerender preparam outro/MP4/thumbnail em caminhos temporários antes do row lock. Sob o lock final ficam somente revalidação do estado/UUID, troca por `Path.replace`, mutação ORM e commit, com restauração de arquivos em falha.
+- As operações `render` e `cancel` agora documentam o conflito `409` no OpenAPI.
+
+### Evidência TDD adicional
+
+REDs observados antes das correções:
+
+- Primeiro lote: `6 failed` — ack tardio não gravava dispatch, UUID não entrava no Redis, OpenAPI não expunha 409, falha DB no claim era engolida e terminal stale sobrescrevia a operação nova.
+- Segundo lote: `3 failed` — append/thumbnail ocorriam depois do row lock, a claim de finalize não existia e job ignorado deixava MP4/JPG diretamente baixáveis.
+
+GREENs após as correções:
+
+- Primeiro lote direcionado: `6 passed, 13 warnings in 3.34s`.
+- Segundo lote direcionado: `3 passed, 13 warnings in 2.79s`.
+- Regressões existentes de finalize/cancel/falha DB: `3 passed, 13 warnings in 2.88s`.
+- Integridade completa: `29 passed, 13 warnings in 48.74s` antes do format; `29 passed, 13 warnings in 25.70s` depois do format isolado.
+- Gate integrado final corretivo: `81 passed, 13 warnings in 70.96s`.
+- `python -m alembic heads`: `f6e7d8c9b0a1 (head)`.
+- `uvx pre-commit run --files ...`: `ruff Passed`; `ruff-format Passed` na segunda execução.
+- `git diff --check`: exit 0 antes do fechamento do relatório.
+
+As 13 warnings continuam sendo exclusivamente o `DeprecationWarning` já existente do SlowAPI no Python 3.14.

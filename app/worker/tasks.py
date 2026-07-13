@@ -30,6 +30,18 @@ from app.worker.celery_app import celery_app
 logger = logging.getLogger(__name__)
 
 _redis = get_redis()
+_rerender_terminal_fallback_lock = threading.Lock()
+
+_RERENDER_TERMINAL_LUA = """
+local current = redis.call('HGET', KEYS[1], 'rerender_operation_id')
+if (current or '') ~= ARGV[1] then
+    return 0
+end
+for index = 2, #ARGV, 2 do
+    redis.call('HSET', KEYS[1], ARGV[index], ARGV[index + 1])
+end
+return 1
+"""
 
 
 def _write_thumbnail(video_path: str, thumb_path: str) -> None:
@@ -100,6 +112,42 @@ def _update_job(
     _redis.hset(key, mapping=data)
 
 
+def _update_rerender_terminal(
+    job_id: str,
+    operation_id: str | None,
+    *,
+    status: str,
+    error: str = "",
+    detail: str = "",
+) -> bool:
+    """Atomically publish a rerender terminal state only for the current operation."""
+    key = f"job:{job_id}"
+    expected_operation_id = operation_id or ""
+    mapping = {
+        "status": status,
+        "current_step": "",
+        "progress": "1.0" if status == "completed" else "0.0",
+        "error": error,
+        "detail": detail,
+        "rerender_cost": "0",
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+    arguments = [expected_operation_id]
+    for field, value in mapping.items():
+        arguments.extend((field, str(value)))
+
+    evaluator = getattr(_redis, "eval", None)
+    if evaluator is not None:
+        return bool(evaluator(_RERENDER_TERMINAL_LUA, 1, key, *arguments))
+
+    # Unit-test/legacy fake fallback. Production redis-py always uses the Lua path.
+    with _rerender_terminal_fallback_lock:
+        if (_redis_hget(key, "rerender_operation_id") or "") != expected_operation_id:
+            return False
+        _redis.hset(key, mapping=mapping)
+        return True
+
+
 def _redis_get(key: str) -> str | None:
     getter = getattr(_redis, "get", None)
     return getter(key) if getter else None
@@ -164,6 +212,7 @@ def _refund_job_credit(job_id: str, status_value: str, error: str, cleanup_files
         if cleanup_files:
             cleanup_job_dir(job_id)
             remove_path(get_output_dir() / f"{job_id}.mp4")
+            remove_path(get_output_dir() / f"{job_id}.jpg")
         _update_job(job_id, status_value, error=error, detail=error)
         logger.info("Refunded generation credit for %s job %s", status_value, job_id)
         return True
@@ -259,11 +308,7 @@ def _claim_rerender_operation(job_id: str, operation_id: str | None) -> bool:
                 await session.commit()
             return claimed
 
-    try:
-        return asyncio.run(_claim())
-    except Exception as exc:  # noqa: BLE001
-        logger.error("Failed to claim rerender operation for job %s: %s", job_id, exc)
-        return False
+    return asyncio.run(_claim())
 
 
 def _publish_rerender_operation(
@@ -282,40 +327,76 @@ def _publish_rerender_operation(
     except (TypeError, ValueError):
         return None
 
+    output_dir = get_output_dir()
+    operation_suffix = operation_id or "legacy"
+    prepared_video = output_dir / f".{job_id}.{operation_suffix}.prepared.mp4"
+    prepared_thumbnail = output_dir / f".{job_id}.{operation_suffix}.prepared.jpg"
+    canonical_video = output_dir / f"{job_id}.mp4"
+    canonical_thumbnail = output_dir / f"{job_id}.jpg"
+    backup_video = output_dir / f".{job_id}.{operation_suffix}.backup.mp4"
+    backup_thumbnail = output_dir / f".{job_id}.{operation_suffix}.backup.jpg"
+    final_src: str | None = None
+
     async def _publish() -> str | None:
         async with async_session() as session:
             job = await lock_rerender_for_publication(session, job_id, parsed_operation_id)
             if job is None:
                 return None
 
-            output_dir = get_output_dir()
-            final_path = str(output_dir / f"{job_id}.mp4")
-            final_src: str | None = None
+            telemetry = dict(job.telemetry or {})
+            rerenders = list(telemetry.get("rerenders") or [])[-9:]
+            rerenders.append(
+                {
+                    "engine": engine,
+                    "duration_seconds": duration,
+                    "at": datetime.now(timezone.utc).isoformat(),
+                }
+            )
+            telemetry["rerenders"] = rerenders
+            job.telemetry = telemetry
+            if not complete_locked_rerender(job, parsed_operation_id):
+                return None
+
+            video_published = False
+            thumbnail_published = False
             try:
-                final_src = append_outro(output_path)
-                shutil.copy2(final_src, final_path)
-                _write_thumbnail(final_path, str(output_dir / f"{job_id}.jpg"))
-
-                telemetry = dict(job.telemetry or {})
-                rerenders = list(telemetry.get("rerenders") or [])[-9:]
-                rerenders.append(
-                    {
-                        "engine": engine,
-                        "duration_seconds": duration,
-                        "at": datetime.now(timezone.utc).isoformat(),
-                    }
-                )
-                telemetry["rerenders"] = rerenders
-                job.telemetry = telemetry
-                if not complete_locked_rerender(job, parsed_operation_id):
-                    return None
+                if canonical_video.exists():
+                    canonical_video.replace(backup_video)
+                prepared_video.replace(canonical_video)
+                video_published = True
+                if prepared_thumbnail.exists():
+                    if canonical_thumbnail.exists():
+                        canonical_thumbnail.replace(backup_thumbnail)
+                    prepared_thumbnail.replace(canonical_thumbnail)
+                    thumbnail_published = True
                 await session.commit()
-                return final_path
-            finally:
-                if final_src is not None and final_src != output_path:
-                    Path(final_src).unlink(missing_ok=True)
+            except Exception:
+                await session.rollback()
+                if video_published:
+                    canonical_video.unlink(missing_ok=True)
+                if backup_video.exists():
+                    backup_video.replace(canonical_video)
+                if thumbnail_published:
+                    canonical_thumbnail.unlink(missing_ok=True)
+                if backup_thumbnail.exists():
+                    backup_thumbnail.replace(canonical_thumbnail)
+                raise
+            backup_video.unlink(missing_ok=True)
+            backup_thumbnail.unlink(missing_ok=True)
+            return str(canonical_video)
 
-    return asyncio.run(_publish())
+    try:
+        final_src = append_outro(output_path)
+        shutil.copy2(final_src, prepared_video)
+        _write_thumbnail(str(prepared_video), str(prepared_thumbnail))
+        return asyncio.run(_publish())
+    finally:
+        if final_src is not None and final_src != output_path:
+            Path(final_src).unlink(missing_ok=True)
+        prepared_video.unlink(missing_ok=True)
+        prepared_thumbnail.unlink(missing_ok=True)
+        backup_video.unlink(missing_ok=True)
+        backup_thumbnail.unlink(missing_ok=True)
 
 
 def _refund_rerender_operation(job_id: str, operation_id: str | None) -> bool:
@@ -1252,60 +1333,145 @@ def _send_video_ready_email(job_id: str) -> None:
         logger.exception("Falha ao enviar email de video pronto (job %s)", job_id)
 
 
+def _claim_generation_finalize(job_id: str) -> str:
+    from app.db.engine import worker_session as async_session
+    from app.services.job_operations import claim_generation_finalize
+
+    async def _claim() -> str:
+        async with async_session() as session:
+            transition = await claim_generation_finalize(session, job_id)
+            if transition == "claimed":
+                await session.commit()
+            return transition
+
+    return asyncio.run(_claim())
+
+
+def _publish_generation_finalize(
+    job_id: str,
+    prepared_video: Path,
+    prepared_thumbnail: Path,
+    *,
+    script: dict | None,
+    telemetry: dict | None,
+) -> str | None:
+    """Publish prepared artifacts while holding only the final DB row lock."""
+    from app.db.engine import worker_session as async_session
+    from app.services.job_operations import finalize_generation
+
+    output_dir = get_output_dir()
+    canonical_video = output_dir / f"{job_id}.mp4"
+    canonical_thumbnail = output_dir / f"{job_id}.jpg"
+    token = prepared_video.stem.removeprefix(f".{job_id}.").removesuffix(".prepared")
+    backup_video = output_dir / f".{job_id}.{token}.backup.mp4"
+    backup_thumbnail = output_dir / f".{job_id}.{token}.backup.jpg"
+
+    async def _publish() -> str | None:
+        async with async_session() as session:
+            transition = await finalize_generation(
+                session,
+                job_id,
+                script=script,
+                video_url=str(canonical_video),
+                telemetry=telemetry,
+            )
+            if transition != "finalized":
+                return None
+
+            video_published = False
+            thumbnail_published = False
+            try:
+                if canonical_video.exists():
+                    canonical_video.replace(backup_video)
+                prepared_video.replace(canonical_video)
+                video_published = True
+                if prepared_thumbnail.exists():
+                    if canonical_thumbnail.exists():
+                        canonical_thumbnail.replace(backup_thumbnail)
+                    prepared_thumbnail.replace(canonical_thumbnail)
+                    thumbnail_published = True
+                await session.commit()
+            except Exception:
+                await session.rollback()
+                if video_published:
+                    canonical_video.unlink(missing_ok=True)
+                if backup_video.exists():
+                    backup_video.replace(canonical_video)
+                if thumbnail_published:
+                    canonical_thumbnail.unlink(missing_ok=True)
+                if backup_thumbnail.exists():
+                    backup_thumbnail.replace(canonical_thumbnail)
+                raise
+            backup_video.unlink(missing_ok=True)
+            backup_thumbnail.unlink(missing_ok=True)
+            return str(canonical_video)
+
+    try:
+        return asyncio.run(_publish())
+    finally:
+        backup_video.unlink(missing_ok=True)
+        backup_thumbnail.unlink(missing_ok=True)
+
+
 @celery_app.task(name="finalize", bind=True, soft_time_limit=120, time_limit=150)
 def task_finalize(self, video_path: str, job_id: str) -> str:
+    prepared_video: Path | None = None
+    prepared_thumbnail: Path | None = None
+    final_src: str | None = None
     try:
         if not video_path or _check_cancelled(job_id):
             return ""
-        _update_job(job_id, "processing", "finalizing", 0.95, detail="Salvando video final...")
+
+        transition = _claim_generation_finalize(job_id)
         output_dir = get_output_dir()
-        final_path = str(output_dir / f"{job_id}.mp4")
-        final_src = append_outro(video_path)  # selo de marca (~1.5s); no-op-safe se off/asset ausente/erro
-        shutil.copy2(final_src, final_path)
-        if final_src != video_path:
-            Path(final_src).unlink(missing_ok=True)
-        _write_thumbnail(final_path, str(output_dir / f"{job_id}.jpg"))
+        canonical_video = output_dir / f"{job_id}.mp4"
+        canonical_thumbnail = output_dir / f"{job_id}.jpg"
+        if transition in {"delivered", "in_progress"}:
+            return ""
+        if transition == "cancelled":
+            canonical_video.unlink(missing_ok=True)
+            canonical_thumbnail.unlink(missing_ok=True)
+            _cancel_job(job_id)
+            return ""
+        if transition != "claimed":
+            canonical_video.unlink(missing_ok=True)
+            canonical_thumbnail.unlink(missing_ok=True)
+            return ""
 
-        # Save script to PostgreSQL for the editor (keep job dir for editing)
+        # Never expose a stale artifact while this persistent claim prepares
+        # the only publication that may become downloadable.
+        canonical_video.unlink(missing_ok=True)
+        canonical_thumbnail.unlink(missing_ok=True)
+        _update_job(job_id, "processing", "finalizing", 0.95, detail="Salvando video final...")
+
+        job_dir = get_job_dir(job_id)
+        script_path = job_dir / "script.json"
+        script_data = _read_json_file(script_path) if script_path.exists() else None
         try:
-            from app.db.engine import worker_session as async_session  # NullPool: seguro com asyncio.run() por task
-            from app.services.job_operations import finalize_generation
+            telemetry = _build_telemetry(job_id, script_data)
+        except Exception as tel_err:  # noqa: BLE001 - telemetry is best-effort
+            logger.warning("telemetria do job %s falhou: %s", job_id, tel_err)
+            telemetry = None
 
-            job_dir = get_job_dir(job_id)
-            script_path = job_dir / "script.json"
-            script_data = _read_json_file(script_path) if script_path.exists() else None
-            try:
-                telemetry = _build_telemetry(job_id, script_data)
-            except Exception as tel_err:  # noqa: BLE001 — telemetria nunca falha o finalize
-                logger.warning("telemetria do job %s falhou: %s", job_id, tel_err)
-                telemetry = None
+        token = uuid.uuid4().hex
+        prepared_video = output_dir / f".{job_id}.{token}.prepared.mp4"
+        prepared_thumbnail = output_dir / f".{job_id}.{token}.prepared.jpg"
+        final_src = append_outro(video_path)
+        shutil.copy2(final_src, prepared_video)
+        _write_thumbnail(str(prepared_video), str(prepared_thumbnail))
 
-            async def _save_script():
-                async with async_session() as session:
-                    transition = await finalize_generation(
-                        session,
-                        job_id,
-                        script=script_data,
-                        video_url=final_path,
-                        telemetry=telemetry,
-                    )
-                    if transition == "finalized":
-                        await session.commit()
-                    return transition
+        final_path = _publish_generation_finalize(
+            job_id,
+            prepared_video,
+            prepared_thumbnail,
+            script=script_data,
+            telemetry=telemetry,
+        )
+        if final_path is None:
+            return ""
 
-            transition = asyncio.run(_save_script())
-            if transition == "cancelled":
-                _cancel_job(job_id)
-                return ""
-            if transition != "finalized":
-                return ""
-            _redis.delete(f"job:{job_id}:cancelled")
-            # So depois do commit (job realmente editavel): convite de volta 1x por job.
-            _send_video_ready_email(job_id)
-        except Exception as e:
-            logger.error("Could not save finalized job to DB: %s", e)
-            raise
-
+        _redis.delete(f"job:{job_id}:cancelled")
+        _send_video_ready_email(job_id)
         _update_job(job_id, "completed", None, 1.0, detail="Video final pronto para download.")
         return final_path
     except SoftTimeLimitExceeded:
@@ -1314,6 +1480,13 @@ def task_finalize(self, video_path: str, job_id: str) -> str:
     except Exception as e:
         _fail_job(job_id, f"Finalize failed: {e}")
         raise
+    finally:
+        if final_src is not None and final_src != video_path:
+            Path(final_src).unlink(missing_ok=True)
+        if prepared_video is not None:
+            prepared_video.unlink(missing_ok=True)
+        if prepared_thumbnail is not None:
+            prepared_thumbnail.unlink(missing_ok=True)
 
 
 @celery_app.task(name="rerender_video", bind=True, soft_time_limit=300, time_limit=360)
@@ -1461,9 +1634,12 @@ def task_rerender_video(self, job_id: str, operation_id: str | None = None) -> s
         if final_path is None:
             return ""
 
-        # zera o marcador de custo legado: export entregue, nada a devolver
-        _redis.hset(f"job:{job_id}", mapping={"rerender_cost": 0})
-        _update_job(job_id, "completed", None, 1.0, detail="Re-render concluido.")
+        _update_rerender_terminal(
+            job_id,
+            operation_id,
+            status="completed",
+            detail="Re-render concluido.",
+        )
         logger.info(f"Re-render completed for job {job_id}")
         return final_path
     except SoftTimeLimitExceeded:
@@ -1472,9 +1648,10 @@ def task_rerender_video(self, job_id: str, operation_id: str | None = None) -> s
         # o proprio custo e deixa o job em "error" (re-tentavel).
         if not _refund_rerender_operation(job_id, operation_id):
             raise
-        _update_job(
+        _update_rerender_terminal(
             job_id,
-            "error",
+            operation_id,
+            status="error",
             error="Re-render demorou demais.",
             detail="O export demorou demais e foi interrompido. Seu credito foi devolvido — tente novamente.",
         )
@@ -1483,9 +1660,10 @@ def task_rerender_video(self, job_id: str, operation_id: str | None = None) -> s
     except Exception as e:
         if not _refund_rerender_operation(job_id, operation_id):
             raise
-        _update_job(
+        _update_rerender_terminal(
             job_id,
-            "error",
+            operation_id,
+            status="error",
             error=str(e),
             detail="Falha no re-render. Seu credito do export foi devolvido — tente novamente.",
         )
