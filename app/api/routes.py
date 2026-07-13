@@ -1259,6 +1259,10 @@ async def render_video(
 ):
     """Re-render video with current editor state via FFmpeg+NVENC."""
     job = await get_owned_job(db, user, job_id)
+    if job.status not in {"editable", "completed"}:
+        raise HTTPException(status_code=409, detail="Only a delivered job can be rendered")
+    if job.rerender_state in {"debited", "dispatched", "running"}:
+        raise HTTPException(status_code=409, detail="A rerender is already active")
     job_id = str(job.id)
     job_dir = Path(settings.STORAGE_DIR) / "jobs" / job_id
     if not job_dir.exists():
@@ -1285,7 +1289,7 @@ async def render_video(
         # persisted rerender may clear a stale legacy generation flag.
         _redis.delete(f"job:{job_id}:cancelled")
 
-        from app.worker.tasks import task_rerender_video
+        from app.worker.tasks import _update_rerender_terminal, task_rerender_video
 
         _redis.hset(
             f"job:{job_id}",
@@ -1303,13 +1307,11 @@ async def render_video(
         except Exception as e:  # noqa: BLE001 - preserve the existing enqueue refund contract
             await refund_rerender(db, job.id, operation_id)
             await db.commit()
-            _redis.hset(
-                f"job:{job_id}",
-                mapping={
-                    "status": "completed",
-                    "detail": "Re-render nao pode ser enfileirado; credito estornado.",
-                    "rerender_cost": 0,
-                },
+            _update_rerender_terminal(
+                job_id,
+                str(operation_id),
+                status="completed",
+                detail="Re-render nao pode ser enfileirado; credito estornado.",
             )
             logger.error("task_rerender_video.delay falhou job=%s: %s - credito estornado", job_id, e)
             raise HTTPException(

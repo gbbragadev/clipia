@@ -406,6 +406,69 @@ async def test_render_route_persists_operation_clears_legacy_cancel_and_rejects_
     )
 
 
+@pytest.mark.asyncio
+async def test_enqueue_failure_terminal_cannot_overwrite_new_rerender_redis(
+    client,
+    db_session,
+    test_db,
+    verified_user,
+    auth_headers,
+    job_factory,
+    app,
+    storage_dir,
+    monkeypatch,
+):
+    job = await job_factory(status="completed", pending_credits=1.5)
+    (storage_dir / "jobs" / str(job.id)).mkdir(parents=True)
+    app.state.rerender_task.delay.side_effect = RuntimeError("broker unavailable")
+    new_operation_id = uuid.uuid4()
+    interleaved = False
+    armed = True
+    original_commit = AsyncSession.commit
+
+    async def commit_with_new_operation_after_refund(session):
+        nonlocal interleaved
+        await original_commit(session)
+        if not armed or interleaved:
+            return
+        persisted = await session.get(Job, job.id)
+        await session.refresh(persisted)
+        if persisted.rerender_state != "refunded":
+            return
+        interleaved = True
+        async with test_db["session_factory"]() as second_session:
+            await job_operations.begin_rerender(
+                second_session,
+                job.id,
+                verified_user.id,
+                operation_id=new_operation_id,
+            )
+            await original_commit(second_session)
+        app.state.fake_redis.hset(
+            f"job:{job.id}",
+            mapping={
+                "status": "rendering",
+                "detail": "new operation",
+                "rerender_operation_id": str(new_operation_id),
+            },
+        )
+
+    monkeypatch.setattr(AsyncSession, "commit", commit_with_new_operation_after_refund)
+
+    response = await client.post(f"/api/v1/jobs/{job.id}/render", headers=auth_headers(verified_user))
+
+    db_session.expire_all()
+    persisted_job = await db_session.get(Job, job.id)
+    live = app.state.fake_redis.hgetall(f"job:{job.id}")
+    assert response.status_code == 503
+    assert interleaved is True
+    assert persisted_job.rerender_operation_id == new_operation_id
+    assert persisted_job.rerender_state == "debited"
+    assert live["rerender_operation_id"] == str(new_operation_id)
+    assert live["status"] == "rendering"
+    assert live["detail"] == "new operation"
+
+
 def test_render_and_cancel_openapi_document_invalid_state_conflicts(app):
     schema = app.openapi()
     assert "409" in schema["paths"]["/api/v1/jobs/{job_id}/render"]["post"]["responses"]
@@ -429,6 +492,59 @@ async def test_invalid_render_does_not_clear_active_generation_cancel_flag(
 
     assert response.status_code == 409
     assert app.state.fake_redis.get(f"job:{job.id}:cancelled") == "true"
+    app.state.rerender_task.delay.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_invalid_persisted_render_returns_conflict_before_missing_filesystem(
+    client,
+    db_session,
+    verified_user,
+    auth_headers,
+    job_factory,
+    app,
+):
+    job = await job_factory(status="queued", pending_credits=1.5)
+
+    response = await client.post(f"/api/v1/jobs/{job.id}/render", headers=auth_headers(verified_user))
+
+    db_session.expire_all()
+    persisted_job = await db_session.get(Job, job.id)
+    persisted_user = await db_session.get(User, verified_user.id)
+    assert response.status_code == 409
+    assert persisted_job.rerender_operation_id is None
+    assert persisted_job.rerender_state == "idle"
+    assert persisted_job.pending_credits == 1.5
+    assert persisted_user.credits == 5
+    app.state.rerender_task.delay.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_active_rerender_returns_conflict_before_missing_filesystem(
+    client,
+    db_session,
+    verified_user,
+    auth_headers,
+    job_factory,
+    app,
+):
+    active_operation_id = uuid.uuid4()
+    job = await job_factory(status="completed", pending_credits=1.5)
+    async with db_session.begin():
+        persisted_job = await db_session.get(Job, job.id)
+        persisted_job.rerender_operation_id = active_operation_id
+        persisted_job.rerender_state = "running"
+
+    response = await client.post(f"/api/v1/jobs/{job.id}/render", headers=auth_headers(verified_user))
+
+    db_session.expire_all()
+    persisted_job = await db_session.get(Job, job.id)
+    persisted_user = await db_session.get(User, verified_user.id)
+    assert response.status_code == 409
+    assert persisted_job.rerender_operation_id == active_operation_id
+    assert persisted_job.rerender_state == "running"
+    assert persisted_job.pending_credits == 1.5
+    assert persisted_user.credits == 5
     app.state.rerender_task.delay.assert_not_called()
 
 
@@ -874,6 +990,51 @@ def test_generation_finalize_prepares_artifacts_before_final_publication_lock(tm
     assert published.endswith(f"{job.id}.mp4")
     assert events.index("append_outro") < events.index("lock")
     assert events.index("thumbnail") < events.index("lock")
+
+
+def test_generation_completed_redis_cannot_overwrite_new_rerender(tmp_path, monkeypatch):
+    env, job, source, _output_dir = _prepare_finalize_env(tmp_path, monkeypatch, status="processing")
+    new_operation_id = uuid.uuid4()
+
+    def start_rerender_after_delivery_commit(_job_id):
+        async def start():
+            async with env.session_factory() as session:
+                await job_operations.begin_rerender(
+                    session,
+                    job.id,
+                    env.verified_user.id,
+                    operation_id=new_operation_id,
+                )
+                await session.commit()
+
+        run(start())
+        env.fake_redis.hset(
+            f"job:{job.id}",
+            mapping={
+                "status": "rendering",
+                "current_step": "queued",
+                "detail": "new rerender",
+                "rerender_operation_id": str(new_operation_id),
+            },
+        )
+
+    monkeypatch.setattr(worker_tasks, "_send_video_ready_email", start_rerender_after_delivery_commit)
+
+    result = worker_tasks.task_finalize.run.__func__(object(), str(source), str(job.id))
+
+    async def read_state():
+        async with env.session_factory() as session:
+            return await session.get(Job, job.id)
+
+    persisted_job = run(read_state())
+    live = env.fake_redis.hgetall(f"job:{job.id}")
+    assert result.endswith(f"{job.id}.mp4")
+    assert persisted_job.rerender_operation_id == new_operation_id
+    assert persisted_job.rerender_state == "debited"
+    assert live["rerender_operation_id"] == str(new_operation_id)
+    assert live["status"] == "rendering"
+    assert live["current_step"] == "queued"
+    assert live["detail"] == "new rerender"
 
 
 def test_finalize_success_commits_delivery_then_clears_cancel_flag(tmp_path, monkeypatch):

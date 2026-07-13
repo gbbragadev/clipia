@@ -113,3 +113,25 @@ GREENs após as correções:
 - `git diff --check`: exit 0 antes do fechamento do relatório.
 
 As 13 warnings continuam sendo exclusivamente o `DeprecationWarning` já existente do SlowAPI no Python 3.14.
+
+## Segunda re-review corretiva
+
+A re-review posterior ao commit `2cbdc5c` encontrou duas corridas Redis restantes e uma precedência incorreta entre validação persistida e filesystem. As três foram corrigidas por TDD, novamente sem ampliar o escopo para reconciler ou watchdog.
+
+### Correções
+
+- O terminal/refund do enqueue-failure da rota `render` usa o mesmo CAS Redis por `rerender_operation_id` da task. Se A faz refund, B inicia e só então A tenta publicar o terminal, o Redis de B permanece `rendering`.
+- O terminal `completed` da geração usa Lua atômico próprio e só publica quando o hash ainda não possui um `rerender_operation_id`. Assim, o intervalo entre commit `editable`, notificação e update Redis não permite que a geração sobrescreva um rerender B já iniciado.
+- A rota `render` faz precheck dos estados persistidos inválidos (`status` não entregue ou rerender ativo) antes de consultar o diretório. O `begin_rerender` sob row lock permanece como revalidação autoritativa, portanto o precheck não substitui o CAS nem debita créditos.
+
+### Evidência TDD
+
+- RED dos três achados: `3 failed, 13 warnings in 5.22s`, exatamente com A sobrescrevendo B para `completed`, geração sobrescrevendo B para `completed` e job `queued` sem diretório retornando 404 em vez de 409.
+- RED adicional do outro estado persistido inválido: rerender `running` sem diretório retornou 404 em vez de 409 (`1 failed, 13 warnings in 4.06s`).
+- GREEN conjunto dos quatro interleavings/prechecks: `4 passed, 13 warnings in 5.50s`.
+- Gate cobridor final: `85 passed, 13 warnings in 73.03s`.
+- Ruff: `All checks passed!`.
+- `python -m alembic heads`: `f6e7d8c9b0a1 (head)`.
+- Hook isolado: `ruff Passed`; `ruff-format Passed`, sem modificações.
+
+As 13 warnings continuam sendo exclusivamente o `DeprecationWarning` já existente do SlowAPI no Python 3.14.

@@ -43,6 +43,17 @@ end
 return 1
 """
 
+_GENERATION_COMPLETED_LUA = """
+local current = redis.call('HGET', KEYS[1], 'rerender_operation_id')
+if (current or '') ~= '' then
+    return 0
+end
+for index = 1, #ARGV, 2 do
+    redis.call('HSET', KEYS[1], ARGV[index], ARGV[index + 1])
+end
+return 1
+"""
+
 
 def _write_thumbnail(video_path: str, thumb_path: str) -> None:
     """Poster do card no dashboard: 1 frame em ~1.5s (depois do fade de abertura).
@@ -143,6 +154,32 @@ def _update_rerender_terminal(
     # Unit-test/legacy fake fallback. Production redis-py always uses the Lua path.
     with _rerender_terminal_fallback_lock:
         if (_redis_hget(key, "rerender_operation_id") or "") != expected_operation_id:
+            return False
+        _redis.hset(key, mapping=mapping)
+        return True
+
+
+def _update_generation_completed(job_id: str, *, detail: str) -> bool:
+    """Atomically publish generation completion only before any rerender starts."""
+    key = f"job:{job_id}"
+    mapping = {
+        "status": "completed",
+        "current_step": "",
+        "progress": "1.0",
+        "error": "",
+        "detail": detail,
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+    arguments: list[str] = []
+    for field, value in mapping.items():
+        arguments.extend((field, str(value)))
+
+    evaluator = getattr(_redis, "eval", None)
+    if evaluator is not None:
+        return bool(evaluator(_GENERATION_COMPLETED_LUA, 1, key, *arguments))
+
+    with _rerender_terminal_fallback_lock:
+        if _redis_hget(key, "rerender_operation_id") not in {None, ""}:
             return False
         _redis.hset(key, mapping=mapping)
         return True
@@ -1472,7 +1509,7 @@ def task_finalize(self, video_path: str, job_id: str) -> str:
 
         _redis.delete(f"job:{job_id}:cancelled")
         _send_video_ready_email(job_id)
-        _update_job(job_id, "completed", None, 1.0, detail="Video final pronto para download.")
+        _update_generation_completed(job_id, detail="Video final pronto para download.")
         return final_path
     except SoftTimeLimitExceeded:
         _handle_soft_timeout(job_id, "finalize")
