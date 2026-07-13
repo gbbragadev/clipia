@@ -15,7 +15,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.dependencies import get_current_user
 from app.config import settings
-from app.credits import credit_equivalences, public_package_intent
+from app.credits import (
+    PUBLIC_PACKAGE_INTENTS,
+    credit_equivalences,
+    normalize_checkout_package,
+)
 from app.db.engine import get_db
 from app.db.models import CreditPurchase, User
 from app.payments.schemas import (
@@ -74,8 +78,9 @@ def _stripe_timestamp_within_tolerance(signature: str) -> bool:
 async def list_packages():
     """Get available credit packages."""
     packages = []
-    for key, pkg in CREDIT_PACKAGES.items():
-        public_key = public_package_intent(key)
+    for public_key in PUBLIC_PACKAGE_INTENTS:
+        key = normalize_checkout_package(public_key)
+        pkg = CREDIT_PACKAGES[key]
         price = pkg["price_brl"]
         reais = price // 100
         centavos = price % 100

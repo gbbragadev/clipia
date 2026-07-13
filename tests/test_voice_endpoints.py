@@ -4,7 +4,7 @@ import json
 from unittest.mock import AsyncMock, Mock
 
 import pytest
-from fastapi import HTTPException
+from fastapi import HTTPException, Request
 from fastapi.security import HTTPAuthorizationCredentials
 
 from app.api import routes as api_routes
@@ -21,6 +21,17 @@ from tests.voice_test_support import (
     create_test_env,
     run,
 )
+
+
+def _invalid_bearer_request() -> Request:
+    return Request(
+        {
+            "type": "http",
+            "method": "GET",
+            "path": "/api/v1/voices",
+            "headers": [(b"authorization", b"Bearer invalid")],
+        }
+    )
 
 
 def test_list_voices_authenticated(tmp_path, monkeypatch):
@@ -42,6 +53,7 @@ def test_list_voices_unauthenticated(tmp_path, monkeypatch):
     async def _case():
         async with env.session_factory() as db:
             return await get_current_user(
+                request=_invalid_bearer_request(),
                 credentials=HTTPAuthorizationCredentials(scheme="Bearer", credentials="invalid"),
                 db=db,
             )
@@ -133,6 +145,7 @@ def test_clone_voice_unauthenticated(tmp_path, monkeypatch):
     async def _case():
         async with env.session_factory() as db:
             return await get_current_user(
+                request=_invalid_bearer_request(),
                 credentials=HTTPAuthorizationCredentials(scheme="Bearer", credentials="invalid"),
                 db=db,
             )
@@ -299,6 +312,7 @@ def test_upload_audio_unauthenticated(tmp_path, monkeypatch):
     async def _case():
         async with env.session_factory() as db:
             return await get_current_user(
+                request=_invalid_bearer_request(),
                 credentials=HTTPAuthorizationCredentials(scheme="Bearer", credentials="invalid"),
                 db=db,
             )
