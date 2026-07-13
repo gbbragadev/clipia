@@ -8,6 +8,7 @@ from slowapi import Limiter
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.analytics.service import append_server_event_safely
 from app.auth.dependencies import get_current_user
 from app.auth.disposable import is_disposable_email
 from app.auth.email import (
@@ -47,12 +48,20 @@ from app.utils.ratelimit import client_ip
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 limiter = Limiter(key_func=client_ip)
+_ANALYTICS_NICHES = {"curiosidades", "religioso", "motivacional", "financas", "historias", "humor", "drama"}
 
 
 def _ensure_utc(dt: datetime) -> datetime:
     if dt.tzinfo is None:
         return dt.replace(tzinfo=timezone.utc)
     return dt.astimezone(timezone.utc)
+
+
+def _analytics_niche(utm_campaign: str | None) -> str | None:
+    if not utm_campaign or not utm_campaign.startswith("nicho-"):
+        return None
+    niche = utm_campaign.removeprefix("nicho-")
+    return niche if niche in _ANALYTICS_NICHES else None
 
 
 @router.post(
@@ -93,6 +102,7 @@ async def register(request: Request, response: Response, body: RegisterRequest, 
         # O backend exige o aceite e congela as versoes legais vigentes para auditoria.
         consented_at = datetime.now(timezone.utc)
         consent_ip = client_ip(request)
+        registered_at = datetime.now(timezone.utc)
         user = User(
             email=body.email,
             name=body.name,
@@ -111,8 +121,21 @@ async def register(request: Request, response: Response, body: RegisterRequest, 
             consent_ip=consent_ip,
             consent_terms_version=settings.TERMS_VERSION,
             consent_privacy_version=settings.PRIVACY_VERSION,
+            created_at=registered_at,
         )
         db.add(user)
+        await db.flush()
+        await append_server_event_safely(
+            db,
+            event_name="user_registered",
+            user=user,
+            properties={
+                "selected_package": body.selected_package,
+                "niche": _analytics_niche(body.utm_campaign),
+            },
+            idempotency_key=f"user:{user.id}:registered",
+            occurred_at=registered_at,
+        )
         await db.commit()
         await db.refresh(user)
 
@@ -205,6 +228,7 @@ async def verify_email(
             reason="verified email welcome bonus",
             idempotency_key=f"welcome:{user.id}",
         )
+        verified_at = datetime.now(timezone.utc)
         transition = (
             update(User)
             .where(User.id == user.id, User.email_verified.is_(False))
@@ -222,6 +246,23 @@ async def verify_email(
             await db.rollback()
             return {"status": "already_verified"}
 
+        await append_server_event_safely(
+            db,
+            event_name="email_verified",
+            user=user,
+            properties={"welcome_credits": settings.WELCOME_CREDIT_BONUS},
+            idempotency_key=f"user:{user.id}:verified",
+            occurred_at=verified_at,
+        )
+        if settings.WELCOME_CREDIT_BONUS > 0:
+            await append_server_event_safely(
+                db,
+                event_name="credit_balance_changed",
+                user=user,
+                properties={"reason": "welcome", "delta": settings.WELCOME_CREDIT_BONUS},
+                idempotency_key=f"user:{user.id}:welcome-credit",
+                occurred_at=verified_at,
+            )
         await db.commit()
         await db.refresh(user)
         record_credit_metric("credit", settings.WELCOME_CREDIT_BONUS)

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import re
 import uuid
 from datetime import datetime, timezone
@@ -40,6 +41,7 @@ _SERVER_EVENT_PAGES: dict[str, str] = {
 }
 _CAMPAIGN_TOKEN = re.compile(r"^[a-z0-9._-]{1,100}$")
 _SERVER_EVENT_NAMESPACE = uuid.UUID("e02a5d1f-3ba0-4dca-8fa2-91cc0d8bd7b6")
+logger = logging.getLogger(__name__)
 
 
 def canonical_payload_hash(event: ClientEvent) -> str:
@@ -219,3 +221,28 @@ async def append_server_event(
             "payload_hash": payload_hash,
         },
     )
+
+
+async def append_server_event_safely(
+    db: AsyncSession,
+    *,
+    event_name: ServerEventName | str,
+    user: User,
+    properties: dict,
+    idempotency_key: str,
+    occurred_at: datetime,
+) -> bool:
+    """Append inside a savepoint so analytics can never block core state."""
+    try:
+        async with db.begin_nested():
+            return await append_server_event(
+                db,
+                event_name=event_name,
+                user=user,
+                properties=properties,
+                idempotency_key=idempotency_key,
+                occurred_at=occurred_at,
+            )
+    except Exception:  # noqa: BLE001 - non-critical telemetry must not poison the caller transaction
+        logger.exception("Failed to append authoritative analytics event %s", event_name)
+        return False

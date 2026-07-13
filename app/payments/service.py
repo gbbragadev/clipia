@@ -14,7 +14,9 @@ from sqlalchemy import case, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.analytics.service import append_server_event_safely
 from app.config import settings
+from app.credits import public_package_intent
 from app.db.models import CreditPurchase, ProcessedPaymentEvent, User
 from app.observability import record_credit_metric
 from app.payments.schemas import CREDIT_PACKAGES  # noqa: F401 - compatibility export
@@ -229,6 +231,39 @@ async def _apply_payment_event(
                     )
                     .execution_options(synchronize_session=False)
                 )
+
+            if applied:
+                analytics_user = await db.get(User, purchase.user_id)
+                if analytics_user is not None:
+                    event_at = purchase.paid_at or datetime.now(timezone.utc)
+                    total_credits = purchase.credits_amount + purchase.bonus_credits
+                    if result_state == "paid":
+                        await append_server_event_safely(
+                            db,
+                            event_name="payment_completed",
+                            user=analytics_user,
+                            properties={
+                                "provider": provider,
+                                "package": public_package_intent(purchase.package_name),
+                                "total_credits": total_credits,
+                            },
+                            idempotency_key=f"purchase:{purchase.id}:paid",
+                            occurred_at=event_at,
+                        )
+                    if delta:
+                        await append_server_event_safely(
+                            db,
+                            event_name="credit_balance_changed",
+                            user=analytics_user,
+                            properties={
+                                "reason": "purchase" if delta > 0 else "refund",
+                                "delta": delta,
+                            },
+                            idempotency_key=(
+                                f"purchase:{purchase.id}:credit" if delta > 0 else f"purchase:{purchase.id}:refund"
+                            ),
+                            occurred_at=event_at,
+                        )
 
             await db.commit()
         except IntegrityError as exc:

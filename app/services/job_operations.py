@@ -8,6 +8,7 @@ from math import ceil
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.analytics.service import append_server_event_safely
 from app.db.models import Job, JobDispatch, User
 from app.services.credit_ledger import set_credit_ledger_context
 from app.services.refine_balance import adjust_refine_balance
@@ -26,6 +27,18 @@ class RerenderOperation:
     operation_id: uuid.UUID
     cost: int
     pending_credits: float
+
+
+async def _analytics_user(session: AsyncSession, user_id: uuid.UUID) -> User | None:
+    return await session.get(User, user_id)
+
+
+async def _generation_ordinal(session: AsyncSession, job: Job) -> str:
+    conditions = [Job.user_id == job.user_id]
+    if job.created_at is not None:
+        conditions.append(Job.created_at <= job.created_at)
+    count = int(await session.scalar(select(func.count(Job.id)).where(*conditions)) or 0)
+    return "first" if count <= 1 else "second" if count == 2 else "repeat"
 
 
 async def _lock_operation_dispatch(
@@ -202,6 +215,31 @@ async def refund_generation(
         )
         .values(state="cancelled", publisher_token=None, publisher_lease_until=None)
     )
+    analytics_user = await _analytics_user(session, job.user_id)
+    if analytics_user is not None:
+        ordinal = await _generation_ordinal(session, job)
+        reason_code = "cancelled" if status in {"cancelled", "canceled"} else "pipeline"
+        await append_server_event_safely(
+            session,
+            event_name="generation_failed",
+            user=analytics_user,
+            properties={
+                "operation_kind": "generation",
+                "generation_ordinal": ordinal,
+                "reason_code": reason_code,
+            },
+            idempotency_key=f"job:{job.id}:generation-failed",
+            occurred_at=job.generation_refunded_at,
+        )
+        if refund_amount > 0:
+            await append_server_event_safely(
+                session,
+                event_name="credit_balance_changed",
+                user=analytics_user,
+                properties={"reason": "generation_refund", "delta": refund_amount},
+                idempotency_key=f"job:{job.id}:generation-refund",
+                occurred_at=job.generation_refunded_at,
+            )
     return True
 
 
@@ -262,6 +300,19 @@ async def finalize_generation(
             )
             .values(state="completed", publisher_token=None, publisher_lease_until=None)
         )
+        analytics_user = await _analytics_user(session, job.user_id)
+        if analytics_user is not None:
+            await append_server_event_safely(
+                session,
+                event_name="generation_completed",
+                user=analytics_user,
+                properties={
+                    "operation_kind": "generation",
+                    "generation_ordinal": await _generation_ordinal(session, job),
+                },
+                idempotency_key=f"job:{job.id}:generation-completed",
+                occurred_at=job.completed_at,
+            )
         return "finalized"
     if (
         (job.status == "cancelling" or job.cancel_requested_at is not None)
@@ -319,6 +370,29 @@ async def begin_rerender(
     job.rerender_debited_at = now
     job.rerender_dispatched_at = None
     job.pending_credits = 0.0
+    analytics_user = await _analytics_user(session, job.user_id)
+    if analytics_user is not None:
+        await append_server_event_safely(
+            session,
+            event_name="generation_requested",
+            user=analytics_user,
+            properties={
+                "operation_kind": "rerender",
+                "credit_cost": cost,
+                "generation_ordinal": "repeat",
+            },
+            idempotency_key=f"rerender:{operation_id}:requested",
+            occurred_at=now,
+        )
+        if cost > 0:
+            await append_server_event_safely(
+                session,
+                event_name="credit_balance_changed",
+                user=analytics_user,
+                properties={"reason": "rerender_debit", "delta": -cost},
+                idempotency_key=f"rerender:{operation_id}:debit",
+                occurred_at=now,
+            )
     return RerenderOperation(operation_id=operation_id, cost=cost, pending_credits=snapshot)
 
 
@@ -369,6 +443,16 @@ async def complete_rerender(session: AsyncSession, job_id: uuid.UUID | str, oper
         )
         .values(state="completed", publisher_token=None, publisher_lease_until=None)
     )
+    analytics_user = await _analytics_user(session, job.user_id)
+    if analytics_user is not None:
+        await append_server_event_safely(
+            session,
+            event_name="generation_completed",
+            user=analytics_user,
+            properties={"operation_kind": "rerender", "generation_ordinal": "repeat"},
+            idempotency_key=f"rerender:{operation_id}:completed",
+            occurred_at=datetime.now(timezone.utc),
+        )
     return True
 
 
@@ -446,6 +530,30 @@ async def refund_rerender(
         )
         .values(state="cancelled", publisher_token=None, publisher_lease_until=None)
     )
+    analytics_user = await _analytics_user(session, job.user_id)
+    if analytics_user is not None:
+        failed_at = datetime.now(timezone.utc)
+        await append_server_event_safely(
+            session,
+            event_name="generation_failed",
+            user=analytics_user,
+            properties={
+                "operation_kind": "rerender",
+                "generation_ordinal": "repeat",
+                "reason_code": "pipeline",
+            },
+            idempotency_key=f"rerender:{operation_id}:failed",
+            occurred_at=failed_at,
+        )
+        if refund_cost > 0:
+            await append_server_event_safely(
+                session,
+                event_name="credit_balance_changed",
+                user=analytics_user,
+                properties={"reason": "rerender_refund", "delta": refund_cost},
+                idempotency_key=f"rerender:{operation_id}:refund",
+                occurred_at=failed_at,
+            )
     return True
 
 
@@ -491,6 +599,16 @@ async def complete_locked_rerender(
             )
             .values(state="completed", publisher_token=None, publisher_lease_until=None)
         )
+        analytics_user = await _analytics_user(session, job.user_id)
+        if analytics_user is not None:
+            await append_server_event_safely(
+                session,
+                event_name="generation_completed",
+                user=analytics_user,
+                properties={"operation_kind": "rerender", "generation_ordinal": "repeat"},
+                idempotency_key=f"rerender:{operation_id}:completed",
+                occurred_at=datetime.now(timezone.utc),
+            )
     return True
 
 

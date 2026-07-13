@@ -17,8 +17,9 @@ from sqlalchemy import func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from app.analytics.service import append_server_event_safely
 from app.config import settings
-from app.credits import normalize_checkout_package
+from app.credits import normalize_checkout_package, public_package_intent
 from app.db.models import CreditPurchase, PaymentCheckoutDispatch, User
 from app.payments.schemas import CREDIT_PACKAGES
 from app.payments.snapshot import build_snapshot_metadata, freeze_purchase_snapshot
@@ -289,6 +290,7 @@ async def create_or_resume_checkout(
         await db.rollback()
         raise RuntimeError("database clock is unavailable")
     now = _aware_utc(database_now)
+    purchase.created_at = now
     dispatch = PaymentCheckoutDispatch(
         id=uuid.uuid4(),
         purchase_id=purchase.id,
@@ -304,6 +306,18 @@ async def create_or_resume_checkout(
     )
     db.add_all([purchase, dispatch])
     try:
+        await append_server_event_safely(
+            db,
+            event_name="checkout_started",
+            user=user,
+            properties={
+                "provider": normalized_provider,
+                "package": public_package_intent(normalized_package),
+                "total_credits": purchase.credits_amount + purchase.bonus_credits,
+            },
+            idempotency_key=f"purchase:{purchase.id}:checkout-started",
+            occurred_at=now,
+        )
         await db.commit()
     except IntegrityError:
         await db.rollback()

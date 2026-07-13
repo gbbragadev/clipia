@@ -15,6 +15,7 @@ from slowapi import Limiter
 from sqlalchemy import func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.analytics.service import append_server_event_safely
 from app.api.security import get_owned_job
 from app.auth.dependencies import get_current_admin_user, get_current_user
 from app.config import settings
@@ -676,6 +677,9 @@ async def generate(
                 if debit.rowcount == 0:
                     raise HTTPException(status_code=402, detail=ErrorMessages.INSUFFICIENT_CREDITS)
 
+            prior_generations = int(await db.scalar(select(func.count(Job.id)).where(Job.user_id == user.id)) or 0)
+            generation_ordinal = "first" if prior_generations == 0 else "second" if prior_generations == 1 else "repeat"
+            requested_at = datetime.now(timezone.utc)
             job = Job(
                 id=job_uuid,
                 user_id=user.id,
@@ -688,6 +692,7 @@ async def generate(
                 credit_cost=credit_cost,
                 refine_credit_cost=refine_extra,
                 status="queued",
+                created_at=requested_at,
             )
             db.add(job)
             dispatch = await create_dispatch(
@@ -713,6 +718,37 @@ async def generate(
                 pending_credits_snapshot=0.0,
             )
             dispatch_id = dispatch.id
+            event_properties = {
+                "operation_kind": "generation",
+                "credit_cost": credit_cost,
+                "generation_ordinal": generation_ordinal,
+            }
+            await append_server_event_safely(
+                db,
+                event_name="generation_requested",
+                user=locked_user,
+                properties=event_properties,
+                idempotency_key=f"job:{job_uuid}:requested",
+                occurred_at=requested_at,
+            )
+            if generation_ordinal == "second":
+                await append_server_event_safely(
+                    db,
+                    event_name="second_generation_requested",
+                    user=locked_user,
+                    properties={"credit_cost": credit_cost},
+                    idempotency_key=f"user:{user.id}:second-generation",
+                    occurred_at=requested_at,
+                )
+            if credit_cost > 0:
+                await append_server_event_safely(
+                    db,
+                    event_name="credit_balance_changed",
+                    user=locked_user,
+                    properties={"reason": "generation_debit", "delta": -credit_cost},
+                    idempotency_key=f"job:{job_uuid}:generation-debit",
+                    occurred_at=requested_at,
+                )
             await db.commit()
         except HTTPException:
             await db.rollback()
@@ -1087,6 +1123,18 @@ async def download_job(
     file_path = Path(settings.STORAGE_DIR) / "output" / f"{job.id}.mp4"
     if not file_path.exists():
         raise not_found_error()
+    if job.exported_at is None:
+        exported_at = datetime.now(timezone.utc)
+        job.exported_at = exported_at
+        await append_server_event_safely(
+            db,
+            event_name="video_exported",
+            user=user,
+            properties={"export_ordinal": "first"},
+            idempotency_key=f"job:{job.id}:first-export",
+            occurred_at=exported_at,
+        )
+        await db.commit()
     return FileResponse(str(file_path), media_type="video/mp4", filename=f"clipia-{str(job.id)[:8]}.mp4")
 
 
