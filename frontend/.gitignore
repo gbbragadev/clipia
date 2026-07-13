@@ -18,6 +18,7 @@
 /.next/
 /.next-verify/
 /.next-release-b/
+/.next-releases/
 /out/
 
 # production

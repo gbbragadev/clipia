@@ -52,6 +52,18 @@ foreach ($p in $old) {
     Log "Matando processo antigo PID $($p.ProcessId) ($($p.Name))"
     Stop-Process -Id $p.ProcessId -Force -ErrorAction SilentlyContinue
 }
+# O launcher do frontend reinicia o Node em loop. Ele precisa parar antes do
+# owner da porta; caso contrario o boot cria dois launchers concorrentes.
+Get-CimInstance Win32_Process -Filter "Name='powershell.exe'" -ErrorAction SilentlyContinue |
+    Where-Object {
+        $_.ProcessId -ne $PID -and
+        $_.CommandLine -like '*_run-frontend.ps1*' -and
+        $_.CommandLine -like "*$root*"
+    } |
+    ForEach-Object {
+        Log "Matando launcher frontend antigo PID $($_.ProcessId)"
+        Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
+    }
 $port3003 = Get-NetTCPConnection -LocalPort 3003 -State Listen -ErrorAction SilentlyContinue
 if ($port3003) {
     Log "Matando frontend antigo PID $($port3003[0].OwningProcess) (porta 3003)"

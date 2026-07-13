@@ -1,22 +1,37 @@
-$root = 'C:\Dev\clipia'
-Set-Location "$root\frontend"
-# Producao: roda o build estatico de .next (gerado por `npm run build`).
-#
-# !!! BUG RAIZ DOCUMENTADO !!!
-# NUNCA rode `npm run build` enquanto este processo (next start) estiver no ar.
-# O `next start` carrega o manifest (BUILD_ID + mapa de chunks/server-actions) em
-# memoria ao subir. Se o .next for sobreescrito por um build novo durante a vida
-# do processo, o HTML comeca a referenciar chunks do build NOVO que o processo
-# nao conhece -> HTTP 500 "text/plain" em arquivos .js -> browser recusa executar
-# (MIME type errado) -> JS da pagina morre -> login/dashboard/register quebrados
-# (sintoma: "nao consigo entrar no dashboard"). Alem disso, Server Actions deixam
-# de ser encontradas ("Failed to find Server Action ...").
-#
-# Para rebuildar em producao, use sempre:
-#   powershell -ExecutionPolicy Bypass -File scripts\restart-frontend.ps1 -Rebuild
-# (ele PARA o next start, builda atomico, e so entao reinicia).
+param(
+    [string]$Root = (Split-Path -Parent $PSScriptRoot)
+)
+
+$ErrorActionPreference = "Continue"
+$frontendRoot = Join-Path $Root "frontend"
+$pointer = Join-Path $Root "storage\frontend-active-build.txt"
+$logPath = Join-Path $Root "storage\frontend.log"
+New-Item -ItemType Directory -Path (Split-Path -Parent $logPath) -Force | Out-Null
+Set-Location $frontendRoot
+
 while ($true) {
-    & npm run start -- -p 3003 *>&1 | Out-File -Append -Encoding utf8 "$root\storage\frontend.log"
-    Add-Content -Path "$root\storage\frontend.log" -Value "$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') Frontend encerrou. Reiniciando em 5s..."
-    Start-Sleep 5
+    $activeDistDir = ".next"
+    if (Test-Path -LiteralPath $pointer) {
+        $activeDistDir = (Get-Content -LiteralPath $pointer -Raw).Trim()
+    }
+
+    try {
+        if ([System.IO.Path]::IsPathRooted($activeDistDir)) { throw "absolute NEXT_DIST_DIR rejected" }
+        $resolvedFrontend = [System.IO.Path]::GetFullPath($frontendRoot).TrimEnd('\')
+        $resolvedBuild = [System.IO.Path]::GetFullPath((Join-Path $frontendRoot $activeDistDir))
+        if (-not $resolvedBuild.StartsWith("$resolvedFrontend\", [System.StringComparison]::OrdinalIgnoreCase)) {
+            throw "NEXT_DIST_DIR escaped frontend root"
+        }
+        if (-not (Test-Path -LiteralPath (Join-Path $resolvedBuild "BUILD_ID"))) {
+            throw "BUILD_ID missing from $activeDistDir"
+        }
+
+        $env:NEXT_DIST_DIR = $activeDistDir
+        & npm.cmd run start -- -p 3003 *>&1 | Out-File -Append -Encoding utf8 $logPath
+    } catch {
+        Add-Content -Path $logPath -Value "$(Get-Date -Format o) Frontend launcher rejected build: $($_.Exception.Message)"
+    }
+
+    Add-Content -Path $logPath -Value "$(Get-Date -Format o) Frontend exited. Retrying pointer in 5s..."
+    Start-Sleep -Seconds 5
 }
