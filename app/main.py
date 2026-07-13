@@ -77,7 +77,7 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
 
 
 def create_app() -> FastAPI:
-    app = FastAPI(title="ClipIA API", version="0.1.0", lifespan=lifespan)
+    app = FastAPI(title="ClipIA API", version=settings.APP_VERSION, lifespan=lifespan)
     app.state.limiter = limiter
     app.add_exception_handler(RateLimitExceeded, rate_limit_exceeded_handler)
     app.add_exception_handler(RequestValidationError, request_validation_exception_handler)
@@ -155,7 +155,7 @@ def create_app() -> FastAPI:
         Performs connection tests to the database, caching layers, and any external
         services required for full functionality. Returns a detailed status report.
         """
-        return await get_deep_health(app.version)
+        return await get_deep_health(settings.APP_VERSION)
 
     @app.get(
         "/metrics",

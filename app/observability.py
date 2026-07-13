@@ -114,6 +114,9 @@ async def _compute_deep_health(version: str) -> dict[str, Any]:
             "celery": celery,
         },
         "version": version,
+        "git_sha": settings.GIT_SHA,
+        "app_version": version,
+        "deployed_at": settings.DEPLOYED_AT,
         "uptime_seconds": int(time.monotonic() - _START_TIME),
     }
 

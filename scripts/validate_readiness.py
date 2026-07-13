@@ -183,7 +183,7 @@ async def run(base: str, make_video: bool) -> None:
         }
         st, body = _http("POST", f"{api}/generate", gen, token=token)
         job_id = body.get("job_id")
-        if st == 200 and job_id:
+        if st in {200, 202} and job_id:
             _mark("PASS", f"Geracao enfileirada (job {job_id[:8]}, custo {body.get('credit_cost')} credito).")
         else:
             _mark("FAIL", f"/generate recusou (status={st}): {body.get('detail') or body}")

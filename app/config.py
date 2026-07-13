@@ -7,6 +7,12 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 
 
 class Settings(BaseSettings):
+    # Proveniencia do build, injetada pelo pipeline/deploy. Defaults nao inventam
+    # uma revisao ou horario quando o processo local nao recebeu esses metadados.
+    APP_VERSION: str = "0.1.0"
+    GIT_SHA: str = "unknown"
+    DEPLOYED_AT: str = "unknown"
+
     # API Keys
     PEXELS_API_KEY: str = ""
 
