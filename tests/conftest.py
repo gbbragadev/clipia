@@ -1,4 +1,5 @@
 import os
+import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
 from types import SimpleNamespace
@@ -22,6 +23,7 @@ from app.db.engine import get_db
 from app.db.models import CreditPurchase, Job, User
 from app.main import create_app
 from app.payments.schemas import CREDIT_PACKAGES
+from app.payments.snapshot import freeze_purchase_snapshot
 from app.worker import tasks as worker_tasks
 
 
@@ -339,6 +341,8 @@ async def job_factory(test_db, verified_user):
 
 @pytest_asyncio.fixture
 async def purchase_factory(test_db, verified_user):
+    purchase_number = 0
+
     async def _create_purchase(
         *,
         user_id=None,
@@ -348,14 +352,22 @@ async def purchase_factory(test_db, verified_user):
         mp_preference_id: str = "pref_123",
         mp_payment_id: str | None = None,
         bonus_credits: int | None = None,
+        payment_state: str | None = None,
+        snapshot: bool = False,
     ) -> CreditPurchase:
+        nonlocal purchase_number
+        purchase_number += 1
         pkg = CREDIT_PACKAGES[package_name]
-        if provider == "stripe" and mp_preference_id == "pref_123":
-            mp_preference_id = "cs_test_1"
+        if mp_preference_id == "pref_123":
+            if provider == "stripe":
+                mp_preference_id = f"cs_test_{purchase_number}"
+            elif purchase_number > 1:
+                mp_preference_id = f"pref_{purchase_number}"
         if bonus_credits is None:
             bonus_credits = pkg["credits"] * settings.PURCHASE_BONUS_PERCENT // 100
         async with test_db["session_factory"]() as session:
             purchase = CreditPurchase(
+                id=uuid.uuid4(),
                 user_id=user_id or verified_user.id,
                 package_name=package_name,
                 credits_amount=pkg["credits"],
@@ -365,7 +377,11 @@ async def purchase_factory(test_db, verified_user):
                 mp_payment_id=mp_payment_id,
                 bonus_credits=bonus_credits,
                 status=status,
+                payment_state=payment_state,
+                currency="BRL",
             )
+            if snapshot:
+                freeze_purchase_snapshot(purchase)
             session.add(purchase)
             await session.commit()
             await session.refresh(purchase)

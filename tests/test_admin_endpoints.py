@@ -33,6 +33,26 @@ async def test_admin_purchases_filter_by_status(client, admin_user, purchase_fac
     assert data["purchases"][0]["package_name"] == "popular"
     assert data["purchases"][0]["user_email"] == "verified@example.com", "Lista traz o email via join."
     assert "bonus_credits" in data["purchases"][0]
+    assert data["purchases"][0]["status"] == "paid"
+
+
+@pytest.mark.asyncio
+async def test_admin_purchases_filter_uses_canonical_state_precedence(
+    client, admin_user, purchase_factory, auth_headers
+):
+    await purchase_factory(package_name="starter", status="approved", payment_state="refunded")
+    await purchase_factory(package_name="popular", status="pending", payment_state="paid")
+
+    paid = await client.get("/api/v1/admin/purchases", params={"status": "paid"}, headers=auth_headers(admin_user))
+    refunded = await client.get(
+        "/api/v1/admin/purchases", params={"status": "refunded"}, headers=auth_headers(admin_user)
+    )
+
+    assert paid.status_code == refunded.status_code == 200
+    assert [item["package_name"] for item in paid.json()["purchases"]] == ["popular"]
+    assert [item["status"] for item in paid.json()["purchases"]] == ["paid"]
+    assert [item["package_name"] for item in refunded.json()["purchases"]] == ["starter"]
+    assert [item["status"] for item in refunded.json()["purchases"]] == ["refunded"]
 
 
 @pytest.mark.asyncio

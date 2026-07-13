@@ -2,6 +2,7 @@ import hashlib
 import hmac
 import json
 import logging
+import time
 from json import JSONDecodeError
 
 import stripe
@@ -22,15 +23,40 @@ from app.payments.schemas import (
     PurchaseHistoryResponse,
 )
 from app.payments.service import (
+    PaymentEventResult,
     create_checkout,
     create_checkout_stripe,
     process_webhook,
     process_webhook_stripe,
     verify_stripe_event_via_api,
 )
+from app.payments.states import canonical_payment_state
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["payments"])
+
+
+def _payment_result_payload(result: PaymentEventResult) -> dict[str, str | int | None]:
+    return {
+        "status": "processed" if result.applied else "not_processed",
+        "state": result.state,
+        "balance_delta": result.balance_delta,
+    }
+
+
+def _stripe_timestamp_within_tolerance(signature: str) -> bool:
+    try:
+        timestamps = [
+            int(value)
+            for part in signature.split(",")
+            for key, separator, value in [part.strip().partition("=")]
+            if separator and key == "t"
+        ]
+    except ValueError:
+        return False
+    if len(timestamps) != 1:
+        return False
+    return abs(time.time() - timestamps[0]) <= stripe.Webhook.DEFAULT_TOLERANCE
 
 
 @router.get(
@@ -162,8 +188,8 @@ async def mercadopago_webhook(
         logger.warning("Webhook without payment ID: %s", parsed)
         return {"status": "no_payment_id"}
 
-    credited = await process_webhook(payment_id, db)
-    return {"status": "credited" if credited else "not_credited"}
+    result = await process_webhook(payment_id, db)
+    return _payment_result_payload(result)
 
 
 @router.post(
@@ -182,6 +208,9 @@ async def stripe_webhook(
 
     if settings.STRIPE_WEBHOOK_SECRET:
         sig = request.headers.get("stripe-signature", "")
+        if not _stripe_timestamp_within_tolerance(sig):
+            logger.warning("Stripe webhook timestamp outside tolerance")
+            return {"status": "invalid_signature"}
         try:
             event = stripe.Webhook.construct_event(payload, sig, settings.STRIPE_WEBHOOK_SECRET)
         except Exception as e:  # noqa: BLE001 — assinatura invalida / payload malformado
@@ -198,8 +227,8 @@ async def stripe_webhook(
         if event is None:
             return {"status": "unverified"}
 
-    credited = await process_webhook_stripe(event, db)
-    return {"status": "credited" if credited else "not_credited"}
+    result = await process_webhook_stripe(event, db)
+    return _payment_result_payload(result)
 
 
 @router.get(
@@ -230,7 +259,7 @@ async def purchase_history(
                 package_name=p.package_name,
                 credits_amount=p.credits_amount,
                 price_brl=p.price_brl,
-                status=p.status,
+                status=canonical_payment_state(p.status, p.payment_state),
                 created_at=p.created_at,
                 paid_at=p.paid_at,
             )

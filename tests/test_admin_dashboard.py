@@ -56,9 +56,7 @@ async def test_admin_dashboard_aggregates_finance_funnel_operations_and_recent_a
         .values(created_at=recent_created, paid_at=recent_created)
     )
     await db_session.execute(
-        update(CreditPurchase)
-        .where(CreditPurchase.id == pending_purchase.id)
-        .values(created_at=recent_created)
+        update(CreditPurchase).where(CreditPurchase.id == pending_purchase.id).values(created_at=recent_created)
     )
     await db_session.execute(
         update(CreditPurchase)
@@ -142,3 +140,43 @@ async def test_admin_dashboard_rejects_invalid_range(client, admin_user, auth_he
     response = await client.get("/api/v1/admin/dashboard?range=365d", headers=auth_headers(admin_user))
 
     assert response.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_admin_dashboard_uses_canonical_payment_precedence(
+    client,
+    db_session,
+    verified_user,
+    admin_user,
+    auth_headers,
+    purchase_factory,
+):
+    stale_approved = await purchase_factory(
+        user_id=verified_user.id,
+        status="approved",
+        payment_state="refunded",
+        package_name="starter",
+    )
+    rolling_paid = await purchase_factory(
+        user_id=verified_user.id,
+        status="pending",
+        payment_state="paid",
+        package_name="popular",
+    )
+    await db_session.execute(
+        update(CreditPurchase)
+        .where(CreditPurchase.id.in_([stale_approved.id, rolling_paid.id]))
+        .values(created_at=datetime.now(timezone.utc))
+    )
+    await db_session.commit()
+
+    response = await client.get("/api/v1/admin/dashboard?range=30d", headers=auth_headers(admin_user))
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["summary"]["approved_orders"] == 1
+    assert body["summary"]["approved_revenue_brl"] == 49.9
+    assert body["summary"]["pending_orders"] == 0
+    recent_states = {item["id"]: item["status"] for item in body["recent_activity"]["recent_purchases"]}
+    assert recent_states[str(stale_approved.id)] == "refunded"
+    assert recent_states[str(rolling_paid.id)] == "paid"

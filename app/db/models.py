@@ -12,6 +12,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
     func,
+    text,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -21,6 +22,45 @@ from app.db.types import GUID, JsonType
 
 class CreditPurchase(Base):
     __tablename__ = "credit_purchases"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('pending', 'approved', 'paid', 'refunded', 'charged_back', "
+            "'cancelled', 'canceled', 'rejected', 'expired', 'void')",
+            name="ck_credit_purchase_legacy_status",
+        ),
+        CheckConstraint("credits_amount > 0", name="ck_credit_purchase_credits_positive"),
+        CheckConstraint("bonus_credits >= 0", name="ck_credit_purchase_bonus_nonnegative"),
+        CheckConstraint("price_brl > 0", name="ck_credit_purchase_price_positive"),
+        CheckConstraint(
+            "payment_state IS NULL OR payment_state IN ('pending', 'paid', 'refunded', 'void')",
+            name="ck_credit_purchase_payment_state",
+        ),
+        CheckConstraint(
+            "snapshot_version IS NULL OR snapshot_version = 1",
+            name="ck_credit_purchase_snapshot_version",
+        ),
+        CheckConstraint(
+            "(snapshot_version IS NULL AND snapshot_hash IS NULL) OR "
+            "(snapshot_version = 1 AND snapshot_hash IS NOT NULL AND LENGTH(snapshot_hash) = 64)",
+            name="ck_credit_purchase_snapshot_pair",
+        ),
+        Index(
+            "uq_credit_purchase_provider_checkout",
+            "provider",
+            "mp_preference_id",
+            unique=True,
+            postgresql_where=text("mp_preference_id IS NOT NULL AND mp_preference_id <> 'pending'"),
+            sqlite_where=text("mp_preference_id IS NOT NULL AND mp_preference_id <> 'pending'"),
+        ),
+        Index(
+            "uq_credit_purchase_provider_payment",
+            "provider",
+            "mp_payment_id",
+            unique=True,
+            postgresql_where=text("mp_payment_id IS NOT NULL"),
+            sqlite_where=text("mp_payment_id IS NOT NULL"),
+        ),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(GUID(), primary_key=True, default=uuid.uuid4)
     user_id: Mapped[uuid.UUID] = mapped_column(GUID(), ForeignKey("users.id"), nullable=False)
@@ -38,8 +78,12 @@ class CreditPurchase(Base):
     # ATIVO (MP: preference_id/payment_id; Stripe: session_id/payment_intent_id). Renomear = churn em 8
     # call-sites + export de conta + 4 testes, sem ganho funcional. provider diz qual gateway é.
     mp_payment_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    mp_preference_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    mp_preference_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
     status: Mapped[str] = mapped_column(String(50), default="pending")
+    payment_state: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    currency: Mapped[str] = mapped_column(String(3), nullable=False, default="BRL", server_default="BRL")
+    snapshot_version: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    snapshot_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     paid_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 

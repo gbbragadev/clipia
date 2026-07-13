@@ -39,7 +39,7 @@ async def test_purchase_bonus_credited_with_flag_on(client, db_session, purchase
 
     response = await client.post("/api/v1/webhooks/stripe", json=_WEBHOOK_BODY)
 
-    assert response.json()["status"] == "credited"
+    assert response.json()["status"] == "processed"
     db_session.expire_all()
     refreshed_purchase = await db_session.get(CreditPurchase, purchase.id)
     refreshed_user = await db_session.get(User, verified_user.id)
@@ -56,8 +56,8 @@ async def test_purchase_bonus_replay_is_idempotent(client, db_session, purchase_
     first = await client.post("/api/v1/webhooks/stripe", json=_WEBHOOK_BODY)
     second = await client.post("/api/v1/webhooks/stripe", json=_WEBHOOK_BODY)
 
-    assert first.json()["status"] == "credited"
-    assert second.json()["status"] == "not_credited", "Replay nao pode re-creditar base nem bonus."
+    assert first.json()["status"] == "processed"
+    assert second.json()["status"] == "not_processed", "Replay nao pode re-creditar base nem bonus."
     db_session.expire_all()
     assert (await db_session.get(User, verified_user.id)).credits == 41
 
@@ -111,7 +111,7 @@ async def test_bonus_zero_when_flag_off(client, db_session, purchase_factory, ve
 
     response = await client.post("/api/v1/webhooks/stripe", json=_WEBHOOK_BODY)
 
-    assert response.json()["status"] == "credited"
+    assert response.json()["status"] == "processed"
     db_session.expire_all()
     assert (await db_session.get(CreditPurchase, purchase.id)).bonus_credits == 0
     assert (await db_session.get(User, verified_user.id)).credits == 35, "Sem promo: comportamento atual."

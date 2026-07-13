@@ -1,0 +1,277 @@
+import asyncio
+import os
+import re
+import uuid
+from contextlib import asynccontextmanager
+
+import asyncpg
+import pytest
+import pytest_asyncio
+import stripe
+from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+
+from app.api.routes import _debit_credits
+from app.db.base import Base
+from app.db.models import CreditPurchase, ProcessedPaymentEvent, User
+from app.payments.service import process_webhook_stripe
+
+_ADMIN_DSN = os.getenv(
+    "POSTGRES_PAYMENT_TEST_ADMIN_DSN",
+    "postgresql://clipia:clipia_dev@localhost:5435/postgres",
+)
+
+
+def _require_postgres_tests() -> None:
+    if os.getenv("RUN_POSTGRES_PAYMENT_TESTS") != "1":
+        pytest.skip("set RUN_POSTGRES_PAYMENT_TESTS=1 to run real PostgreSQL payment races")
+
+
+@pytest_asyncio.fixture
+async def postgres_payment_sessions():
+    _require_postgres_tests()
+    database_name = f"clipia_payment_test_{uuid.uuid4().hex[:12]}"
+    assert re.fullmatch(r"clipia_payment_test_[0-9a-f]{12}", database_name)
+    admin = await asyncpg.connect(_ADMIN_DSN)
+    await admin.execute(f'CREATE DATABASE "{database_name}"')
+    database_url = f"postgresql+asyncpg://clipia:clipia_dev@localhost:5435/{database_name}"
+    engine = create_async_engine(database_url, pool_size=10, max_overflow=10)
+    sessions = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+    try:
+        async with engine.begin() as connection:
+            await connection.run_sync(Base.metadata.create_all)
+        yield sessions
+    finally:
+        await engine.dispose()
+        await admin.execute(
+            "SELECT pg_terminate_backend(pid) FROM pg_stat_activity " "WHERE datname = $1 AND pid <> pg_backend_pid()",
+            database_name,
+        )
+        await admin.execute(f'DROP DATABASE "{database_name}"')
+        await admin.close()
+
+
+@pytest.fixture(autouse=True)
+def _disable_process_local_payment_lock(monkeypatch):
+    @asynccontextmanager
+    async def no_process_lock():
+        yield
+
+    monkeypatch.setattr("app.payments.service.get_lock", lambda _key: no_process_lock())
+
+
+async def _seed_user(sessions, *, credits: int = 5) -> User:
+    async with sessions() as session:
+        user = User(
+            id=uuid.uuid4(),
+            email=f"postgres-payment-{uuid.uuid4().hex}@example.com",
+            name="PostgreSQL Payment Test",
+            password_hash="test",
+            credits=credits,
+            email_verified=True,
+            referral_code=uuid.uuid4().hex[:8],
+        )
+        session.add(user)
+        await session.commit()
+        return user
+
+
+async def _seed_purchase(
+    sessions,
+    user: User,
+    *,
+    checkout_id: str,
+    status: str = "pending",
+    payment_state: str | None = "pending",
+) -> CreditPurchase:
+    async with sessions() as session:
+        purchase = CreditPurchase(
+            id=uuid.uuid4(),
+            user_id=user.id,
+            package_name="starter",
+            credits_amount=10,
+            bonus_credits=0,
+            price_brl=1990,
+            currency="BRL",
+            provider="stripe",
+            mp_preference_id=checkout_id,
+            status=status,
+            payment_state=payment_state,
+        )
+        session.add(purchase)
+        await session.commit()
+        return purchase
+
+
+def _paid_event(purchase: CreditPurchase, *, event_id: str, payment_intent: str) -> dict:
+    return {
+        "id": event_id,
+        "type": "checkout.session.completed",
+        "data": {
+            "object": {
+                "id": purchase.mp_preference_id,
+                "payment_status": "paid",
+                "client_reference_id": str(purchase.id),
+                "metadata": {"purchase_id": str(purchase.id)},
+                "amount_total": purchase.price_brl,
+                "currency": "brl",
+                "payment_intent": payment_intent,
+            }
+        },
+    }
+
+
+def _refund_event(purchase: CreditPurchase, *, event_id: str, payment_intent: str) -> dict:
+    return {
+        "id": event_id,
+        "type": "charge.refunded",
+        "data": {
+            "object": {
+                "id": f"ch_{event_id}",
+                "payment_intent": payment_intent,
+                "amount": purchase.price_brl,
+                "amount_refunded": purchase.price_brl,
+                "currency": "brl",
+                "refunded": True,
+            }
+        },
+    }
+
+
+async def _apply_event(sessions, event: dict) -> bool:
+    async with sessions() as session:
+        return await process_webhook_stripe(event, session)
+
+
+@pytest.mark.asyncio
+async def test_postgres_paid_and_refund_race_converges_to_refunded_without_credit_loss(
+    postgres_payment_sessions, monkeypatch
+):
+    sessions = postgres_payment_sessions
+    user = await _seed_user(sessions)
+    purchase = await _seed_purchase(sessions, user, checkout_id=f"cs_{uuid.uuid4().hex}")
+    payment_intent = f"pi_{uuid.uuid4().hex}"
+    monkeypatch.setattr(
+        stripe.PaymentIntent,
+        "retrieve",
+        staticmethod(
+            lambda pi: {
+                "id": pi,
+                "metadata": {"purchase_id": str(purchase.id)},
+            }
+        ),
+    )
+
+    await asyncio.gather(
+        _apply_event(
+            sessions, _paid_event(purchase, event_id=f"evt_{uuid.uuid4().hex}", payment_intent=payment_intent)
+        ),
+        _apply_event(
+            sessions,
+            _refund_event(purchase, event_id=f"evt_{uuid.uuid4().hex}", payment_intent=payment_intent),
+        ),
+    )
+
+    async with sessions() as session:
+        assert (await session.get(CreditPurchase, purchase.id)).payment_state == "refunded"
+        assert (await session.get(User, user.id)).credits == 5
+        assert (
+            await session.scalar(
+                select(func.count())
+                .select_from(ProcessedPaymentEvent)
+                .where(ProcessedPaymentEvent.purchase_id == purchase.id)
+            )
+            == 2
+        )
+
+
+@pytest.mark.asyncio
+async def test_postgres_two_purchase_credits_and_generation_debit_preserve_arithmetic_sum(
+    postgres_payment_sessions,
+):
+    sessions = postgres_payment_sessions
+    user = await _seed_user(sessions)
+    first = await _seed_purchase(sessions, user, checkout_id=f"cs_{uuid.uuid4().hex}")
+    second = await _seed_purchase(sessions, user, checkout_id=f"cs_{uuid.uuid4().hex}")
+
+    async def debit_generation():
+        async with sessions() as session:
+            await _debit_credits(session, user.id, 3)
+
+    results = await asyncio.gather(
+        _apply_event(
+            sessions,
+            _paid_event(first, event_id=f"evt_{uuid.uuid4().hex}", payment_intent=f"pi_{uuid.uuid4().hex}"),
+        ),
+        _apply_event(
+            sessions,
+            _paid_event(second, event_id=f"evt_{uuid.uuid4().hex}", payment_intent=f"pi_{uuid.uuid4().hex}"),
+        ),
+        debit_generation(),
+    )
+
+    assert [result.applied for result in results[:2]] == [True, True]
+    async with sessions() as session:
+        assert (await session.get(User, user.id)).credits == 22
+
+
+@pytest.mark.asyncio
+async def test_postgres_concurrent_replay_claims_once(postgres_payment_sessions):
+    sessions = postgres_payment_sessions
+    user = await _seed_user(sessions)
+    purchase = await _seed_purchase(sessions, user, checkout_id=f"cs_{uuid.uuid4().hex}")
+    event = _paid_event(
+        purchase,
+        event_id=f"evt_{uuid.uuid4().hex}",
+        payment_intent=f"pi_{uuid.uuid4().hex}",
+    )
+
+    results = await asyncio.gather(_apply_event(sessions, event), _apply_event(sessions, event))
+
+    assert sorted(result.applied for result in results) == [False, True]
+    async with sessions() as session:
+        assert (await session.get(User, user.id)).credits == 15
+        assert (
+            await session.scalar(
+                select(func.count())
+                .select_from(ProcessedPaymentEvent)
+                .where(ProcessedPaymentEvent.purchase_id == purchase.id)
+            )
+            == 1
+        )
+
+
+@pytest.mark.asyncio
+async def test_postgres_provider_identity_collision_credits_only_one_purchase(postgres_payment_sessions):
+    sessions = postgres_payment_sessions
+    user = await _seed_user(sessions)
+    first = await _seed_purchase(sessions, user, checkout_id=f"cs_{uuid.uuid4().hex}")
+    second = await _seed_purchase(sessions, user, checkout_id=f"cs_{uuid.uuid4().hex}")
+    payment_intent = f"pi_{uuid.uuid4().hex}"
+
+    results = await asyncio.gather(
+        _apply_event(
+            sessions,
+            _paid_event(first, event_id=f"evt_{uuid.uuid4().hex}", payment_intent=payment_intent),
+        ),
+        _apply_event(
+            sessions,
+            _paid_event(second, event_id=f"evt_{uuid.uuid4().hex}", payment_intent=payment_intent),
+        ),
+    )
+
+    assert sorted(result.applied for result in results) == [False, True]
+    async with sessions() as session:
+        purchases = list(
+            (await session.scalars(select(CreditPurchase).where(CreditPurchase.id.in_([first.id, second.id])))).all()
+        )
+        assert sorted(purchase.payment_state for purchase in purchases) == ["paid", "pending"]
+        assert (await session.get(User, user.id)).credits == 15
+        assert (
+            await session.scalar(
+                select(func.count())
+                .select_from(ProcessedPaymentEvent)
+                .where(ProcessedPaymentEvent.purchase_id.in_([first.id, second.id]))
+            )
+            == 1
+        )

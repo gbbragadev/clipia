@@ -38,6 +38,7 @@ from app.config import settings
 from app.db.engine import get_db
 from app.db.models import CreditPurchase, Job, User
 from app.observability import record_credit_metric
+from app.payments.states import canonical_payment_state
 from app.utils.locks import get_lock
 from app.utils.ratelimit import client_ip
 
@@ -513,7 +514,7 @@ async def export_data(
                 "package_name": purchase.package_name,
                 "credits_amount": purchase.credits_amount,
                 "price_brl": purchase.price_brl,
-                "status": purchase.status,
+                "status": canonical_payment_state(purchase.status, purchase.payment_state),
                 "mp_payment_id": purchase.mp_payment_id,
                 "mp_preference_id": purchase.mp_preference_id,
                 "created_at": purchase.created_at.isoformat() if purchase.created_at else None,

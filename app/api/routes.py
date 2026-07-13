@@ -35,6 +35,7 @@ from app.models import (
     WaitlistRequest,
 )
 from app.observability import record_credit_metric
+from app.payments.states import canonical_payment_state, canonical_payment_state_expression
 from app.pricing import get_generation_credit_cost
 from app.redis_pool import get_redis
 from app.services.dispatch_outbox import DispatchPayload, create_dispatch, publish_dispatch
@@ -2142,11 +2143,19 @@ async def admin_dashboard(
     jobs_in_range = list(jobs_result.scalars().all())
 
     # Aggregate totals via SQL — no need to load all rows
-    approved_purchases = [purchase for purchase in purchases_in_range if purchase.status == "approved"]
-    pending_purchases = [purchase for purchase in purchases_in_range if purchase.status != "approved"]
+    purchase_states = {
+        purchase.id: canonical_payment_state(purchase.status, purchase.payment_state) for purchase in purchases_in_range
+    }
+    approved_purchases = [purchase for purchase in purchases_in_range if purchase_states[purchase.id] == "paid"]
+    pending_purchases = [purchase for purchase in purchases_in_range if purchase_states[purchase.id] == "pending"]
+
+    canonical_state_sql = canonical_payment_state_expression(
+        CreditPurchase.status,
+        CreditPurchase.payment_state,
+    )
 
     approved_user_ids_result = await db.execute(
-        select(CreditPurchase.user_id).where(CreditPurchase.status == "approved").distinct()
+        select(CreditPurchase.user_id).where(canonical_state_sql == "paid").distinct()
     )
     approved_user_ids = {str(uid) for uid in approved_user_ids_result.scalars().all()}
 
@@ -2187,7 +2196,7 @@ async def admin_dashboard(
     for purchase in purchases_in_range:
         bucket = _bucket_key(purchase.created_at)
         if bucket:
-            if purchase.status == "approved":
+            if purchase_states[purchase.id] == "paid":
                 revenue_by_day[bucket] += purchase.price_brl / 100
                 approved_orders_by_day[bucket] += 1
 
@@ -2201,7 +2210,7 @@ async def admin_dashboard(
             },
         )
         mix["orders"] += 1
-        if purchase.status == "approved":
+        if purchase_states[purchase.id] == "paid":
             mix["approved_revenue_brl"] = _round2(float(mix["approved_revenue_brl"]) + (purchase.price_brl / 100))
             mix["credits_sold"] = int(mix["credits_sold"]) + purchase.credits_amount
 
@@ -2297,7 +2306,7 @@ async def admin_dashboard(
                     "package_name": purchase.package_name,
                     "price_brl": purchase.price_brl,
                     "credits_amount": purchase.credits_amount,
-                    "status": purchase.status,
+                    "status": canonical_payment_state(purchase.status, purchase.payment_state),
                     "created_at": purchase.created_at.isoformat() if purchase.created_at else None,
                     "paid_at": purchase.paid_at.isoformat() if purchase.paid_at else None,
                 }
@@ -2366,7 +2375,14 @@ async def admin_list_users(
     if users:
         paying_rows = await db.execute(
             select(CreditPurchase.user_id)
-            .where(CreditPurchase.user_id.in_([u.id for u in users]), CreditPurchase.status == "approved")
+            .where(
+                CreditPurchase.user_id.in_([u.id for u in users]),
+                canonical_payment_state_expression(
+                    CreditPurchase.status,
+                    CreditPurchase.payment_state,
+                )
+                == "paid",
+            )
             .distinct()
         )
         paying = {str(uid) for uid in paying_rows.scalars().all()}
@@ -2408,8 +2424,12 @@ async def admin_list_purchases(
     stmt = select(CreditPurchase, User.email).join(User, CreditPurchase.user_id == User.id)
     count_stmt = select(func.count()).select_from(CreditPurchase)
     if status.strip():
-        stmt = stmt.where(CreditPurchase.status == status.strip())
-        count_stmt = count_stmt.where(CreditPurchase.status == status.strip())
+        requested_status = "paid" if status.strip().lower() == "approved" else status.strip().lower()
+        state_filter = (
+            canonical_payment_state_expression(CreditPurchase.status, CreditPurchase.payment_state) == requested_status
+        )
+        stmt = stmt.where(state_filter)
+        count_stmt = count_stmt.where(state_filter)
 
     total = (await db.execute(count_stmt)).scalar() or 0
     rows = await db.execute(
@@ -2429,7 +2449,7 @@ async def admin_list_purchases(
                 "bonus_credits": p.bonus_credits,
                 "price_brl": p.price_brl,
                 "provider": p.provider,
-                "status": p.status,
+                "status": canonical_payment_state(p.status, p.payment_state),
                 "created_at": p.created_at.isoformat() if p.created_at else None,
                 "paid_at": p.paid_at.isoformat() if p.paid_at else None,
             }
