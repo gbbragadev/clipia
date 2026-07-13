@@ -1,7 +1,18 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, Float, ForeignKey, Index, Integer, String, Text, func
+from sqlalchemy import (
+    CheckConstraint,
+    DateTime,
+    Float,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+    func,
+)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
@@ -73,6 +84,7 @@ class User(Base):
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
     credits: Mapped[int] = mapped_column(Integer, default=2)
     script_refine_pending: Mapped[float] = mapped_column(Float, default=0.0, server_default="0", nullable=False)
+    script_refine_version: Mapped[int] = mapped_column(Integer, default=0, server_default="0", nullable=False)
     script_refine_redis_migrated: Mapped[bool] = mapped_column(default=False, server_default="false", nullable=False)
     plan: Mapped[str] = mapped_column(String(50), default="free")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
@@ -137,6 +149,63 @@ class Job(Base):
     telemetry: Mapped[dict | None] = mapped_column(JsonType, nullable=True)
 
     user: Mapped["User"] = relationship(back_populates="jobs")
+
+
+class JobDispatch(Base):
+    """Transactional outbox entry for one paid generation/rerender operation."""
+
+    __tablename__ = "job_dispatches"
+    __table_args__ = (
+        UniqueConstraint("kind", "operation_id", name="uq_job_dispatch_kind_operation"),
+        CheckConstraint("kind IN ('generation', 'rerender')", name="ck_job_dispatch_kind"),
+        CheckConstraint(
+            "state IN ('pending', 'published', 'claimed', 'completed', 'cancelled')",
+            name="ck_job_dispatch_state",
+        ),
+        CheckConstraint("debited_credits >= 0", name="ck_job_dispatch_debited_credits"),
+        CheckConstraint("refine_debited >= 0", name="ck_job_dispatch_refine_debited"),
+        CheckConstraint("pending_credits_snapshot >= 0", name="ck_job_dispatch_pending_snapshot"),
+        Index("ix_job_dispatch_state_attempt", "state", "last_attempt_at"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(GUID(), primary_key=True, default=uuid.uuid4)
+    job_id: Mapped[uuid.UUID] = mapped_column(GUID(), ForeignKey("jobs.id"), nullable=False, index=True)
+    operation_id: Mapped[uuid.UUID] = mapped_column(GUID(), nullable=False)
+    kind: Mapped[str] = mapped_column(String(20), nullable=False)
+    payload: Mapped[dict] = mapped_column(JsonType, nullable=False)
+    debited_credits: Mapped[int] = mapped_column(Integer, default=0, server_default="0", nullable=False)
+    refine_debited: Mapped[float] = mapped_column(Float, default=0.0, server_default="0", nullable=False)
+    pending_credits_snapshot: Mapped[float] = mapped_column(Float, default=0.0, server_default="0", nullable=False)
+    state: Mapped[str] = mapped_column(String(20), default="pending", server_default="pending", nullable=False)
+    attempt_count: Mapped[int] = mapped_column(Integer, default=0, server_default="0", nullable=False)
+    last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    last_attempt_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_task_id: Mapped[uuid.UUID | None] = mapped_column(GUID(), nullable=True)
+    publisher_token: Mapped[uuid.UUID | None] = mapped_column(GUID(), nullable=True)
+    publisher_lease_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    claimed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    claimed_task_id: Mapped[uuid.UUID | None] = mapped_column(GUID(), nullable=True)
+    worker_heartbeat_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class RefineBalanceOutbox(Base):
+    """Versioned projection of the SQL refine balance to the legacy Redis key."""
+
+    __tablename__ = "refine_balance_outbox"
+    __table_args__ = (
+        UniqueConstraint("user_id", "version", name="uq_refine_balance_outbox_user_version"),
+        Index("ix_refine_balance_outbox_applied", "applied_at", "created_at"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(GUID(), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(GUID(), ForeignKey("users.id"), nullable=False, index=True)
+    version: Mapped[int] = mapped_column(Integer, nullable=False)
+    balance_after: Mapped[float] = mapped_column(Float, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    applied_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
 class VoiceClone(Base):

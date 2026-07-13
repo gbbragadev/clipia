@@ -19,7 +19,7 @@ from app.api.security import get_owned_job
 from app.auth.dependencies import get_current_admin_user, get_current_user
 from app.config import settings
 from app.db.engine import get_db
-from app.db.models import CreditAdjustment, CreditPurchase, Feedback, Job, User, VoiceClone, WaitlistEntry
+from app.db.models import CreditAdjustment, CreditPurchase, Feedback, Job, JobDispatch, User, VoiceClone, WaitlistEntry
 from app.errors import ErrorMessages, not_found_error, validate_uuid
 from app.models import (
     AdminCreditAdjustRequest,
@@ -37,6 +37,7 @@ from app.models import (
 from app.observability import record_credit_metric
 from app.pricing import get_generation_credit_cost
 from app.redis_pool import get_redis
+from app.services.dispatch_outbox import DispatchPayload, create_dispatch, publish_dispatch
 from app.services.job_operations import (
     InsufficientCredits,
     InvalidJobOperation,
@@ -48,6 +49,11 @@ from app.services.job_operations import (
     request_generation_cancel,
 )
 from app.services.llm import complete_text, strip_code_fences
+from app.services.refine_balance import (
+    adjust_refine_balance,
+    queue_refine_balance_projection,
+    sync_refine_balance_projection,
+)
 from app.services.remotion import scene_sort_key
 from app.services.trends import fetch_trends, get_example_topics
 from app.templates import get_template
@@ -225,7 +231,7 @@ async def _refund_credits_safe(db: AsyncSession, user_id, cost: int, action: str
             return False
 
 
-async def _lock_script_refine_balance(db: AsyncSession, user_id: uuid.UUID) -> tuple[User, str | None]:
+async def _lock_script_refine_balance(db: AsyncSession, user_id: uuid.UUID) -> tuple[User, uuid.UUID | None]:
     """Lock the SQL refine balance and lazily import the legacy Redis value once."""
     result = await db.execute(
         select(User).where(User.id == user_id).with_for_update().execution_options(populate_existing=True)
@@ -237,27 +243,46 @@ async def _lock_script_refine_balance(db: AsyncSession, user_id: uuid.UUID) -> t
         return locked_user, None
 
     legacy_key = f"script_refine_pending:{user_id}"
+    legacy_version_key = f"script_refine_pending_version:{user_id}"
     try:
         raw_legacy = _redis.get(legacy_key)
+        raw_legacy_version = _redis.get(legacy_version_key)
         legacy_pending = float(raw_legacy or 0.0)
+        legacy_version = int(raw_legacy_version or 0)
         if not math.isfinite(legacy_pending) or legacy_pending < 0:
             raise ValueError("invalid legacy refine balance")
+        if legacy_version < 0:
+            raise ValueError("invalid legacy refine version")
     except Exception as exc:  # noqa: BLE001 - unknown legacy debt must never be discarded
         logger.error("Falha ao importar saldo legado de refino user=%s: %s", user_id, exc)
         raise HTTPException(status_code=503, detail="Nao foi possivel reservar o saldo de refinos agora.") from exc
 
     locked_user.script_refine_pending = round(float(locked_user.script_refine_pending or 0.0) + legacy_pending, 2)
+    locked_user.script_refine_version = (
+        max(
+            int(locked_user.script_refine_version or 0),
+            legacy_version,
+        )
+        + 1
+    )
     locked_user.script_refine_redis_migrated = True
-    return locked_user, legacy_key
+    projection = await queue_refine_balance_projection(
+        db,
+        user_id=user_id,
+        version=locked_user.script_refine_version,
+        balance_after=locked_user.script_refine_pending,
+    )
+    return locked_user, projection.id
 
 
-def _clear_legacy_refine_balance(legacy_key: str | None) -> None:
-    if legacy_key is None:
+async def _sync_refine_projection_best_effort(db: AsyncSession, projection_id: uuid.UUID | None) -> None:
+    if projection_id is None:
         return
     try:
-        _redis.delete(legacy_key)
-    except Exception:  # noqa: BLE001 - SQL migration flag prevents duplicate import
-        logger.exception("Falha ao remover saldo legado de refino key=%s", legacy_key)
+        await sync_refine_balance_projection(db, projection_id, _redis)
+    except Exception:  # noqa: BLE001 - the committed outbox is drained independently
+        await db.rollback()
+        logger.exception("Falha ao projetar saldo de refino; outbox permanece para drain id=%s", projection_id)
 
 
 def _release_generation_quota(cap_key: str | None, reserved: bool) -> None:
@@ -269,6 +294,69 @@ def _release_generation_quota(cap_key: str | None, reserved: bool) -> None:
         logger.exception("Falha ao devolver quota de geracao key=%s", cap_key)
 
 
+async def _classify_dispatch_after_refund_cas(
+    db: AsyncSession,
+    *,
+    job_id: uuid.UUID,
+    dispatch_id: uuid.UUID,
+    kind: str,
+    operation_id: uuid.UUID,
+) -> str:
+    """Classify CAS=False without turning accepted work into a manual refund."""
+    try:
+        await db.rollback()
+        job_result = await db.execute(
+            select(Job).where(Job.id == job_id).with_for_update().execution_options(populate_existing=True)
+        )
+        job = job_result.scalar_one_or_none()
+        dispatch_result = await db.execute(
+            select(JobDispatch)
+            .where(
+                JobDispatch.id == dispatch_id,
+                JobDispatch.job_id == job_id,
+                JobDispatch.kind == kind,
+                JobDispatch.operation_id == operation_id,
+            )
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+        dispatch = dispatch_result.scalar_one_or_none()
+        financially_refunded = job is not None and (
+            (kind == "generation" and job.generation_refunded_at is not None)
+            or (kind == "rerender" and job.rerender_state == "refunded")
+        )
+        exact_dispatch_cancelled = dispatch is not None and dispatch.state == "cancelled"
+        delivered = (dispatch is not None and dispatch.state == "completed") or (
+            job is not None
+            and (
+                (
+                    kind == "generation"
+                    and (
+                        job.video_url is not None
+                        or job.completed_at is not None
+                        or job.status in {"editable", "completed"}
+                    )
+                )
+                or (kind == "rerender" and job.rerender_state == "completed")
+            )
+        )
+        active_dispatch = dispatch is not None and (
+            dispatch.claimed_at is not None or dispatch.state in {"published", "claimed"}
+        )
+        if financially_refunded or exact_dispatch_cancelled:
+            outcome = "already_refunded"
+        elif delivered or active_dispatch:
+            outcome = "accepted_or_completed"
+        else:
+            outcome = "refund_pending"
+        await db.rollback()
+        return outcome
+    except Exception:  # noqa: BLE001 - an unreadable DB means financial state is unresolved
+        await db.rollback()
+        logger.exception("Falha ao classificar compensation job=%s dispatch=%s", job_id, dispatch_id)
+        return "refund_pending"
+
+
 async def _compensate_generation_dispatch(
     db: AsyncSession,
     *,
@@ -277,7 +365,8 @@ async def _compensate_generation_dispatch(
     quota_reserved: bool,
     credit_cost: int,
     error: Exception,
-) -> bool:
+    dispatch_id: uuid.UUID,
+) -> str:
     refunded = False
     for attempt in range(2):
         try:
@@ -286,6 +375,7 @@ async def _compensate_generation_dispatch(
                 job_id,
                 status="failed",
                 error="Falha ao enfileirar a geracao. Credito estornado.",
+                outbox_dispatch_id=dispatch_id,
             )
             await db.commit()
             break
@@ -295,36 +385,111 @@ async def _compensate_generation_dispatch(
                 logger.critical("Refund persistente falhou job=%s", job_id, exc_info=True)
 
     if refunded:
+        outcome = "refunded"
         record_credit_metric("credit", credit_cost)
     else:
+        outcome = await _classify_dispatch_after_refund_cas(
+            db,
+            job_id=job_id,
+            dispatch_id=dispatch_id,
+            kind="generation",
+            operation_id=job_id,
+        )
+    if outcome == "accepted_or_completed":
+        logger.warning("Compensation ignorada: dispatch aceito job=%s dispatch=%s", job_id, dispatch_id)
+        return outcome
+    if outcome == "refund_pending":
         try:
             await asyncio.to_thread(
                 _send_admin_alert,
-                "ClipIA - compensation de dispatch falhou",
-                f"job_id={job_id} error={error!r}. Verificar estorno persistente manualmente.",
+                "ClipIA - compensation requer reconciliacao",
+                f"job_id={job_id} error={error!r}. Acompanhar outbox/reconciliador; "
+                "nao ajustar saldo manualmente sem confirmar o estado idempotente.",
             )
         except Exception:  # noqa: BLE001
             logger.exception("Falha ao alertar compensation manual job=%s", job_id)
+        try:
+            _redis.hset(
+                f"job:{job_id}",
+                mapping={
+                    "status": "refund_pending",
+                    "error": "Falha ao enfileirar a geracao. Estorno persistente pendente.",
+                    "generation_broker_state": "failed",
+                },
+            )
+        except Exception:  # noqa: BLE001 - DB reconciliation remains authoritative
+            logger.exception("Falha ao publicar refund_pending job=%s", job_id)
+        return outcome
 
     cleanup_job_dir(str(job_id))
-    _release_generation_quota(cap_key, quota_reserved)
+    if outcome == "refunded":
+        # Only the request that won the refund CAS owns this non-idempotent
+        # decrement. An already-refunded worker race is cleaned up, but its
+        # quota reservation is left to expire instead of risking a double DECR.
+        _release_generation_quota(cap_key, quota_reserved)
     try:
-        message = (
-            "Falha ao enfileirar a geracao. Credito estornado."
-            if refunded
-            else "Falha ao enfileirar a geracao. Estorno persistente pendente."
-        )
+        message = "Falha ao enfileirar a geracao. Credito estornado."
         _redis.hset(
             f"job:{job_id}",
             mapping={
-                "status": "failed" if refunded else "refund_pending",
+                "status": "failed",
                 "error": message,
                 "generation_broker_state": "failed",
             },
         )
     except Exception:  # noqa: BLE001 - terminal Redis state is best-effort; DB is authoritative
         logger.exception("Falha ao publicar estado Redis compensado job=%s", job_id)
-    return refunded
+    return outcome
+
+
+async def _compensate_rerender_dispatch(
+    db: AsyncSession,
+    *,
+    job_id: uuid.UUID,
+    operation_id: uuid.UUID,
+    dispatch_id: uuid.UUID,
+) -> str:
+    refunded = False
+    for attempt in range(2):
+        try:
+            refunded = await refund_rerender(
+                db,
+                job_id,
+                operation_id,
+                outbox_dispatch_id=dispatch_id,
+            )
+            await db.commit()
+            break
+        except Exception:  # noqa: BLE001 - rollback and one retry before durable reconciliation
+            await db.rollback()
+            if attempt == 1:
+                logger.critical("Refund de rerender falhou job=%s op=%s", job_id, operation_id, exc_info=True)
+    if refunded:
+        return "refunded"
+    outcome = await _classify_dispatch_after_refund_cas(
+        db,
+        job_id=job_id,
+        dispatch_id=dispatch_id,
+        kind="rerender",
+        operation_id=operation_id,
+    )
+    if outcome == "accepted_or_completed":
+        logger.warning(
+            "Compensation de rerender ignorada: dispatch aceito job=%s op=%s",
+            job_id,
+            operation_id,
+        )
+        return outcome
+    if outcome == "refund_pending":
+        try:
+            await asyncio.to_thread(
+                _send_admin_alert,
+                "ClipIA - refund de rerender falhou",
+                f"job_id={job_id} operation_id={operation_id}. Verificar reconciliacao, sem duplicar credito.",
+            )
+        except Exception:  # noqa: BLE001
+            logger.exception("Falha ao alertar refund de rerender job=%s", job_id)
+    return outcome
 
 
 @router.post(
@@ -368,7 +533,8 @@ async def generate(
 
     job_uuid = uuid.uuid4()
     quota_reserved = False
-    legacy_refine_key: str | None = None
+    legacy_projection_id: uuid.UUID | None = None
+    debit_projection_id: uuid.UUID | None = None
 
     async with get_lock(f"generate:{user.id}"):
         _ensure_storage_ready()
@@ -407,23 +573,43 @@ async def generate(
                 raise HTTPException(status_code=503, detail="Nao foi possivel reservar a geracao agora.")
 
         try:
-            locked_user, legacy_refine_key = await _lock_script_refine_balance(db, user.id)
+            locked_user, legacy_projection_id = await _lock_script_refine_balance(db, user.id)
             if not locked_user.email_verified:
                 raise HTTPException(status_code=403, detail=ErrorMessages.EMAIL_NOT_VERIFIED)
 
             refine_pending = float(locked_user.script_refine_pending or 0.0)
             refine_extra = int(refine_pending)
             credit_cost = base_credit_cost + refine_extra
-            debit = await db.execute(
-                update(User)
-                .where(User.id == user.id, User.email_verified.is_(True), User.credits >= credit_cost)
-                .values(
-                    credits=User.credits - credit_cost,
+            debit_values = {"credits": User.credits - credit_cost}
+            if refine_extra > 0:
+                debit_values.update(
                     script_refine_pending=User.script_refine_pending - refine_extra,
+                    script_refine_version=User.script_refine_version + 1,
                 )
-            )
-            if debit.rowcount == 0:
-                raise HTTPException(status_code=402, detail=ErrorMessages.INSUFFICIENT_CREDITS)
+                debit = await db.execute(
+                    update(User)
+                    .where(User.id == user.id, User.email_verified.is_(True), User.credits >= credit_cost)
+                    .values(**debit_values)
+                    .returning(User.script_refine_pending, User.script_refine_version)
+                )
+                debit_row = debit.one_or_none()
+                if debit_row is None:
+                    raise HTTPException(status_code=402, detail=ErrorMessages.INSUFFICIENT_CREDITS)
+                projection = await queue_refine_balance_projection(
+                    db,
+                    user_id=user.id,
+                    version=int(debit_row.script_refine_version),
+                    balance_after=float(debit_row.script_refine_pending),
+                )
+                debit_projection_id = projection.id
+            else:
+                debit = await db.execute(
+                    update(User)
+                    .where(User.id == user.id, User.email_verified.is_(True), User.credits >= credit_cost)
+                    .values(**debit_values)
+                )
+                if debit.rowcount == 0:
+                    raise HTTPException(status_code=402, detail=ErrorMessages.INSUFFICIENT_CREDITS)
 
             job = Job(
                 id=job_uuid,
@@ -439,8 +625,30 @@ async def generate(
                 status="queued",
             )
             db.add(job)
+            dispatch = await create_dispatch(
+                db,
+                job_id=job_uuid,
+                operation_id=job_uuid,
+                kind="generation",
+                payload=DispatchPayload(
+                    topic=req.topic,
+                    style=req.style,
+                    duration_target=req.duration_target,
+                    template_id=req.template_id,
+                    voice_provider=req.voice_provider,
+                    voice_config=req.voice_config,
+                    trend_context=req.trend_context,
+                    narration_mode=req.narration_mode,
+                    sfx_enabled=req.sfx_enabled,
+                    music_enabled=req.music_enabled,
+                    custom_script=req.custom_script is not None,
+                ),
+                debited_credits=credit_cost,
+                refine_debited=float(refine_extra),
+                pending_credits_snapshot=0.0,
+            )
+            dispatch_id = dispatch.id
             await db.commit()
-            _clear_legacy_refine_balance(legacy_refine_key)
         except HTTPException:
             await db.rollback()
             _release_generation_quota(cap_key, quota_reserved)
@@ -452,6 +660,9 @@ async def generate(
             cleanup_job_dir(str(job_uuid))
             logger.exception("Falha na transacao de geracao job=%s", job_uuid)
             raise HTTPException(status_code=503, detail="Nao foi possivel reservar a geracao agora.") from exc
+
+        for projection_id in (legacy_projection_id, debit_projection_id):
+            await _sync_refine_projection_best_effort(db, projection_id)
 
         record_credit_metric("debit", credit_cost)
         job_id = str(job_uuid)
@@ -476,67 +687,109 @@ async def generate(
             _redis.hset(f"job:{job_id}", mapping=job_meta)
             if req.custom_script is not None:
                 _redis.hset(f"job:{job_id}", mapping={"custom_script": "1"})
-
-            dispatch_pipeline(
-                job_id,
-                req.topic,
-                req.style,
-                req.duration_target,
-                template_id=req.template_id,
-                voice_provider=req.voice_provider,
-                voice_config=req.voice_config,
-                trend_context=req.trend_context,
-                narration_mode=req.narration_mode,
-            )
-        except Exception as exc:  # noqa: BLE001 - broker has not acknowledged the message
-            refunded = await _compensate_generation_dispatch(
+        except Exception as exc:  # noqa: BLE001 - Redis failed before any broker call
+            compensation = await _compensate_generation_dispatch(
                 db,
                 job_id=job_uuid,
                 cap_key=cap_key,
                 quota_reserved=quota_reserved,
                 credit_cost=credit_cost,
                 error=exc,
+                dispatch_id=dispatch_id,
             )
             logger.error("Dispatch compensado job=%s user=%s: %s", job_id, user.id, exc)
+            if compensation == "accepted_or_completed":
+                return {"job_id": job_id, "status": "queued", "credit_cost": credit_cost}
             raise HTTPException(
                 status_code=503,
                 detail=(
                     "Nao foi possivel iniciar a geracao agora. Seu credito foi estornado, tente novamente em instantes."
-                    if refunded
+                    if compensation in {"refunded", "already_refunded"}
                     else "Nao foi possivel iniciar a geracao agora. O estorno ficou pendente para reconciliacao."
                 ),
             )
 
-        try:
-            _redis.hset(
-                f"job:{job_id}",
-                mapping={
-                    "generation_broker_accepted_at": datetime.now(timezone.utc).isoformat(),
-                    "generation_broker_state": "accepted",
-                },
+        def _publish_generation(_dispatch, *, task_id: str) -> None:
+            payload = _dispatch.payload
+            dispatch_pipeline(
+                job_id,
+                payload["topic"],
+                payload["style"],
+                payload["duration_target"],
+                template_id=payload.get("template_id") or "stock_narration",
+                voice_provider=payload.get("voice_provider") or "edge",
+                voice_config=payload.get("voice_config"),
+                trend_context=payload.get("trend_context"),
+                narration_mode=payload.get("narration_mode") or "single",
+                sfx_enabled=payload.get("sfx_enabled"),
+                music_enabled=payload.get("music_enabled"),
+                custom_script=bool(payload.get("custom_script")),
+                dispatch_id=str(dispatch_id),
+                task_id=task_id,
             )
-        except Exception:  # noqa: BLE001 - broker already accepted; DB marker is the next durable proof
-            logger.critical("Falha ao registrar evidencia Redis de broker aceito job=%s", job_id, exc_info=True)
 
         try:
-            await mark_generation_dispatched(db, job_uuid)
-            await db.commit()
-        except Exception as exc:  # noqa: BLE001 - accepted work must never be refunded
+            publish_outcome = await publish_dispatch(db, dispatch_id, send=_publish_generation)
+        except Exception:  # noqa: BLE001 - durable pending outbox is reconciled with the same operation claim
             await db.rollback()
-            logger.critical(
-                "Broker aceitou geracao mas marker falhou job=%s user=%s; worker deve autocurar",
-                job_id,
-                user.id,
-                exc_info=True,
+            publish_outcome = "pending"
+            logger.critical("Falha apos preparar outbox de geracao job=%s", job_id, exc_info=True)
+
+        if publish_outcome == "send_failed":
+            compensation = await _compensate_generation_dispatch(
+                db,
+                job_id=job_uuid,
+                cap_key=cap_key,
+                quota_reserved=quota_reserved,
+                credit_cost=credit_cost,
+                error=RuntimeError("broker send failed"),
+                dispatch_id=dispatch_id,
             )
+            if compensation == "accepted_or_completed":
+                return {"job_id": job_id, "status": "queued", "credit_cost": credit_cost}
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    "Nao foi possivel iniciar a geracao agora. Seu credito foi estornado, tente novamente em instantes."
+                    if compensation in {"refunded", "already_refunded"}
+                    else "Nao foi possivel iniciar a geracao agora. O estorno ficou pendente para reconciliacao."
+                ),
+            )
+
+        if publish_outcome == "published":
             try:
-                await asyncio.to_thread(
-                    _send_admin_alert,
-                    "ClipIA - marker de dispatch da geracao falhou",
-                    f"job_id={job_id} user_id={user.id} error={exc!r}. Broker aceitou; nao estornar.",
+                _redis.hset(
+                    f"job:{job_id}",
+                    mapping={
+                        "generation_broker_accepted_at": datetime.now(timezone.utc).isoformat(),
+                        "generation_broker_state": "accepted",
+                    },
                 )
-            except Exception:  # noqa: BLE001
-                logger.exception("Falha ao enviar alerta de marker job=%s", job_id)
+            except Exception:  # noqa: BLE001 - the SQL outbox is the durable broker evidence
+                logger.critical("Falha ao espelhar aceite do broker no Redis job=%s", job_id, exc_info=True)
+        else:
+            logger.warning("Geracao aguardando replay do outbox job=%s outcome=%s", job_id, publish_outcome)
+
+        if publish_outcome in {"published", "claimed"}:
+            try:
+                await mark_generation_dispatched(db, job_uuid)
+                await db.commit()
+            except Exception as exc:  # noqa: BLE001 - accepted work must never be refunded
+                await db.rollback()
+                logger.critical(
+                    "Broker aceitou geracao mas marker falhou job=%s user=%s; worker deve autocurar",
+                    job_id,
+                    user.id,
+                    exc_info=True,
+                )
+                try:
+                    await asyncio.to_thread(
+                        _send_admin_alert,
+                        "ClipIA - marker de dispatch da geracao falhou",
+                        f"job_id={job_id} user_id={user.id} error={exc!r}. Broker aceitou; nao estornar.",
+                    )
+                except Exception:  # noqa: BLE001
+                    logger.exception("Falha ao enviar alerta de marker job=%s", job_id)
 
         if is_ai_video:
             logger.warning(
@@ -581,10 +834,11 @@ async def script_preview(
     para gerar o video deste template + cap horario."""
     cost_provider = "elevenlabs" if req.narration_mode == "dialogue" else req.voice_provider
     template_cost = get_generation_credit_cost(req.template_id, cost_provider)
-    locked_user, legacy_refine_key = await _lock_script_refine_balance(db, user.id)
+    locked_user, legacy_projection_id = await _lock_script_refine_balance(db, user.id)
+    available_credits = int(locked_user.credits)
     await db.commit()
-    _clear_legacy_refine_balance(legacy_refine_key)
-    if locked_user.credits < template_cost:
+    await _sync_refine_projection_best_effort(db, legacy_projection_id)
+    if available_credits < template_cost:
         raise HTTPException(status_code=402, detail=ErrorMessages.INSUFFICIENT_CREDITS)
     _script_preview_rate_limit(user.id)
 
@@ -623,9 +877,9 @@ async def script_preview_refine(
 ):
     """Refino = 0,5 credito acumulado no PostgreSQL e liquidado no proximo
     /generate (parte inteira; o resto carrega). Nunca um campo de custo do cliente."""
-    _, legacy_refine_key = await _lock_script_refine_balance(db, user.id)
+    _, legacy_projection_id = await _lock_script_refine_balance(db, user.id)
     await db.commit()
-    _clear_legacy_refine_balance(legacy_refine_key)
+    await _sync_refine_projection_best_effort(db, legacy_projection_id)
     _script_preview_rate_limit(user.id)
 
     from app.services.scriptwriter import refine_script
@@ -640,14 +894,10 @@ async def script_preview_refine(
 
     # Debita os 0,5 SOMENTE com refino entregue. O incremento SQL aritmetico
     # serializa com a reserva da geracao e preserva refinamentos concorrentes.
-    pending_result = await db.execute(
-        update(User)
-        .where(User.id == user.id)
-        .values(script_refine_pending=User.script_refine_pending + 0.5)
-        .returning(User.script_refine_pending)
-    )
-    pending = float(pending_result.scalar_one())
+    projection = await adjust_refine_balance(db, user.id, 0.5)
+    pending = float(projection.balance_after)
     await db.commit()
+    await _sync_refine_projection_best_effort(db, projection.id)
     return {"script": refined, "refine_cost": 0.5, "refine_pending": pending}
 
 
@@ -1441,7 +1691,8 @@ async def render_video(
         raise HTTPException(status_code=409, detail="Only a delivered job can be rendered")
     if job.rerender_state in {"debited", "dispatched", "running"}:
         raise HTTPException(status_code=409, detail="A rerender is already active")
-    job_id = str(job.id)
+    job_uuid = job.id
+    job_id = str(job_uuid)
     job_dir = Path(settings.STORAGE_DIR) / "jobs" / job_id
     if not job_dir.exists():
         raise not_found_error()
@@ -1451,10 +1702,21 @@ async def render_video(
         try:
             operation = await begin_rerender(
                 db,
-                job.id,
+                job_uuid,
                 user.id,
                 operation_id=operation_id,
             )
+            dispatch = await create_dispatch(
+                db,
+                job_id=job_uuid,
+                operation_id=operation_id,
+                kind="rerender",
+                payload=DispatchPayload(rerender_cost=operation.cost),
+                debited_credits=operation.cost,
+                refine_debited=0.0,
+                pending_credits_snapshot=operation.pending_credits,
+            )
+            dispatch_id = dispatch.id
             await db.commit()
         except InsufficientCredits as exc:
             await db.rollback()
@@ -1483,88 +1745,136 @@ async def render_video(
                     "rerender_broker_state": "attempting",
                 },
             )
-            task_rerender_video.delay(job_id, str(operation_id))
-        except Exception as exc:  # noqa: BLE001 - broker has not acknowledged the operation
-            refunded = False
-            for attempt in range(2):
+        except Exception as exc:  # noqa: BLE001 - Redis failed before any broker call
+            compensation = await _compensate_rerender_dispatch(
+                db,
+                job_id=job_uuid,
+                operation_id=operation_id,
+                dispatch_id=dispatch_id,
+            )
+            if compensation == "accepted_or_completed":
+                return {"status": "rendering", "message": "Re-render iniciado com edicoes atuais."}
+            if compensation in {"refunded", "already_refunded", "refund_pending"}:
                 try:
-                    refunded = await refund_rerender(db, job.id, operation_id)
-                    await db.commit()
-                    break
-                except Exception:  # noqa: BLE001
-                    await db.rollback()
-                    if attempt == 1:
-                        logger.critical("Refund de rerender falhou job=%s op=%s", job_id, operation_id, exc_info=True)
-            try:
-                _update_rerender_terminal(
-                    job_id,
-                    str(operation_id),
-                    status="completed" if refunded else "refund_pending",
-                    error="" if refunded else "Estorno persistente pendente.",
-                    detail=(
-                        "Re-render nao pode ser enfileirado; credito estornado."
-                        if refunded
-                        else "Re-render nao foi enfileirado; estorno pendente para reconciliacao."
-                    ),
-                    broker_state="failed",
-                )
-            except Exception:  # noqa: BLE001 - DB is authoritative
-                logger.exception("Falha ao publicar compensation Redis rerender job=%s", job_id)
-            if not refunded:
-                try:
-                    await asyncio.to_thread(
-                        _send_admin_alert,
-                        "ClipIA - refund de rerender falhou",
-                        f"job_id={job_id} operation_id={operation_id} error={exc!r}.",
+                    _update_rerender_terminal(
+                        job_id,
+                        str(operation_id),
+                        status="completed" if compensation != "refund_pending" else "refund_pending",
+                        error="" if compensation != "refund_pending" else "Estorno persistente pendente.",
+                        detail=(
+                            "Re-render nao pode ser enfileirado; credito estornado."
+                            if compensation != "refund_pending"
+                            else "Re-render nao foi enfileirado; estorno pendente para reconciliacao."
+                        ),
+                        broker_state="failed",
                     )
-                except Exception:  # noqa: BLE001
-                    logger.exception("Falha ao alertar refund de rerender job=%s", job_id)
+                except Exception:  # noqa: BLE001 - DB is authoritative
+                    logger.exception("Falha ao publicar compensation Redis rerender job=%s", job_id)
             logger.error("Dispatch de rerender compensado job=%s op=%s: %s", job_id, operation_id, exc)
             raise HTTPException(
                 status_code=503,
                 detail=(
                     "Nao foi possivel iniciar o re-render agora. Seu credito foi estornado, tente novamente."
-                    if refunded
+                    if compensation in {"refunded", "already_refunded"}
                     else "Nao foi possivel iniciar o re-render agora. O estorno ficou pendente para reconciliacao."
                 ),
             )
 
-        try:
-            _redis.hset(
-                f"job:{job_id}",
-                mapping={
-                    "rerender_broker_accepted_at": datetime.now(timezone.utc).isoformat(),
-                    "rerender_broker_accepted_operation_id": str(operation_id),
-                    "rerender_broker_state": "accepted",
-                },
-            )
-        except Exception:  # noqa: BLE001 - broker already accepted; DB marker is the next durable proof
-            logger.critical(
-                "Falha ao registrar evidencia Redis de broker aceito job=%s op=%s",
-                job_id,
-                operation_id,
-                exc_info=True,
-            )
+        def _publish_rerender(_dispatch, *, task_id: str) -> None:
+            if hasattr(task_rerender_video, "apply_async"):
+                task_rerender_video.apply_async(
+                    args=(job_id, str(operation_id), str(_dispatch.id), task_id),
+                    task_id=task_id,
+                )
+            else:  # compatibility for pre-outbox queued-task adapters during rolling tests
+                task_rerender_video.delay(job_id, str(operation_id))
 
         try:
-            if await mark_rerender_dispatched(db, job.id, operation_id):
-                await db.commit()
-        except Exception as exc:  # noqa: BLE001 - broker accepted; worker claim self-heals marker
+            publish_outcome = await publish_dispatch(db, dispatch_id, send=_publish_rerender)
+        except Exception:  # noqa: BLE001 - durable pending outbox will be replayed
             await db.rollback()
-            logger.critical(
-                "Broker aceitou rerender mas marker falhou job=%s op=%s; worker deve autocurar",
+            publish_outcome = "pending"
+            logger.critical("Falha apos preparar outbox do rerender job=%s op=%s", job_id, operation_id, exc_info=True)
+
+        if publish_outcome == "send_failed":
+            compensation = await _compensate_rerender_dispatch(
+                db,
+                job_id=job_uuid,
+                operation_id=operation_id,
+                dispatch_id=dispatch_id,
+            )
+            if compensation == "accepted_or_completed":
+                return {"status": "rendering", "message": "Re-render iniciado com edicoes atuais."}
+            if compensation in {"refunded", "already_refunded", "refund_pending"}:
+                try:
+                    _update_rerender_terminal(
+                        job_id,
+                        str(operation_id),
+                        status="completed" if compensation != "refund_pending" else "refund_pending",
+                        error="" if compensation != "refund_pending" else "Estorno persistente pendente.",
+                        detail=(
+                            "Re-render nao pode ser enfileirado; credito estornado."
+                            if compensation != "refund_pending"
+                            else "Re-render nao foi enfileirado; estorno pendente para reconciliacao."
+                        ),
+                        broker_state="failed",
+                    )
+                except Exception:  # noqa: BLE001 - DB remains authoritative
+                    logger.exception("Falha ao publicar compensation Redis rerender job=%s", job_id)
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    "Nao foi possivel iniciar o re-render agora. Seu credito foi estornado, tente novamente."
+                    if compensation in {"refunded", "already_refunded"}
+                    else "Nao foi possivel iniciar o re-render agora. O estorno ficou pendente para reconciliacao."
+                ),
+            )
+
+        if publish_outcome == "published":
+            try:
+                _redis.hset(
+                    f"job:{job_id}",
+                    mapping={
+                        "rerender_broker_accepted_at": datetime.now(timezone.utc).isoformat(),
+                        "rerender_broker_accepted_operation_id": str(operation_id),
+                        "rerender_broker_state": "accepted",
+                    },
+                )
+            except Exception:  # noqa: BLE001 - SQL outbox is authoritative
+                logger.critical(
+                    "Falha ao espelhar aceite Redis job=%s op=%s",
+                    job_id,
+                    operation_id,
+                    exc_info=True,
+                )
+        else:
+            logger.warning(
+                "Rerender aguardando replay do outbox job=%s op=%s outcome=%s",
                 job_id,
                 operation_id,
-                exc_info=True,
+                publish_outcome,
             )
+
+        if publish_outcome in {"published", "claimed"}:
             try:
-                await asyncio.to_thread(
-                    _send_admin_alert,
-                    "ClipIA - marker de dispatch do rerender falhou",
-                    f"job_id={job_id} operation_id={operation_id} error={exc!r}. Nao estornar.",
+                if await mark_rerender_dispatched(db, job_uuid, operation_id):
+                    await db.commit()
+            except Exception as exc:  # noqa: BLE001 - broker accepted; worker claim self-heals marker
+                await db.rollback()
+                logger.critical(
+                    "Broker aceitou rerender mas marker falhou job=%s op=%s; worker deve autocurar",
+                    job_id,
+                    operation_id,
+                    exc_info=True,
                 )
-            except Exception:  # noqa: BLE001
-                logger.exception("Falha ao enviar alerta de marker do rerender job=%s", job_id)
+                try:
+                    await asyncio.to_thread(
+                        _send_admin_alert,
+                        "ClipIA - marker de dispatch do rerender falhou",
+                        f"job_id={job_id} operation_id={operation_id} error={exc!r}. Nao estornar.",
+                    )
+                except Exception:  # noqa: BLE001
+                    logger.exception("Falha ao enviar alerta de marker do rerender job=%s", job_id)
 
     return {
         "status": "rendering",

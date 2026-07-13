@@ -11,7 +11,7 @@ from datetime import datetime, timedelta, timezone
 from email.mime.text import MIMEText
 from pathlib import Path
 
-from celery.exceptions import SoftTimeLimitExceeded
+from celery.exceptions import Ignore, SoftTimeLimitExceeded
 
 from app.auth.email import send_video_ready_email
 from app.config import settings
@@ -132,6 +132,40 @@ def _update_job(
     if step and not _redis_hget(key, f"t:{step}"):
         data[f"t:{step}"] = now_iso
     _redis.hset(key, mapping=data)
+    _persist_dispatch_worker_heartbeat(job_id, status)
+
+
+def _persist_dispatch_worker_heartbeat(job_id: str, status: str) -> None:
+    """Best-effort SQL heartbeat for claimed work, independent of Redis retention."""
+    try:
+        parsed_job_id = uuid.UUID(job_id)
+    except (TypeError, ValueError):
+        return
+    kind = "rerender" if status == "rendering" else "generation"
+
+    async def _persist() -> None:
+        from sqlalchemy import update
+
+        from app.db.engine import worker_session as async_session
+        from app.db.models import JobDispatch
+
+        async with async_session() as session:
+            await session.execute(
+                update(JobDispatch)
+                .where(
+                    JobDispatch.job_id == parsed_job_id,
+                    JobDispatch.kind == kind,
+                    JobDispatch.state == "claimed",
+                    JobDispatch.claimed_at.is_not(None),
+                )
+                .values(worker_heartbeat_at=datetime.now(timezone.utc))
+            )
+            await session.commit()
+
+    try:
+        asyncio.run(_persist())
+    except Exception:  # noqa: BLE001 - Redis heartbeat remains the compatibility fallback
+        logger.exception("Falha ao persistir heartbeat do outbox job=%s kind=%s", job_id, kind)
 
 
 def _update_rerender_terminal(
@@ -313,8 +347,9 @@ def _refund_job_credit(job_id: str, status_value: str, error: str, cleanup_files
         # Sem isto a falha era 100% silenciosa: o job ja esta "failed" no Redis, o
         # watchdog pula jobs nao-ativos e o refund nunca seria re-tentado.
         _send_admin_alert(
-            "ClipIA - refund FALHOU",
-            f"Job {job_id}: credito da geracao nao foi devolvido ({e}). Reembolsar manualmente.",
+            "ClipIA - refund requer reconciliacao",
+            f"Job {job_id}: refund da geracao falhou ({e}). Investigar job/outbox; "
+            "nao ajustar saldo manualmente sem confirmar o estado idempotente.",
         )
         return False
 
@@ -375,18 +410,26 @@ def _refund_rerender_cost(job_id: str) -> bool:
         # devolve o marcador p/ revisao manual nao perder o valor devido
         _redis.hset(f"job:{job_id}", mapping={"rerender_cost": cost})
         _send_admin_alert(
-            "ClipIA - refund de re-render FALHOU",
-            f"Job {job_id}: {cost} credito(s) do export nao foram devolvidos ({e}). Reembolsar manualmente.",
+            "ClipIA - refund de re-render requer reconciliacao",
+            f"Job {job_id}: refund de {cost} credito(s) falhou ({e}). Reconciliar o marcador; "
+            "nao ajustar saldo manualmente sem confirmar o estado idempotente.",
         )
         return False
 
 
-def _claim_rerender_operation(job_id: str, operation_id: str | None) -> bool:
+def _claim_rerender_operation(
+    job_id: str,
+    operation_id: str | None,
+    dispatch_id: str | None = None,
+    task_id: str | None = None,
+) -> bool:
     from app.db.engine import worker_session as async_session
+    from app.services.dispatch_outbox import claim_rerender_dispatch
     from app.services.job_operations import claim_legacy_rerender, claim_rerender
 
     try:
         parsed_operation_id = uuid.UUID(operation_id) if operation_id is not None else None
+        parsed_dispatch_id = uuid.UUID(dispatch_id) if dispatch_id is not None else None
     except (TypeError, ValueError):
         return False
 
@@ -394,6 +437,14 @@ def _claim_rerender_operation(job_id: str, operation_id: str | None) -> bool:
         async with async_session() as session:
             if parsed_operation_id is None:
                 claimed = await claim_legacy_rerender(session, job_id)
+            elif parsed_dispatch_id is not None and task_id is not None:
+                claimed = await claim_rerender_dispatch(
+                    session,
+                    job_id,
+                    parsed_operation_id,
+                    parsed_dispatch_id,
+                    task_id=task_id,
+                )
             else:
                 claimed = await claim_rerender(session, job_id, parsed_operation_id)
             if claimed:
@@ -403,14 +454,32 @@ def _claim_rerender_operation(job_id: str, operation_id: str | None) -> bool:
     return asyncio.run(_claim())
 
 
-def _mark_generation_worker_started(job_id: str) -> bool:
+def _mark_generation_worker_started(
+    job_id: str,
+    dispatch_id: str | None = None,
+    task_id: str | None = None,
+) -> bool:
     """Backfill the dispatch marker once the broker message is demonstrably executing."""
     from app.db.engine import worker_session as async_session
+    from app.services.dispatch_outbox import claim_generation_dispatch
     from app.services.job_operations import claim_generation_worker_start
+
+    try:
+        parsed_dispatch_id = uuid.UUID(dispatch_id) if dispatch_id is not None else None
+    except (TypeError, ValueError):
+        return False
 
     async def _mark() -> bool:
         async with async_session() as session:
-            allowed = await claim_generation_worker_start(session, job_id)
+            if parsed_dispatch_id is not None and task_id is not None:
+                allowed = await claim_generation_dispatch(
+                    session,
+                    job_id,
+                    parsed_dispatch_id,
+                    task_id=task_id,
+                )
+            else:
+                allowed = await claim_generation_worker_start(session, job_id)
             if allowed:
                 await session.commit()
             return allowed
@@ -425,13 +494,13 @@ def _mark_generation_worker_started(job_id: str) -> bool:
         # that is a marker-write failure, not proof that the accepted broker
         # message was refunded. Continue and let reconciliation backfill it.
         logger.warning("Self-heal sync adiado dentro de event loop ativo job=%s", job_id)
-        return True
+        return parsed_dispatch_id is None
 
     try:
         return asyncio.run(_mark())
     except Exception:  # noqa: BLE001 - accepted work must continue; reconciler is the fallback
         logger.critical("Falha ao autocurar generation_dispatched_at job=%s", job_id, exc_info=True)
-        return True
+        return parsed_dispatch_id is None
 
 
 def _publish_rerender_operation(
@@ -477,7 +546,7 @@ def _publish_rerender_operation(
             )
             telemetry["rerenders"] = rerenders
             job.telemetry = telemetry
-            if not complete_locked_rerender(job, parsed_operation_id):
+            if not await complete_locked_rerender(session, job, parsed_operation_id):
                 return None
 
             video_published = False
@@ -562,8 +631,9 @@ def _refund_rerender_operation(job_id: str, operation_id: str | None) -> bool:
     except Exception as exc:  # noqa: BLE001
         logger.error("Failed to refund rerender operation for job %s: %s", job_id, exc)
         _send_admin_alert(
-            "ClipIA - refund de re-render FALHOU",
-            f"Job {job_id}, operacao {operation_id}: refund DB falhou ({exc}). Reembolsar manualmente.",
+            "ClipIA - refund de re-render requer reconciliacao",
+            f"Job {job_id}, operacao {operation_id}: refund DB falhou ({exc}). Investigar outbox/operacao; "
+            "nao ajustar saldo manualmente sem confirmar o estado idempotente.",
         )
         return False
 
@@ -731,6 +801,11 @@ def dispatch_pipeline(
     voice_config: dict | None = None,
     trend_context: str | None = None,
     narration_mode: str = "single",
+    sfx_enabled: bool | None = None,
+    music_enabled: bool | None = None,
+    custom_script: bool = False,
+    dispatch_id: str | None = None,
+    task_id: str | None = None,
 ):
     from celery import chain
 
@@ -751,9 +826,30 @@ def dispatch_pipeline(
     # Store voice config in Redis for the worker to pick up
     if voice_config:
         _redis.hset(f"job:{job_id}", mapping={"voice_config": json.dumps(voice_config)})
+    flags: dict[str, str] = {}
+    if sfx_enabled is not None:
+        flags["sfx_enabled"] = "1" if sfx_enabled else "0"
+    if music_enabled is not None:
+        flags["music_enabled"] = "1" if music_enabled else "0"
+    if custom_script:
+        flags["custom_script"] = "1"
+    if flags:
+        _redis.hset(f"job:{job_id}", mapping=flags)
 
+    first_task = task_generate_script.s(
+        job_id,
+        topic,
+        style,
+        duration_target,
+        template_id,
+        trend_context,
+        dispatch_id,
+        task_id,
+    )
+    if task_id is not None:
+        first_task = first_task.set(task_id=task_id)
     pipeline = chain(
-        task_generate_script.s(job_id, topic, style, duration_target, template_id, trend_context),
+        first_task,
         task_generate_images.s(job_id, template_id),
         task_generate_videos.s(job_id, template_id),
         task_synthesize_audio.s(job_id, template_id),
@@ -763,6 +859,55 @@ def dispatch_pipeline(
         task_finalize.s(job_id),
     )
     pipeline.apply_async()
+
+
+def _send_job_dispatch_message(dispatch, *, task_id: str) -> None:
+    """Publish one outbox row using only its frozen payload and identifiers."""
+    payload = dict(dispatch.payload or {})
+    job_id = str(dispatch.job_id)
+    if dispatch.kind == "generation":
+        topic = payload.get("topic")
+        style = payload.get("style")
+        duration_target = payload.get("duration_target")
+        if not isinstance(topic, str) or not isinstance(style, str) or not isinstance(duration_target, int):
+            raise ValueError("invalid frozen generation dispatch payload")
+        dispatch_pipeline(
+            job_id,
+            topic,
+            style,
+            duration_target,
+            template_id=payload.get("template_id") or "stock_narration",
+            voice_provider=payload.get("voice_provider") or "edge",
+            voice_config=payload.get("voice_config"),
+            trend_context=payload.get("trend_context"),
+            narration_mode=payload.get("narration_mode") or "single",
+            sfx_enabled=payload.get("sfx_enabled"),
+            music_enabled=payload.get("music_enabled"),
+            custom_script=bool(payload.get("custom_script")),
+            dispatch_id=str(dispatch.id),
+            task_id=task_id,
+        )
+        return
+    if dispatch.kind == "rerender":
+        _redis.delete(f"job:{job_id}:cancelled")
+        _redis.hset(
+            f"job:{job_id}",
+            mapping={
+                "status": "rendering",
+                "progress": "0",
+                "current_step": "queued",
+                "detail": "Re-render enfileirado...",
+                "rerender_cost": str(dispatch.debited_credits),
+                "rerender_operation_id": str(dispatch.operation_id),
+                "rerender_broker_state": "attempting",
+            },
+        )
+        task_rerender_video.apply_async(
+            args=(job_id, str(dispatch.operation_id), str(dispatch.id), task_id),
+            task_id=task_id,
+        )
+        return
+    raise ValueError(f"unsupported dispatch kind: {dispatch.kind}")
 
 
 async def _cleanup_old_jobs_async() -> dict[str, int]:
@@ -908,12 +1053,47 @@ def _redis_has_ambiguous_dispatch_attempt(data: dict[str, str], *, operation_id:
     return data.get("rerender_broker_state") == "attempting" and data.get("rerender_operation_id") == str(operation_id)
 
 
+def _has_live_post_claim_worker_heartbeat(data: dict[str, str], dispatch, *, now: datetime) -> bool:
+    """Accept a recent Redis or SQL heartbeat newer than this exact claim."""
+    stale_cutoff = now - timedelta(minutes=35)
+    durable_heartbeat = dispatch.worker_heartbeat_at
+    claimed_at = dispatch.claimed_at
+    if durable_heartbeat is not None and claimed_at is not None:
+        if durable_heartbeat.tzinfo is None:
+            durable_heartbeat = durable_heartbeat.replace(tzinfo=timezone.utc)
+        if claimed_at.tzinfo is None:
+            claimed_at = claimed_at.replace(tzinfo=timezone.utc)
+        if durable_heartbeat >= claimed_at and durable_heartbeat >= stale_cutoff:
+            return True
+
+    heartbeat = data.get("updated_at")
+    if not heartbeat or claimed_at is None:
+        return False
+    try:
+        heartbeat_at = datetime.fromisoformat(heartbeat)
+    except (TypeError, ValueError):
+        return False
+    if heartbeat_at.tzinfo is None:
+        heartbeat_at = heartbeat_at.replace(tzinfo=timezone.utc)
+    if claimed_at.tzinfo is None:
+        claimed_at = claimed_at.replace(tzinfo=timezone.utc)
+    if heartbeat_at < claimed_at or heartbeat_at < stale_cutoff:
+        return False
+    if dispatch.kind == "generation":
+        return not data.get("rerender_operation_id") and data.get("status") in {"processing", "completed"}
+    return data.get("rerender_operation_id") == str(dispatch.operation_id) and data.get("status") in {
+        "rendering",
+        "completed",
+    }
+
+
 async def _reconcile_undispatched_job_operations_async() -> dict[str, int]:
-    """Close old DB/broker ambiguity using worker Redis evidence or a one-shot refund."""
-    from sqlalchemy import select
+    """Replay durable outbox rows, then close legacy pre-outbox operations."""
+    from sqlalchemy import or_, select
 
     from app.db.engine import worker_session as async_session
-    from app.db.models import Job
+    from app.db.models import Job, JobDispatch
+    from app.services.dispatch_outbox import publish_dispatch
     from app.services.job_operations import (
         mark_generation_dispatched,
         mark_rerender_dispatched,
@@ -930,9 +1110,178 @@ async def _reconcile_undispatched_job_operations_async() -> dict[str, int]:
         "rerender_ambiguous": 0,
         "cancel_flags_removed": 0,
         "cancel_flags_ttl_applied": 0,
+        "dispatch_generation_published": 0,
+        "dispatch_generation_refunded": 0,
+        "dispatch_rerender_published": 0,
+        "dispatch_rerender_refunded": 0,
     }
-    cutoff = datetime.now(timezone.utc) - timedelta(hours=ORPHAN_QUEUED_CUTOFF_HOURS)
+    now = datetime.now(timezone.utc)
+    cutoff = now - timedelta(hours=ORPHAN_QUEUED_CUTOFF_HOURS)
+    retry_cutoff = now - timedelta(minutes=5)
     async with async_session() as session:
+        dispatch_result = await session.execute(
+            select(JobDispatch).where(
+                JobDispatch.state.in_({"pending", "published"}),
+                JobDispatch.claimed_at.is_(None),
+                or_(
+                    JobDispatch.last_error.like("send_failed:%"),
+                    JobDispatch.last_attempt_at <= retry_cutoff,
+                    (JobDispatch.last_attempt_at.is_(None) & (JobDispatch.created_at <= retry_cutoff)),
+                ),
+            )
+        )
+        for pending_dispatch in dispatch_result.scalars().all():
+            if (pending_dispatch.last_error or "").startswith("send_failed:"):
+                if pending_dispatch.kind == "generation":
+                    terminalized = await refund_generation(
+                        session,
+                        pending_dispatch.job_id,
+                        status="failed",
+                        error=UNDISPATCHED_OPERATION_ERROR,
+                        outbox_dispatch_id=pending_dispatch.id,
+                    )
+                    if terminalized:
+                        counts["dispatch_generation_refunded"] += 1
+                else:
+                    terminalized = await refund_rerender(
+                        session,
+                        pending_dispatch.job_id,
+                        pending_dispatch.operation_id,
+                        outbox_dispatch_id=pending_dispatch.id,
+                    )
+                    if terminalized:
+                        counts["dispatch_rerender_refunded"] += 1
+                await session.commit()
+                continue
+            dispatch_created_at = pending_dispatch.created_at
+            if dispatch_created_at.tzinfo is None:
+                dispatch_created_at = dispatch_created_at.replace(tzinfo=timezone.utc)
+            if pending_dispatch.attempt_count >= 5 and dispatch_created_at <= cutoff:
+                if pending_dispatch.kind == "generation":
+                    terminalized = await refund_generation(
+                        session,
+                        pending_dispatch.job_id,
+                        status="failed",
+                        error=UNDISPATCHED_OPERATION_ERROR,
+                        outbox_dispatch_id=pending_dispatch.id,
+                    )
+                    if terminalized:
+                        counts["dispatch_generation_refunded"] += 1
+                else:
+                    terminalized = await refund_rerender(
+                        session,
+                        pending_dispatch.job_id,
+                        pending_dispatch.operation_id,
+                        outbox_dispatch_id=pending_dispatch.id,
+                    )
+                    if terminalized:
+                        counts["dispatch_rerender_refunded"] += 1
+                await session.commit()
+                continue
+            outcome = await publish_dispatch(
+                session,
+                pending_dispatch.id,
+                send=_send_job_dispatch_message,
+                allow_republish=pending_dispatch.state == "published",
+            )
+            if outcome == "published":
+                if pending_dispatch.kind == "generation":
+                    if await mark_generation_dispatched(session, pending_dispatch.job_id):
+                        counts["dispatch_generation_published"] += 1
+                else:
+                    if await mark_rerender_dispatched(
+                        session,
+                        pending_dispatch.job_id,
+                        pending_dispatch.operation_id,
+                    ):
+                        counts["dispatch_rerender_published"] += 1
+                await session.commit()
+                continue
+            if outcome not in {"pending", "send_failed"}:
+                continue
+
+            refreshed = await session.get(
+                JobDispatch,
+                pending_dispatch.id,
+                populate_existing=True,
+            )
+            created_at = refreshed.created_at if refreshed is not None else None
+            if created_at is not None and created_at.tzinfo is None:
+                created_at = created_at.replace(tzinfo=timezone.utc)
+            if refreshed is None or refreshed.attempt_count < 5 or created_at is None or created_at > cutoff:
+                continue
+            if refreshed.kind == "generation":
+                if await refund_generation(
+                    session,
+                    refreshed.job_id,
+                    status="failed",
+                    error=UNDISPATCHED_OPERATION_ERROR,
+                    require_undispatched=True,
+                    outbox_dispatch_id=refreshed.id,
+                ):
+                    counts["dispatch_generation_refunded"] += 1
+            elif await refund_rerender(
+                session,
+                refreshed.job_id,
+                refreshed.operation_id,
+                require_undispatched=True,
+                outbox_dispatch_id=refreshed.id,
+            ):
+                counts["dispatch_rerender_refunded"] += 1
+            await session.commit()
+
+        claimed_result = await session.execute(
+            select(JobDispatch).where(
+                JobDispatch.state == "claimed",
+                JobDispatch.claimed_at.is_not(None),
+                JobDispatch.claimed_at <= retry_cutoff,
+            )
+        )
+        for claimed_dispatch in claimed_result.scalars().all():
+            live = _redis.hgetall(f"job:{claimed_dispatch.job_id}")
+            if _has_live_post_claim_worker_heartbeat(live, claimed_dispatch, now=now):
+                continue
+            if claimed_dispatch.kind == "generation":
+                terminalized = await refund_generation(
+                    session,
+                    claimed_dispatch.job_id,
+                    status="failed",
+                    error=UNDISPATCHED_OPERATION_ERROR,
+                    outbox_dispatch_id=claimed_dispatch.id,
+                    allow_claimed_outbox=True,
+                )
+                if terminalized:
+                    counts["dispatch_generation_refunded"] += 1
+            else:
+                terminalized = await refund_rerender(
+                    session,
+                    claimed_dispatch.job_id,
+                    claimed_dispatch.operation_id,
+                    outbox_dispatch_id=claimed_dispatch.id,
+                    allow_claimed_outbox=True,
+                )
+                if terminalized:
+                    counts["dispatch_rerender_refunded"] += 1
+            await session.commit()
+
+        published_result = await session.execute(
+            select(JobDispatch).where(
+                JobDispatch.state.in_({"published", "claimed"}),
+                JobDispatch.published_at.is_not(None),
+            )
+        )
+        for published_dispatch in published_result.scalars().all():
+            if published_dispatch.kind == "generation":
+                if await mark_generation_dispatched(session, published_dispatch.job_id):
+                    counts["generation_backfilled"] += 1
+            elif await mark_rerender_dispatched(
+                session,
+                published_dispatch.job_id,
+                published_dispatch.operation_id,
+            ):
+                counts["rerender_backfilled"] += 1
+        await session.commit()
+
         generation_result = await session.execute(
             select(Job).where(
                 Job.status.in_({"queued", "processing"}),
@@ -942,6 +1291,11 @@ async def _reconcile_undispatched_job_operations_async() -> dict[str, int]:
             )
         )
         for job in generation_result.scalars().all():
+            dispatch_exists = await session.scalar(
+                select(JobDispatch.id).where(JobDispatch.job_id == job.id, JobDispatch.kind == "generation").limit(1)
+            )
+            if dispatch_exists is not None:
+                continue
             live = _redis.hgetall(f"job:{job.id}")
             if _redis_has_dispatch_evidence(
                 live,
@@ -950,9 +1304,6 @@ async def _reconcile_undispatched_job_operations_async() -> dict[str, int]:
             ):
                 if await mark_generation_dispatched(session, job.id):
                     counts["generation_backfilled"] += 1
-            elif _redis_has_ambiguous_dispatch_attempt(live, operation_id=None):
-                counts["generation_ambiguous"] += 1
-                logger.critical("Dispatch de geracao ambiguo job=%s; no-op seguro", job.id)
             elif await refund_generation(
                 session,
                 job.id,
@@ -979,6 +1330,17 @@ async def _reconcile_undispatched_job_operations_async() -> dict[str, int]:
                     f"Job {job.id}: rerender_state=debited sem operation ID; nenhuma cobranca foi inferida.",
                 )
                 continue
+            dispatch_exists = await session.scalar(
+                select(JobDispatch.id)
+                .where(
+                    JobDispatch.job_id == job.id,
+                    JobDispatch.kind == "rerender",
+                    JobDispatch.operation_id == operation_id,
+                )
+                .limit(1)
+            )
+            if dispatch_exists is not None:
+                continue
             live = _redis.hgetall(f"job:{job.id}")
             if _redis_has_dispatch_evidence(
                 live,
@@ -987,9 +1349,6 @@ async def _reconcile_undispatched_job_operations_async() -> dict[str, int]:
             ):
                 if await mark_rerender_dispatched(session, job.id, operation_id):
                     counts["rerender_backfilled"] += 1
-            elif _redis_has_ambiguous_dispatch_attempt(live, operation_id=operation_id):
-                counts["rerender_ambiguous"] += 1
-                logger.critical("Dispatch de rerender ambiguo job=%s op=%s; no-op seguro", job.id, operation_id)
             elif await refund_rerender(session, job.id, operation_id, require_undispatched=True):
                 counts["rerender_refunded"] += 1
 
@@ -1018,6 +1377,137 @@ async def _reconcile_undispatched_job_operations_async() -> dict[str, int]:
 
         await session.commit()
     return counts
+
+
+async def _drain_refine_balance_outbox_async() -> dict[str, int]:
+    """Project every durable SQL refine balance to the ba03321 Redis contract."""
+    from sqlalchemy import func, select
+
+    from app.db.engine import worker_session as async_session
+    from app.db.models import RefineBalanceOutbox, User
+    from app.services.refine_balance import ensure_refine_balance_projection, sync_refine_balance_projection
+
+    projected = 0
+    async with async_session() as session:
+        result = await session.execute(
+            select(RefineBalanceOutbox.id)
+            .join(User, User.id == RefineBalanceOutbox.user_id)
+            .where(
+                RefineBalanceOutbox.applied_at.is_(None),
+                User.script_refine_redis_migrated.is_(True),
+            )
+            .order_by(RefineBalanceOutbox.user_id, RefineBalanceOutbox.version)
+        )
+        projection_ids = list(result.scalars().all())
+        for projection_id in projection_ids:
+            if await sync_refine_balance_projection(session, projection_id, _redis):
+                projected += 1
+        mismatches = 0
+        users_result = await session.execute(
+            select(User.id, User.script_refine_version, User.script_refine_pending).where(
+                User.script_refine_redis_migrated.is_(True)
+            )
+        )
+        for user_id, version, balance_after in users_result.all():
+            try:
+                if ensure_refine_balance_projection(
+                    _redis,
+                    user_id=user_id,
+                    version=int(version or 0),
+                    balance_after=float(balance_after or 0.0),
+                ):
+                    projected += 1
+            except Exception:  # noqa: BLE001 - a mismatch must block rollback, not stop the audit
+                mismatches += 1
+                logger.exception("Projecao legacy de refino divergente user=%s", user_id)
+        pending_rows = int(
+            await session.scalar(
+                select(func.count())
+                .select_from(RefineBalanceOutbox)
+                .join(User, User.id == RefineBalanceOutbox.user_id)
+                .where(
+                    RefineBalanceOutbox.applied_at.is_(None),
+                    User.script_refine_redis_migrated.is_(True),
+                )
+            )
+            or 0
+        )
+        remaining = pending_rows + mismatches
+    return {"projected": projected, "remaining": remaining}
+
+
+async def _prepare_refine_balance_rollback_async() -> dict[str, int]:
+    """Verify Redis and atomically hand authority to the ba03321 binary."""
+    from sqlalchemy import func, or_, select
+
+    from app.db.engine import worker_session as async_session
+    from app.db.models import RefineBalanceOutbox, User
+    from app.services.refine_balance import ensure_refine_balance_projection
+
+    drained = await _drain_refine_balance_outbox_async()
+    result = {**drained, "handed_off": 0}
+    if drained["remaining"]:
+        return result
+
+    async with async_session() as session:
+        users_result = await session.execute(
+            select(User)
+            .where(
+                or_(
+                    User.script_refine_redis_migrated.is_(True),
+                    func.abs(User.script_refine_pending) > 0.000001,
+                )
+            )
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+        authority_users = list(users_result.scalars().all())
+        inconsistent_users = [
+            user
+            for user in authority_users
+            if not user.script_refine_redis_migrated and abs(float(user.script_refine_pending or 0.0)) > 0.000001
+        ]
+        if inconsistent_users:
+            await session.rollback()
+            result["remaining"] = len(inconsistent_users)
+            return result
+        users = [user for user in authority_users if user.script_refine_redis_migrated]
+        pending_rows = int(
+            await session.scalar(
+                select(func.count())
+                .select_from(RefineBalanceOutbox)
+                .join(User, User.id == RefineBalanceOutbox.user_id)
+                .where(
+                    RefineBalanceOutbox.applied_at.is_(None),
+                    User.script_refine_redis_migrated.is_(True),
+                )
+            )
+            or 0
+        )
+        mismatches = 0
+        for user in users:
+            try:
+                if ensure_refine_balance_projection(
+                    _redis,
+                    user_id=user.id,
+                    version=int(user.script_refine_version or 0),
+                    balance_after=float(user.script_refine_pending or 0.0),
+                ):
+                    result["projected"] += 1
+            except Exception:  # noqa: BLE001 - any mismatch blocks the authority switch
+                mismatches += 1
+                logger.exception("Handoff legacy de refino divergente user=%s", user.id)
+        if pending_rows or mismatches:
+            await session.rollback()
+            result["remaining"] = pending_rows + mismatches
+            return result
+
+        for user in users:
+            user.script_refine_pending = 0.0
+            user.script_refine_redis_migrated = False
+        await session.commit()
+        result["handed_off"] = len(users)
+    return result
 
 
 async def _find_orphan_queued_jobs_async() -> list[str]:
@@ -1213,6 +1703,11 @@ def reconcile_undispatched_job_operations() -> dict[str, int]:
     return asyncio.run(_reconcile_undispatched_job_operations_async())
 
 
+@celery_app.task(name="drain_refine_balance_outbox")
+def drain_refine_balance_outbox() -> dict[str, int]:
+    return asyncio.run(_drain_refine_balance_outbox_async())
+
+
 @celery_app.task(name="cleanup_orphan_files")
 def cleanup_orphan_files() -> dict[str, int]:
     return asyncio.run(_cleanup_orphan_files_async())
@@ -1227,9 +1722,15 @@ def task_generate_script(
     duration_target: int,
     template_id: str = "stock_narration",
     trend_context: str | None = None,
+    dispatch_id: str | None = None,
+    broker_task_id: str | None = None,
 ) -> dict:
-    if not _mark_generation_worker_started(job_id):
-        return {"cancelled": True}
+    effective_task_id = broker_task_id or getattr(getattr(self, "request", None), "id", None)
+    if dispatch_id is None:
+        if not _mark_generation_worker_started(job_id):
+            return {"cancelled": True}
+    elif not _mark_generation_worker_started(job_id, dispatch_id, effective_task_id):
+        raise Ignore()
     try:
         if _check_cancelled(job_id):
             return {"cancelled": True}
@@ -1823,16 +2324,26 @@ def task_finalize(self, video_path: str, job_id: str) -> str:
 
 
 @celery_app.task(name="rerender_video", bind=True, soft_time_limit=300, time_limit=360)
-def task_rerender_video(self, job_id: str, operation_id: str | None = None) -> str:
+def task_rerender_video(
+    self,
+    job_id: str,
+    operation_id: str | None = None,
+    dispatch_id: str | None = None,
+    broker_task_id: str | None = None,
+) -> str:
     """Re-render the edited video for export.
 
     Hybrid engine: Remotion (fiel ao preview) by default, FFmpeg+NVENC as fallback
     via settings.RENDER_ENGINE. Runs in background — user never waits.
     """
     operation_output_path: str | None = None
-    try:
+    effective_task_id = broker_task_id or getattr(getattr(self, "request", None), "id", None)
+    if dispatch_id is None:
         if not _claim_rerender_operation(job_id, operation_id):
             return ""
+    elif not _claim_rerender_operation(job_id, operation_id, dispatch_id, effective_task_id):
+        raise Ignore()
+    try:
         rerender_t0 = time.monotonic()
         _update_job(job_id, "rendering", "preparing", 0.05, detail="Preparando arquivos para re-render...")
         job_dir = get_job_dir(job_id)

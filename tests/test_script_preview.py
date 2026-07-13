@@ -198,7 +198,9 @@ async def test_generate_imports_legacy_half_refine_once_without_losing_sql_incre
     fresh = await db_session.get(User, verified_user.id)
     assert fresh.script_refine_pending == 0.0
     assert fresh.script_refine_redis_migrated is True
-    assert app.state.fake_redis.get(legacy_key) == "0.5"
+    # O leitor ba03321 precisa ver a projecao atual (0), nao o snapshot legado
+    # importado (0,5), mesmo quando a antiga rotina de delete esta indisponivel.
+    assert app.state.fake_redis.get(legacy_key) == "0.00"
 
 
 @pytest.mark.asyncio

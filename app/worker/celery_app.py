@@ -31,6 +31,10 @@ celery_app.conf.update(
             "task": "reconcile_undispatched_job_operations",
             "schedule": timedelta(minutes=10),
         },
+        "drain-refine-balance-outbox": {
+            "task": "drain_refine_balance_outbox",
+            "schedule": timedelta(minutes=10),
+        },
     },
 )
 

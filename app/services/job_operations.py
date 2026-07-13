@@ -8,7 +8,8 @@ from math import ceil
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models import Job, User
+from app.db.models import Job, JobDispatch, User
+from app.services.refine_balance import adjust_refine_balance
 
 
 class InvalidJobOperation(ValueError):
@@ -24,6 +25,47 @@ class RerenderOperation:
     operation_id: uuid.UUID
     cost: int
     pending_credits: float
+
+
+async def _lock_operation_dispatch(
+    session: AsyncSession,
+    *,
+    job_id: uuid.UUID,
+    operation_id: uuid.UUID,
+    kind: str,
+    dispatch_id: uuid.UUID | None,
+) -> JobDispatch | None:
+    """Resolve the immutable financial authority after the Job row is locked."""
+    statement = select(JobDispatch).where(
+        JobDispatch.job_id == job_id,
+        JobDispatch.operation_id == operation_id,
+        JobDispatch.kind == kind,
+    )
+    if dispatch_id is not None:
+        statement = statement.where(JobDispatch.id == dispatch_id)
+    result = await session.execute(statement.with_for_update().execution_options(populate_existing=True))
+    return result.scalar_one_or_none()
+
+
+def _dispatch_allows_refund(
+    dispatch: JobDispatch | None,
+    *,
+    explicit_dispatch: bool,
+    require_undispatched: bool,
+    allow_claimed: bool,
+) -> bool:
+    if dispatch is None:
+        return not explicit_dispatch
+    if dispatch.state not in {"pending", "published", "claimed"}:
+        return False
+    if require_undispatched:
+        return dispatch.claimed_at is None and dispatch.state in {"pending", "published"}
+    if dispatch.claimed_at is not None or dispatch.state == "claimed":
+        # A normal worker refund resolves its already-claimed operation without
+        # receiving an outbox id. Explicit compensation remains fail-closed
+        # unless reconciliation deliberately opts into a stale claimed row.
+        return allow_claimed or not explicit_dispatch
+    return True
 
 
 async def request_generation_cancel(session: AsyncSession, job_id: uuid.UUID, user_id: uuid.UUID) -> bool:
@@ -94,34 +136,62 @@ async def refund_generation(
     status: str,
     error: str,
     require_undispatched: bool = False,
+    outbox_dispatch_id: uuid.UUID | None = None,
+    allow_claimed_outbox: bool = False,
 ) -> bool:
     """Refund an undelivered generation exactly once under a row lock."""
     result = await session.execute(
         select(Job).where(Job.id == job_id).with_for_update().execution_options(populate_existing=True)
     )
     job = result.scalar_one_or_none()
+    dispatch = (
+        await _lock_operation_dispatch(
+            session,
+            job_id=job.id,
+            operation_id=job.id,
+            kind="generation",
+            dispatch_id=outbox_dispatch_id,
+        )
+        if job is not None
+        else None
+    )
+    dispatch_allowed = _dispatch_allows_refund(
+        dispatch,
+        explicit_dispatch=outbox_dispatch_id is not None,
+        require_undispatched=require_undispatched,
+        allow_claimed=allow_claimed_outbox,
+    )
     if (
         job is None
         or job.generation_refunded_at is not None
-        or (require_undispatched and job.generation_dispatched_at is not None)
+        or not dispatch_allowed
+        or (require_undispatched and dispatch is None and job.generation_dispatched_at is not None)
         or job.status not in {"queued", "processing", "cancelling", "finalizing"}
         or job.video_url is not None
         or job.completed_at is not None
     ):
         return False
 
-    refund_amount = job.credit_cost or 1
-    await session.execute(
-        update(User)
-        .where(User.id == job.user_id)
-        .values(
-            credits=User.credits + refund_amount,
-            script_refine_pending=User.script_refine_pending + (job.refine_credit_cost or 0),
-        )
-    )
+    refund_amount = dispatch.debited_credits if dispatch is not None else (job.credit_cost or 1)
+    refine_refund = dispatch.refine_debited if dispatch is not None else float(job.refine_credit_cost or 0)
+    if refund_amount < 0 or refine_refund < 0:
+        return False
+    await session.execute(update(User).where(User.id == job.user_id).values(credits=User.credits + refund_amount))
+    if refine_refund:
+        await adjust_refine_balance(session, job.user_id, float(refine_refund))
     job.status = status
     job.error = error
     job.generation_refunded_at = datetime.now(timezone.utc)
+    await session.execute(
+        update(JobDispatch)
+        .where(
+            JobDispatch.job_id == job.id,
+            JobDispatch.kind == "generation",
+            JobDispatch.operation_id == job.id,
+            JobDispatch.state != "completed",
+        )
+        .values(state="cancelled", publisher_token=None, publisher_lease_until=None)
+    )
     return True
 
 
@@ -172,6 +242,16 @@ async def finalize_generation(
         job.video_url = video_url
         job.telemetry = telemetry
         job.completed_at = datetime.now(timezone.utc)
+        await session.execute(
+            update(JobDispatch)
+            .where(
+                JobDispatch.job_id == job.id,
+                JobDispatch.kind == "generation",
+                JobDispatch.operation_id == job.id,
+                JobDispatch.state != "cancelled",
+            )
+            .values(state="completed", publisher_token=None, publisher_lease_until=None)
+        )
         return "finalized"
     if (
         (job.status == "cancelling" or job.cancel_requested_at is not None)
@@ -261,6 +341,16 @@ async def complete_rerender(session: AsyncSession, job_id: uuid.UUID | str, oper
     if job is None or job.rerender_operation_id != operation_id or job.rerender_state != "running":
         return False
     job.rerender_state = "completed"
+    await session.execute(
+        update(JobDispatch)
+        .where(
+            JobDispatch.job_id == job.id,
+            JobDispatch.kind == "rerender",
+            JobDispatch.operation_id == operation_id,
+            JobDispatch.state != "cancelled",
+        )
+        .values(state="completed", publisher_token=None, publisher_lease_until=None)
+    )
     return True
 
 
@@ -270,30 +360,66 @@ async def refund_rerender(
     operation_id: uuid.UUID,
     *,
     require_undispatched: bool = False,
+    outbox_dispatch_id: uuid.UUID | None = None,
+    allow_claimed_outbox: bool = False,
 ) -> bool:
     """Refund one exact active rerender and restore its fractional snapshot."""
     result = await session.execute(
         select(Job).where(Job.id == job_id).with_for_update().execution_options(populate_existing=True)
     )
     job = result.scalar_one_or_none()
+    dispatch = (
+        await _lock_operation_dispatch(
+            session,
+            job_id=job.id,
+            operation_id=operation_id,
+            kind="rerender",
+            dispatch_id=outbox_dispatch_id,
+        )
+        if job is not None
+        else None
+    )
+    dispatch_allowed = _dispatch_allows_refund(
+        dispatch,
+        explicit_dispatch=outbox_dispatch_id is not None,
+        require_undispatched=require_undispatched,
+        allow_claimed=allow_claimed_outbox,
+    )
     if (
         job is None
         or job.rerender_operation_id != operation_id
         or job.rerender_state not in {"debited", "dispatched", "running"}
-        or (require_undispatched and (job.rerender_state != "debited" or job.rerender_dispatched_at is not None))
+        or not dispatch_allowed
+        or (
+            require_undispatched
+            and dispatch is None
+            and (job.rerender_state != "debited" or job.rerender_dispatched_at is not None)
+        )
     ):
         return False
 
-    if job.rerender_cost > 0:
-        await session.execute(
-            update(User).where(User.id == job.user_id).values(credits=User.credits + job.rerender_cost)
-        )
+    refund_cost = dispatch.debited_credits if dispatch is not None else job.rerender_cost
+    pending_snapshot = dispatch.pending_credits_snapshot if dispatch is not None else job.rerender_pending_credits
+    if refund_cost < 0 or pending_snapshot < 0:
+        return False
+    if refund_cost > 0:
+        await session.execute(update(User).where(User.id == job.user_id).values(credits=User.credits + refund_cost))
     await session.execute(
         update(Job)
         .where(Job.id == job.id)
-        .values(pending_credits=func.coalesce(Job.pending_credits, 0.0) + job.rerender_pending_credits)
+        .values(pending_credits=func.coalesce(Job.pending_credits, 0.0) + pending_snapshot)
     )
     job.rerender_state = "refunded"
+    await session.execute(
+        update(JobDispatch)
+        .where(
+            JobDispatch.job_id == job.id,
+            JobDispatch.kind == "rerender",
+            JobDispatch.operation_id == operation_id,
+            JobDispatch.state != "completed",
+        )
+        .values(state="cancelled", publisher_token=None, publisher_lease_until=None)
+    )
     return True
 
 
@@ -314,7 +440,11 @@ async def lock_rerender_for_publication(
     return job if job.rerender_operation_id == operation_id else None
 
 
-def complete_locked_rerender(job: Job, operation_id: uuid.UUID | None) -> bool:
+async def complete_locked_rerender(
+    session: AsyncSession,
+    job: Job,
+    operation_id: uuid.UUID | None,
+) -> bool:
     """Complete the exact operation while its publication row lock is still held."""
     if job.rerender_state != "running":
         return False
@@ -324,6 +454,17 @@ def complete_locked_rerender(job: Job, operation_id: uuid.UUID | None) -> bool:
     elif job.rerender_operation_id != operation_id:
         return False
     job.rerender_state = "completed"
+    if operation_id is not None:
+        await session.execute(
+            update(JobDispatch)
+            .where(
+                JobDispatch.job_id == job.id,
+                JobDispatch.kind == "rerender",
+                JobDispatch.operation_id == operation_id,
+                JobDispatch.state != "cancelled",
+            )
+            .values(state="completed", publisher_token=None, publisher_lease_until=None)
+        )
     return True
 
 

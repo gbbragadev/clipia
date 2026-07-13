@@ -44,8 +44,9 @@ async def test_refund_rerender_cost_nao_perde_valor_se_db_falha(monkeypatch):
     assert refunded is False
     assert (
         worker_tasks._redis.hget("job:job-refund-x", "rerender_cost") == "2"
-    ), "falha no refund deve restaurar o marcador para revisao manual"
+    ), "falha no refund deve restaurar o marcador para reconciliacao"
     assert alerts, "falha no refund deve alertar o admin (antes era 100% silenciosa)"
+    assert "reembolsar manualmente" not in alerts[0][1].lower()
 
 
 @pytest.mark.asyncio

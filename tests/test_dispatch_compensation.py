@@ -1,16 +1,19 @@
 from __future__ import annotations
 
+import asyncio
 import importlib
 import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from unittest.mock import MagicMock
 
 import pytest
 from sqlalchemy import select, update
 
 from app.api import routes as api_routes
-from app.db.models import Job, User
+from app.db.models import Job, JobDispatch, User
 from app.services import job_operations
+from app.services.dispatch_outbox import claim_generation_dispatch, claim_rerender_dispatch
 from app.worker import tasks as worker_tasks
 from app.worker.celery_app import celery_app
 from tests.voice_test_support import create_job, create_test_env, run
@@ -70,6 +73,234 @@ async def test_generate_initial_redis_failure_refunds_persisted_refine_reservati
     assert user.script_refine_pending == 1.5
     assert not (storage_dir / "jobs" / str(job.id)).exists()
     app.state.dispatch_pipeline.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_generate_compensation_preserves_claimed_work_without_manual_refund_alert(
+    client,
+    verified_user,
+    auth_headers,
+    app,
+    test_db,
+    monkeypatch,
+):
+    cleanup = MagicMock()
+    release_quota = MagicMock()
+    alert = MagicMock()
+    monkeypatch.setattr(api_routes, "cleanup_job_dir", cleanup)
+    monkeypatch.setattr(api_routes, "_release_generation_quota", release_quota)
+    monkeypatch.setattr(api_routes, "_send_admin_alert", alert)
+
+    async def accepted_before_send_error(session, dispatch_id, **_kwargs):
+        dispatch = await session.get(JobDispatch, dispatch_id)
+        assert dispatch is not None
+        assert await claim_generation_dispatch(
+            session,
+            dispatch.job_id,
+            dispatch.id,
+            task_id=str(uuid.uuid4()),
+        )
+        await session.commit()
+        app.state.fake_redis.hset(
+            f"job:{dispatch.job_id}",
+            mapping={"status": "processing", "updated_at": datetime.now(timezone.utc).isoformat()},
+        )
+        return "send_failed"
+
+    monkeypatch.setattr(api_routes, "publish_dispatch", accepted_before_send_error)
+
+    response = await client.post(
+        "/api/v1/generate",
+        headers=auth_headers(verified_user),
+        json=_generate_payload(),
+    )
+
+    assert response.status_code == 202
+    job_id = uuid.UUID(response.json()["job_id"])
+    async with test_db["session_factory"]() as session:
+        persisted_job = await session.get(Job, job_id)
+        persisted_user = await session.get(User, verified_user.id)
+        persisted_dispatch = (
+            await session.execute(select(JobDispatch).where(JobDispatch.job_id == job_id))
+        ).scalar_one()
+    assert persisted_job is not None and persisted_job.generation_refunded_at is None
+    assert persisted_user is not None and persisted_user.credits == 4
+    assert persisted_dispatch.state == "claimed"
+    assert app.state.fake_redis.hget(f"job:{job_id}", "status") == "processing"
+    cleanup.assert_not_called()
+    release_quota.assert_not_called()
+    alert.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_generate_compensation_detects_worker_refund_before_ambiguous_send_result(
+    client,
+    verified_user,
+    auth_headers,
+    app,
+    test_db,
+    monkeypatch,
+):
+    cleanup = MagicMock()
+    release_quota = MagicMock()
+    alert = MagicMock()
+    monkeypatch.setattr(api_routes, "cleanup_job_dir", cleanup)
+    monkeypatch.setattr(api_routes, "_release_generation_quota", release_quota)
+    monkeypatch.setattr(api_routes, "_send_admin_alert", alert)
+
+    async def refunded_before_send_error(session, dispatch_id, **_kwargs):
+        dispatch = await session.get(JobDispatch, dispatch_id)
+        assert dispatch is not None
+        job_id = dispatch.job_id
+        assert await claim_generation_dispatch(
+            session,
+            job_id,
+            dispatch.id,
+            task_id=str(uuid.uuid4()),
+        )
+        await session.commit()
+        assert await job_operations.refund_generation(
+            session,
+            job_id,
+            status="failed",
+            error="worker failed after broker acceptance",
+        )
+        await session.commit()
+        return "send_failed"
+
+    monkeypatch.setattr(api_routes, "publish_dispatch", refunded_before_send_error)
+
+    response = await client.post(
+        "/api/v1/generate",
+        headers=auth_headers(verified_user),
+        json=_generate_payload(),
+    )
+
+    assert response.status_code == 503
+    async with test_db["session_factory"]() as session:
+        job = (await session.execute(select(Job).where(Job.user_id == verified_user.id))).scalar_one()
+        persisted_user = await session.get(User, verified_user.id)
+        dispatch = (await session.execute(select(JobDispatch).where(JobDispatch.job_id == job.id))).scalar_one()
+    assert persisted_user is not None and persisted_user.credits == 5
+    assert job.generation_refunded_at is not None
+    assert dispatch.state == "cancelled" and dispatch.claimed_at is not None
+    cleanup.assert_called_once_with(str(job.id))
+    release_quota.assert_not_called()
+    alert.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_rerender_compensation_preserves_claimed_work_without_terminal_overwrite(
+    client,
+    db_session,
+    verified_user,
+    auth_headers,
+    job_factory,
+    app,
+    storage_dir,
+    monkeypatch,
+):
+    job = await job_factory(status="completed", pending_credits=1.5)
+    (storage_dir / "jobs" / str(job.id)).mkdir(parents=True)
+    terminal = MagicMock()
+    alert = MagicMock()
+    monkeypatch.setattr(worker_tasks, "_update_rerender_terminal", terminal)
+    monkeypatch.setattr(api_routes, "_send_admin_alert", alert)
+
+    async def accepted_before_send_error(session, dispatch_id, **_kwargs):
+        dispatch = await session.get(JobDispatch, dispatch_id)
+        assert dispatch is not None
+        assert await claim_rerender_dispatch(
+            session,
+            dispatch.job_id,
+            dispatch.operation_id,
+            dispatch.id,
+            task_id=str(uuid.uuid4()),
+        )
+        await session.commit()
+        app.state.fake_redis.hset(
+            f"job:{dispatch.job_id}",
+            mapping={
+                "status": "rendering",
+                "rerender_operation_id": str(dispatch.operation_id),
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+            },
+        )
+        return "send_failed"
+
+    monkeypatch.setattr(api_routes, "publish_dispatch", accepted_before_send_error)
+
+    response = await client.post(f"/api/v1/jobs/{job.id}/render", headers=auth_headers(verified_user))
+
+    assert response.status_code == 200
+    db_session.expire_all()
+    persisted_job = await db_session.get(Job, job.id)
+    persisted_user = await db_session.get(User, verified_user.id)
+    dispatch = (
+        await db_session.execute(
+            select(JobDispatch).where(JobDispatch.job_id == job.id, JobDispatch.kind == "rerender")
+        )
+    ).scalar_one()
+    assert persisted_job is not None and persisted_job.rerender_state == "running"
+    assert persisted_user is not None and persisted_user.credits == 3
+    assert dispatch.state == "claimed"
+    assert app.state.fake_redis.hget(f"job:{job.id}", "status") == "rendering"
+    terminal.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_rerender_compensation_detects_worker_refund_before_ambiguous_send_result(
+    client,
+    db_session,
+    verified_user,
+    auth_headers,
+    job_factory,
+    storage_dir,
+    monkeypatch,
+):
+    job = await job_factory(status="completed", pending_credits=1.5)
+    (storage_dir / "jobs" / str(job.id)).mkdir(parents=True)
+    terminal = MagicMock()
+    alert = MagicMock()
+    monkeypatch.setattr(worker_tasks, "_update_rerender_terminal", terminal)
+    monkeypatch.setattr(api_routes, "_send_admin_alert", alert)
+
+    async def refunded_before_send_error(session, dispatch_id, **_kwargs):
+        dispatch = await session.get(JobDispatch, dispatch_id)
+        assert dispatch is not None
+        job_id = dispatch.job_id
+        operation_id = dispatch.operation_id
+        assert await claim_rerender_dispatch(
+            session,
+            job_id,
+            operation_id,
+            dispatch.id,
+            task_id=str(uuid.uuid4()),
+        )
+        await session.commit()
+        assert await job_operations.refund_rerender(session, job_id, operation_id)
+        await session.commit()
+        return "send_failed"
+
+    monkeypatch.setattr(api_routes, "publish_dispatch", refunded_before_send_error)
+
+    response = await client.post(f"/api/v1/jobs/{job.id}/render", headers=auth_headers(verified_user))
+
+    assert response.status_code == 503
+    db_session.expire_all()
+    persisted_job = await db_session.get(Job, job.id)
+    persisted_user = await db_session.get(User, verified_user.id)
+    dispatch = (
+        await db_session.execute(
+            select(JobDispatch).where(JobDispatch.job_id == job.id, JobDispatch.kind == "rerender")
+        )
+    ).scalar_one()
+    assert persisted_job is not None and persisted_job.rerender_state == "refunded"
+    assert persisted_user is not None and persisted_user.credits == 5
+    assert dispatch.state == "cancelled" and dispatch.claimed_at is not None
+    terminal.assert_called_once()
+    assert terminal.call_args.kwargs["status"] == "completed"
+    alert.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -154,7 +385,7 @@ async def test_generate_marker_failure_after_broker_acceptance_reconciles_withou
 
 
 @pytest.mark.asyncio
-async def test_generate_double_marker_failure_remains_ambiguous_without_refund(
+async def test_generate_double_marker_failure_replays_from_sql_outbox_without_refund(
     client,
     verified_user,
     auth_headers,
@@ -184,24 +415,54 @@ async def test_generate_double_marker_failure_remains_ambiguous_without_refund(
     assert response.status_code == 202
     async with test_db["session_factory"]() as session:
         job = (await session.execute(select(Job).where(Job.user_id == verified_user.id))).scalar_one()
+        dispatch = (await session.execute(select(JobDispatch).where(JobDispatch.job_id == job.id))).scalar_one()
+        job_id = job.id
+        dispatch_id = dispatch.id
+        first_task_id = str(dispatch.last_task_id)
         job.created_at = datetime.now(timezone.utc) - timedelta(hours=7)
+        dispatch.last_attempt_at = datetime.now(timezone.utc) - timedelta(minutes=11)
         await session.commit()
-    live = app.state.fake_redis.hgetall(f"job:{job.id}")
+    live = app.state.fake_redis.hgetall(f"job:{job_id}")
     assert live.get("generation_broker_state") == "attempting"
 
     monkeypatch.setattr(app.state.fake_redis, "hset", original_hset)
     db_engine_module = importlib.import_module("app.db.engine")
     monkeypatch.setattr(db_engine_module, "worker_session", test_db["session_factory"])
+    replay_send = MagicMock()
+    monkeypatch.setattr(worker_tasks, "_send_job_dispatch_message", replay_send)
     result = await worker_tasks._reconcile_undispatched_job_operations_async()
 
+    second_task_id = replay_send.call_args.kwargs["task_id"]
+
+    async def claim(task_id: str) -> bool:
+        async with test_db["session_factory"]() as session:
+            claimed = await claim_generation_dispatch(
+                session,
+                job_id,
+                dispatch_id,
+                task_id=task_id,
+            )
+            if claimed:
+                await session.commit()
+            else:
+                await session.rollback()
+            return claimed
+
+    claims = await asyncio.gather(claim(first_task_id), claim(second_task_id))
+
     async with test_db["session_factory"]() as session:
-        persisted = await session.get(Job, job.id)
+        persisted = await session.get(Job, job_id)
         persisted_user = await session.get(User, verified_user.id)
-    assert result["generation_backfilled"] == 0
+        persisted_dispatch = await session.get(JobDispatch, dispatch_id)
+    assert replay_send.call_count == 1
+    assert first_task_id != second_task_id
+    assert sorted(claims) == [False, True]
+    assert result["dispatch_generation_published"] == 1
     assert result["generation_refunded"] == 0
-    assert persisted.generation_dispatched_at is None
+    assert persisted.generation_dispatched_at is not None
     assert persisted.generation_refunded_at is None
     assert persisted_user.credits == 4
+    assert persisted_dispatch.state == "claimed"
 
 
 @pytest.mark.asyncio
@@ -413,7 +674,7 @@ async def test_render_marker_failure_after_broker_acceptance_does_not_refund(
 
 
 @pytest.mark.asyncio
-async def test_rerender_double_marker_failure_remains_ambiguous_without_refund(
+async def test_rerender_double_marker_failure_backfills_from_sql_outbox_without_refund(
     client,
     db_session,
     test_db,
@@ -460,11 +721,11 @@ async def test_rerender_double_marker_failure_remains_ambiguous_without_refund(
     db_session.expire_all()
     persisted = await db_session.get(Job, job.id)
     persisted_user = await db_session.get(User, verified_user.id)
-    assert result["rerender_backfilled"] == 0
+    assert result["rerender_backfilled"] == 1
     assert result["rerender_refunded"] == 0
     assert persisted.rerender_operation_id == operation_id
-    assert persisted.rerender_dispatched_at is None
-    assert persisted.rerender_state == "debited"
+    assert persisted.rerender_dispatched_at is not None
+    assert persisted.rerender_state == "dispatched"
     assert persisted_user.credits == 3
 
 
@@ -517,7 +778,7 @@ async def test_render_failed_dispatch_and_failed_refund_remains_reconcilable(
     persisted_job = await db_session.get(Job, job.id)
     persisted_user = await db_session.get(User, verified_user.id)
     assert result["rerender_backfilled"] == 0
-    assert result["rerender_refunded"] == 1
+    assert result["dispatch_rerender_refunded"] == 1
     assert persisted_job.rerender_state == "refunded"
     assert persisted_job.rerender_dispatched_at is None
     assert persisted_job.pending_credits == 1.5
