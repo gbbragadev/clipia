@@ -78,9 +78,11 @@ export function EditorTimeline() {
 
         {/* Playhead */}
         <div
-          className="editor-timeline__playhead"
-          style={{ left: `${playheadPercent}%` }}
-        />
+          className="editor-timeline__playhead-track"
+          style={{ transform: `translateX(${playheadPercent}%)` }}
+        >
+          <div className="editor-timeline__playhead" />
+        </div>
       </div>
 
       {/* Word-by-word subtitle visualization (Pretext canvas) */}

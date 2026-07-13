@@ -1,14 +1,40 @@
 'use client'
 
 import Link from 'next/link'
-import { useEffect, useState } from 'react'
-import { AnimatePresence, motion } from 'motion/react'
+import { useEffect, useRef, useState } from 'react'
+import { AnimatePresence, motion, animate } from 'motion/react'
 import { LayoutDashboard, LogIn } from 'lucide-react'
 import { strings } from '@/lib/strings'
 import { EASE, DURATIONS, useReducedMotionState } from '@/lib/motion'
 import ScrollProgress from './ScrollProgress'
 import Logo from './brand/Logo'
 import { useAuth } from '@/contexts/AuthContext'
+
+/** Número de créditos com tick animado: conta do valor antigo pro novo e dá um
+ *  pop sutil quando muda. Reduced-motion: troca direta. */
+function CreditsValue({ value, className }: { value: number; className: string }) {
+  const reduceMotion = useReducedMotionState()
+  const ref = useRef<HTMLSpanElement>(null)
+  const prevRef = useRef(value)
+  useEffect(() => {
+    const prev = prevRef.current
+    prevRef.current = value
+    const el = ref.current
+    if (!el || prev === value) return
+    if (reduceMotion) {
+      el.textContent = String(value)
+      return
+    }
+    const controls = animate(prev, value, {
+      duration: 0.6,
+      ease: EASE,
+      onUpdate: (v) => { el.textContent = String(Math.round(v)) },
+    })
+    const pop = animate(el, { scale: [1, 1.06, 1] }, { duration: 0.35, ease: EASE })
+    return () => { controls.stop(); pop.stop() }
+  }, [value, reduceMotion])
+  return <span ref={ref} className={`inline-block ${className}`}>{value}</span>
+}
 
 export default function Navbar() {
   const { user } = useAuth()
@@ -56,20 +82,20 @@ export default function Navbar() {
                   <span className="w-6 h-6 rounded-full bg-gradient-to-br from-coral to-azure flex items-center justify-center text-white text-[10px] font-semibold">
                     {user.name?.charAt(0).toUpperCase() || '?'}
                   </span>
-                  <span className="text-coral font-semibold text-xs">{user.credits}</span>
+                  <CreditsValue value={user.credits} className="text-coral font-semibold text-xs" />
                   <span className="text-xs text-3">créditos</span>
                 </div>
                 {/* Dashboard button */}
                 <a
                   href="/dashboard"
-                  className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-gradient-to-r from-coral to-azure text-white text-sm font-medium hover:opacity-90 transition"
+                  className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-gradient-to-r from-coral to-azure text-white text-sm font-medium hover:opacity-90 active:scale-[0.97] transition"
                 >
                   <LayoutDashboard className="w-4 h-4" />
                   Dashboard
                 </a>
               </div>
             ) : (
-              <a href="/auth/login" className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-gradient-to-r from-coral to-azure text-white hover:opacity-90 transition">
+              <a href="/auth/login" className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-gradient-to-r from-coral to-azure text-white hover:opacity-90 active:scale-[0.97] transition">
                 <LogIn className="w-4 h-4" />
                 {strings.auth.login.submit}
               </a>
@@ -86,9 +112,9 @@ export default function Navbar() {
               className="flex h-11 w-11 items-center justify-center rounded-lg text-2"
             >
               <span className="relative block h-4 w-5">
-                <span className="absolute left-0 block h-0.5 w-5 bg-current transition-all" style={{ top: open ? 7 : 0, transform: open ? 'rotate(45deg)' : 'none' }} />
-                <span className="absolute left-0 top-[7px] block h-0.5 w-5 bg-current transition-all" style={{ opacity: open ? 0 : 1 }} />
-                <span className="absolute left-0 block h-0.5 w-5 bg-current transition-all" style={{ top: open ? 7 : 14, transform: open ? 'rotate(-45deg)' : 'none' }} />
+                <span className="absolute left-0 top-0 block h-0.5 w-5 bg-current transition-transform duration-200" style={{ transform: open ? 'translateY(7px) rotate(45deg)' : 'none' }} />
+                <span className="absolute left-0 top-[7px] block h-0.5 w-5 bg-current transition-opacity duration-200" style={{ opacity: open ? 0 : 1 }} />
+                <span className="absolute left-0 top-[14px] block h-0.5 w-5 bg-current transition-transform duration-200" style={{ transform: open ? 'translateY(-7px) rotate(-45deg)' : 'none' }} />
               </span>
             </button>
           </div>
@@ -113,15 +139,15 @@ export default function Navbar() {
                     <span className="w-7 h-7 rounded-full bg-gradient-to-br from-coral to-azure flex items-center justify-center text-white text-xs font-semibold">
                       {user.name?.charAt(0).toUpperCase() || '?'}
                     </span>
-                    <span className="text-coral font-semibold text-sm">{user.credits}</span>
+                    <CreditsValue value={user.credits} className="text-coral font-semibold text-sm" />
                     <span className="text-sm text-3">créditos</span>
                   </div>
-                  <a href="/dashboard" onClick={() => setOpen(false)} className="w-full text-center px-4 py-3 rounded-lg bg-gradient-to-r from-coral to-azure text-white font-medium">
+                  <a href="/dashboard" onClick={() => setOpen(false)} className="w-full text-center px-4 py-3 rounded-lg bg-gradient-to-r from-coral to-azure text-white font-medium active:scale-[0.97] transition">
                     Dashboard
                   </a>
                 </>
               ) : (
-                <a href="/auth/login" onClick={() => setOpen(false)} className="w-full text-center px-4 py-3 rounded-lg bg-gradient-to-r from-coral to-azure text-white font-medium">
+                <a href="/auth/login" onClick={() => setOpen(false)} className="w-full text-center px-4 py-3 rounded-lg bg-gradient-to-r from-coral to-azure text-white font-medium active:scale-[0.97] transition">
                   {strings.auth.login.submit}
                 </a>
               )}

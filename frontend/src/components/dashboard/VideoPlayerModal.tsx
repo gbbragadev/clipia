@@ -105,16 +105,21 @@ export default function VideoPlayerModal({ job, onClose, onEdit }: VideoPlayerMo
     typeof navigator !== 'undefined' && typeof navigator.canShare === 'function' && typeof navigator.share === 'function'
 
   return createPortal(
-    <div
+    <motion.div
       className="fixed inset-0 z-[90] flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm"
       role="dialog"
       aria-modal="true"
       aria-label={`Assistir: ${job.topic}`}
+      initial={reduceMotion ? false : { opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      transition={{ duration: DURATIONS.fast, ease: EASE }}
       onClick={(e) => { if (e.target === e.currentTarget) onClose() }}
     >
       <motion.div
         initial={reduceMotion ? false : { opacity: 0, scale: 0.96, y: 8 }}
         animate={{ opacity: 1, scale: 1, y: 0 }}
+        exit={reduceMotion ? { opacity: 0 } : { opacity: 0, scale: 0.96, y: 8 }}
         transition={{ duration: DURATIONS.fast, ease: EASE }}
         className="relative flex w-full max-w-sm flex-col overflow-hidden rounded-2xl border border-white/10 bg-[var(--bg-raised)] shadow-2xl"
       >
@@ -166,8 +171,8 @@ export default function VideoPlayerModal({ job, onClose, onEdit }: VideoPlayerMo
               </p>
               <div className="h-1 w-40 overflow-hidden rounded-full bg-white/10">
                 <div
-                  className="h-full rounded-full bg-gradient-to-r from-coral to-azure transition-all duration-300"
-                  style={{ width: `${Math.max(4, loadProgress * 100)}%` }}
+                  className="h-full w-full origin-left rounded-full bg-gradient-to-r from-coral to-azure transition-transform duration-300"
+                  style={{ transform: `scaleX(${Math.max(0.04, loadProgress)})` }}
                 />
               </div>
             </div>
@@ -241,7 +246,7 @@ export default function VideoPlayerModal({ job, onClose, onEdit }: VideoPlayerMo
           )}
         </div>
       </motion.div>
-    </div>,
+    </motion.div>,
     document.body,
   )
 }

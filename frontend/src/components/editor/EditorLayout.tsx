@@ -204,7 +204,9 @@ export function EditorLayout() {
         </>
       )}
 
-      {showExport && <ExportPanel onClose={() => setShowExport(false)} />}
+      <AnimatePresence>
+        {showExport && <ExportPanel onClose={() => setShowExport(false)} />}
+      </AnimatePresence>
     </div>
   )
 }

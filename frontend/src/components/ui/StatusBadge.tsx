@@ -11,7 +11,7 @@ const VARIANT_CLASSES: Record<BadgeVariant, string> = {
   warn: 'bg-warn/15 text-warn border-warn/30',
   info: 'bg-azure/15 text-azure border-azure/30',
   neutral: 'bg-white/8 text-mist border-white/10',
-  processing: 'bg-coral/15 text-coral border-coral/30 animate-pulse',
+  processing: 'bg-coral/15 text-coral border-coral/30',
 }
 
 export function StatusBadge({
@@ -26,7 +26,7 @@ export function StatusBadge({
   return (
     <span
       className={cn(
-        'inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide',
+        'inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide transition-colors duration-200',
         VARIANT_CLASSES[variant],
         className
       )}

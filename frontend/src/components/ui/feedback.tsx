@@ -1,7 +1,10 @@
 'use client'
 
 import Link from 'next/link'
+import { AnimatePresence, motion } from 'motion/react'
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+
+import { EASE, DURATIONS, SPRING, useReducedMotionState } from '@/lib/motion'
 
 export type ToastTone = 'success' | 'error' | 'info'
 
@@ -103,71 +106,82 @@ export function useToast() {
 }
 
 export function ToastViewport({ toasts, onDismiss }: { toasts: ToastItem[]; onDismiss: (id: string) => void }) {
-  if (toasts.length === 0) return null
+  const reduceMotion = useReducedMotionState()
 
   return (
-    <div className="fixed right-4 top-4 z-[80] w-[min(24rem,calc(100vw-2rem))] space-y-3">
-      {toasts.map((toast) => {
-        const palette = TOAST_PALETTE[toast.tone]
-        return (
-          <div
-            key={toast.id}
-            className="card overflow-hidden shadow-2xl"
-            style={{
-              background: palette.bg,
-              borderColor: palette.border,
-            }}
-          >
-            <div className="flex items-start gap-3 p-4">
-              <div
-                className="mt-0.5 h-2.5 w-2.5 rounded-full shrink-0"
-                style={{ background: palette.dot }}
-              />
-              <div className="min-w-0 flex-1">
-                <p className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>
-                  {toast.title}
-                </p>
-                {toast.description && (
-                  <p className="mt-1 text-sm leading-5" style={{ color: 'var(--text-secondary)' }}>
-                    {toast.description}
+    <div className="pointer-events-none fixed right-4 top-4 z-[80] flex w-[min(24rem,calc(100vw-2rem))] flex-col gap-3">
+      <AnimatePresence initial={false} mode="popLayout">
+        {toasts.map((toast) => {
+          const palette = TOAST_PALETTE[toast.tone]
+          return (
+            <motion.div
+              key={toast.id}
+              layout={!reduceMotion}
+              initial={reduceMotion ? { opacity: 0 } : { opacity: 0, y: -16, scale: 0.98 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={
+                reduceMotion
+                  ? { opacity: 0, transition: { duration: 0.15 } }
+                  : { opacity: 0, scale: 0.96, transition: { duration: 0.15, ease: EASE } }
+              }
+              transition={SPRING}
+              className="card pointer-events-auto overflow-hidden shadow-2xl"
+              style={{
+                background: palette.bg,
+                borderColor: palette.border,
+              }}
+            >
+              <div className="flex items-start gap-3 p-4">
+                <div
+                  className="mt-0.5 h-2.5 w-2.5 rounded-full shrink-0"
+                  style={{ background: palette.dot }}
+                />
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>
+                    {toast.title}
                   </p>
-                )}
-                {(toast.actionLabel || toast.onAction) && (
-                  <div className="mt-3 flex items-center gap-3">
-                    {toast.onAction && toast.actionLabel && (
+                  {toast.description && (
+                    <p className="mt-1 text-sm leading-5" style={{ color: 'var(--text-secondary)' }}>
+                      {toast.description}
+                    </p>
+                  )}
+                  {(toast.actionLabel || toast.onAction) && (
+                    <div className="mt-3 flex items-center gap-3">
+                      {toast.onAction && toast.actionLabel && (
+                        <button
+                          onClick={() => {
+                            toast.onAction?.()
+                            onDismiss(toast.id)
+                          }}
+                          className="text-sm font-medium"
+                          style={{ color: palette.action }}
+                        >
+                          {toast.actionLabel}
+                        </button>
+                      )}
                       <button
-                        onClick={() => {
-                          toast.onAction?.()
-                          onDismiss(toast.id)
-                        }}
-                        className="text-sm font-medium"
-                        style={{ color: palette.action }}
+                        onClick={() => onDismiss(toast.id)}
+                        className="text-sm"
+                        style={{ color: 'var(--text-tertiary)' }}
                       >
-                        {toast.actionLabel}
+                        Fechar
                       </button>
-                    )}
-                    <button
-                      onClick={() => onDismiss(toast.id)}
-                      className="text-sm"
-                      style={{ color: 'var(--text-tertiary)' }}
-                    >
-                      Fechar
-                    </button>
-                  </div>
-                )}
+                    </div>
+                  )}
+                </div>
+                <button
+                  onClick={() => onDismiss(toast.id)}
+                  className="text-lg leading-none transition hover:opacity-80"
+                  style={{ color: 'var(--text-tertiary)' }}
+                  aria-label="Fechar aviso"
+                >
+                  ×
+                </button>
               </div>
-              <button
-                onClick={() => onDismiss(toast.id)}
-                className="text-lg leading-none transition hover:opacity-80"
-                style={{ color: 'var(--text-tertiary)' }}
-                aria-label="Fechar aviso"
-              >
-                ×
-              </button>
-            </div>
-          </div>
-        )
-      })}
+            </motion.div>
+          )
+        })}
+      </AnimatePresence>
     </div>
   )
 }
@@ -194,21 +208,27 @@ const TOAST_PALETTE: Record<ToastTone, { bg: string; border: string; dot: string
 }
 
 export function OfflineBanner({ online }: { online: boolean }) {
-  if (online) return null
-
   return (
-    <div className="pointer-events-none fixed inset-x-0 top-4 z-[70] flex justify-center px-4">
-      <div
-        className="pointer-events-auto rounded-full border px-4 py-2 text-sm shadow-lg backdrop-blur-md"
-        style={{
-          background: 'rgba(17, 17, 24, 0.9)',
-          borderColor: 'rgba(239, 68, 68, 0.3)',
-          color: '#fecaca',
-        }}
-      >
-        Voce esta offline. Alguns recursos podem falhar ate a conexao voltar.
-      </div>
-    </div>
+    <AnimatePresence>
+      {!online && (
+        <div className="pointer-events-none fixed inset-x-0 top-4 z-[70] flex justify-center px-4">
+          <motion.div
+            initial={{ opacity: 0, y: -12 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -12 }}
+            transition={{ duration: DURATIONS.fast, ease: EASE }}
+            className="pointer-events-auto rounded-full border px-4 py-2 text-sm shadow-lg backdrop-blur-md"
+            style={{
+              background: 'rgba(17, 17, 24, 0.9)',
+              borderColor: 'rgba(239, 68, 68, 0.3)',
+              color: '#fecaca',
+            }}
+          >
+            Voce esta offline. Alguns recursos podem falhar ate a conexao voltar.
+          </motion.div>
+        </div>
+      )}
+    </AnimatePresence>
   )
 }
 

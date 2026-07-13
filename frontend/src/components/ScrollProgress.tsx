@@ -6,8 +6,8 @@ export default function ScrollProgress() {
   return (
     <div className="h-[2px] bg-gray-900">
       <div
-        className="h-full bg-gradient-to-r from-coral via-coral-soft to-azure transition-[width] duration-100"
-        style={{ width: `${progress * 100}%` }}
+        className="h-full w-full origin-left bg-gradient-to-r from-coral via-coral-soft to-azure transition-transform duration-100 ease-linear"
+        style={{ transform: `scaleX(${progress})` }}
       />
     </div>
   )

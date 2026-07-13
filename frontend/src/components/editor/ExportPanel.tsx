@@ -2,7 +2,9 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Check, Clapperboard, Download, Loader2, X } from 'lucide-react'
+import { motion } from 'motion/react'
 import { useEditor } from '@/contexts/EditorContext'
+import { EASE, DURATIONS, useReducedMotionState } from '@/lib/motion'
 import { useAuth } from '@/contexts/AuthContext'
 import { downloadAuthenticatedFile } from '@/lib/download'
 import { getToken } from '@/lib/auth'
@@ -31,6 +33,7 @@ export function ExportPanel({ onClose }: { onClose: () => void }) {
   const { composition, jobId, narrationStale, setActivePanel, flushSave } = useEditor()
   const { user } = useAuth()
   const { success: toastSuccess, error: toastError } = useToast()
+  const reduceMotion = useReducedMotionState()
 
   const [renderState, setRenderState] = useState<RenderState>('idle')
   const [renderProgress, setRenderProgress] = useState(0)
@@ -200,8 +203,24 @@ export function ExportPanel({ onClose }: { onClose: () => void }) {
   const downloadIsPrevious = renderState !== 'ready'
 
   return (
-    <div className="export-overlay" onClick={(e) => { if (e.target === e.currentTarget) onClose() }}>
-      <div className="export-panel" role="dialog" aria-modal="true" aria-label="Exportar vídeo">
+    <motion.div
+      className="export-overlay"
+      initial={reduceMotion ? false : { opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      transition={{ duration: DURATIONS.fast, ease: EASE }}
+      onClick={(e) => { if (e.target === e.currentTarget) onClose() }}
+    >
+      <motion.div
+        className="export-panel"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Exportar vídeo"
+        initial={reduceMotion ? false : { opacity: 0, scale: 0.96, y: 8 }}
+        animate={{ opacity: 1, scale: 1, y: 0 }}
+        exit={reduceMotion ? { opacity: 0 } : { opacity: 0, scale: 0.96, y: 8 }}
+        transition={{ duration: DURATIONS.fast, ease: EASE }}
+      >
         <button type="button" className="export-panel__close" onClick={onClose} aria-label="Fechar">
           <X size={16} />
         </button>
@@ -256,7 +275,7 @@ export function ExportPanel({ onClose }: { onClose: () => void }) {
             <div className="export-status__body">
               <div>{renderDetail || 'Aplicando suas edições… (~2 min)'}</div>
               <div className="export-progress">
-                <div className="export-progress__fill" style={{ width: `${Math.max(6, renderProgress * 100)}%` }} />
+                <div className="export-progress__fill" style={{ transform: `scaleX(${Math.max(0.06, renderProgress)})` }} />
               </div>
             </div>
           </div>
@@ -338,7 +357,7 @@ export function ExportPanel({ onClose }: { onClose: () => void }) {
             </div>
           ))}
         </div>
-      </div>
-    </div>
+      </motion.div>
+    </motion.div>
   )
 }

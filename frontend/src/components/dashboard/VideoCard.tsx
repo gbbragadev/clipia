@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useRef, useEffect, useCallback } from 'react'
+import { AnimatePresence } from 'motion/react'
 import { Loader2, Play } from 'lucide-react'
 import { strings } from '@/lib/strings';
 import { ACTIVE_JOB_STATUSES, STEP_LABELS, type JobSummary } from '@/lib/editor-api'
@@ -45,6 +46,22 @@ interface VideoCardProps {
 export default function VideoCard({ job, onEdit, onCancel }: VideoCardProps) {
   const { success: toastSuccess, error: toastError } = useToast()
   const canEdit = ['completed', 'editable'].includes(job.status)
+  // Delight one-shot: acende um anel coral quando ESTE card transiciona de "gerando"
+  // para "pronto" durante a sessão (nunca em cards que já montaram prontos).
+  const prevStatusRef = useRef(job.status)
+  const [justCompleted, setJustCompleted] = useState(false)
+  useEffect(() => {
+    const prev = prevStatusRef.current
+    prevStatusRef.current = job.status
+    if (
+      ACTIVE_JOB_STATUSES.includes(prev) &&
+      ['completed', 'editable'].includes(job.status)
+    ) {
+      setJustCompleted(true)
+      const t = setTimeout(() => setJustCompleted(false), 1000)
+      return () => clearTimeout(t)
+    }
+  }, [job.status])
   const canCancel = onCancel ? ['processing', 'queued'].includes(job.status) : false
   const [confirmCancel, setConfirmCancel] = useState(false)
   const [showPlayer, setShowPlayer] = useState(false)
@@ -137,7 +154,7 @@ export default function VideoCard({ job, onEdit, onCancel }: VideoCardProps) {
 
   return (
     <GlowCard intensity={0.2} className="h-full">
-      <div className="flex flex-col h-full bg-[var(--bg-raised)] hover:bg-[var(--bg-surface)] transition-colors rounded-xl overflow-hidden relative">
+      <div className={`flex flex-col h-full bg-[var(--bg-raised)] hover:bg-[var(--bg-surface)] transition-colors rounded-xl overflow-hidden relative ${justCompleted ? 'anim-ready-ring' : ''}`}>
         {/* Thumbnail - shorter on mobile, taller on desktop */}
         <div
           className={`w-full aspect-[3/4] sm:aspect-[9/16] bg-gradient-to-br ${gradient} flex flex-col items-center justify-center relative overflow-hidden group ${job.download_url ? 'cursor-pointer' : ''}`}
@@ -173,7 +190,7 @@ export default function VideoCard({ job, onEdit, onCancel }: VideoCardProps) {
           )}
 
           {!job.download_url && !thumbSrc && (
-            <span className="text-6xl opacity-30 group-hover:opacity-50 group-hover:scale-110 transition-all duration-500 z-10">{icon}</span>
+            <span className="text-6xl opacity-30 group-hover:opacity-50 group-hover:scale-110 transition-[transform,opacity] duration-200 z-10">{icon}</span>
           )}
 
           {/* Top Info Overlay */}
@@ -245,8 +262,8 @@ export default function VideoCard({ job, onEdit, onCancel }: VideoCardProps) {
               </div>
               <div className="h-1 rounded-full overflow-hidden bg-white/10">
                 <div
-                  className="h-full rounded-full bg-gradient-to-r from-coral to-azure transition-all duration-500 ease-out"
-                  style={{ width: `${Math.max(4, (job.progress ?? 0) * 100)}%` }}
+                  className="h-full w-full origin-left rounded-full bg-gradient-to-r from-coral to-azure transition-transform duration-500 ease-out"
+                  style={{ transform: `scaleX(${Math.max(0.04, job.progress ?? 0)})` }}
                 />
               </div>
             </div>
@@ -326,9 +343,11 @@ export default function VideoCard({ job, onEdit, onCancel }: VideoCardProps) {
       </div>
 
       {/* Player dedicado (portal — escapa do overflow/transform do card) */}
-      {showPlayer && (
-        <VideoPlayerModal job={job} onClose={() => setShowPlayer(false)} onEdit={onEdit} />
-      )}
+      <AnimatePresence>
+        {showPlayer && (
+          <VideoPlayerModal job={job} onClose={() => setShowPlayer(false)} onEdit={onEdit} />
+        )}
+      </AnimatePresence>
     </GlowCard>
   )
 }

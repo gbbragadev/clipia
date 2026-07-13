@@ -2,7 +2,9 @@
 
 import { strings } from '@/lib/strings';
 import { useEffect, useRef, useState } from 'react'
+import { AnimatePresence, motion } from 'motion/react'
 import { useAuth } from '@/contexts/AuthContext'
+import { EASE, DURATIONS, useReducedMotionState } from '@/lib/motion'
 import {
   generateVideo,
   fetchTemplates,
@@ -36,6 +38,7 @@ interface GenerateFormProps {
 export default function GenerateForm({ onJobCreated, prefillTopic, prefillTrendContext, prefillTemplateId, prefillStyle }: GenerateFormProps) {
   const { user } = useAuth()
   const { success, error: toastError, info } = useToast()
+  const reduceMotion = useReducedMotionState()
 
   const [topic, setTopic] = useState('')
   const [trendContext, setTrendContext] = useState<string | null>(null)
@@ -308,7 +311,12 @@ export default function GenerateForm({ onJobCreated, prefillTopic, prefillTrendC
           </button>
         </div>
         {batchMode ? (
-          <>
+          <motion.div
+            key="topic-batch"
+            initial={reduceMotion ? false : { opacity: 0, y: 4 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: DURATIONS.fast, ease: EASE }}
+          >
             <textarea
               value={batchTopics}
               onChange={(e) => setBatchTopics(e.target.value)}
@@ -322,9 +330,14 @@ export default function GenerateForm({ onJobCreated, prefillTopic, prefillTrendC
                 ? 'Cada linha com pelo menos 10 caracteres vira um vídeo.'
                 : `${batchList.length} tema${batchList.length > 1 ? 's' : ''} pronto${batchList.length > 1 ? 's' : ''} para gerar — cada um vira um vídeo na fila.`}
             </p>
-          </>
+          </motion.div>
         ) : (
-          <>
+          <motion.div
+            key="topic-single"
+            initial={reduceMotion ? false : { opacity: 0, y: 4 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: DURATIONS.fast, ease: EASE }}
+          >
             <input
               type="text"
               value={topic}
@@ -340,7 +353,7 @@ export default function GenerateForm({ onJobCreated, prefillTopic, prefillTrendC
                 🔥 Baseado numa tendência do painel &quot;Em alta&quot; — o roteiro usa esse contexto
               </span>
             )}
-          </>
+          </motion.div>
         )}
       </div>
 
@@ -491,8 +504,8 @@ export default function GenerateForm({ onJobCreated, prefillTopic, prefillTrendC
                 className={`relative w-9 h-5 rounded-full transition shrink-0 ${item.on ? 'bg-coral' : 'bg-[var(--bg-surface-hover)]'}`}
               >
                 <span
-                  className="absolute top-0.5 w-4 h-4 rounded-full bg-white transition-all"
-                  style={{ left: item.on ? '18px' : '2px' }}
+                  className="absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white transition-transform duration-200"
+                  style={{ transform: item.on ? 'translateX(16px)' : 'translateX(0)' }}
                 />
               </span>
             </button>
@@ -515,8 +528,17 @@ export default function GenerateForm({ onJobCreated, prefillTopic, prefillTrendC
             Roteiro avançado (opcional){draft ? ' · roteiro editado ativo' : ''}
           </button>
 
-          {showAdvancedScript && (
-            <div className="mt-3 space-y-4">
+          <AnimatePresence initial={false}>
+            {showAdvancedScript && (
+              <motion.div
+                key="advanced-script"
+                initial={reduceMotion ? false : { height: 0, opacity: 0 }}
+                animate={{ height: 'auto', opacity: 1 }}
+                exit={reduceMotion ? { opacity: 0 } : { height: 0, opacity: 0 }}
+                transition={{ duration: DURATIONS.normal, ease: EASE }}
+                style={{ overflow: 'hidden' }}
+              >
+                <div className="mt-3 space-y-4">
               {!draft && (
                 <>
                   <p className="text-[11px] leading-relaxed text-[var(--text-tertiary)]">
@@ -527,7 +549,7 @@ export default function GenerateForm({ onJobCreated, prefillTopic, prefillTrendC
                     type="button"
                     onClick={handleGenerateDraft}
                     disabled={draftLoading || generating || topic.trim().length < 10}
-                    className="w-full py-2.5 rounded-xl border border-azure/40 bg-azure/10 text-azure text-xs font-semibold hover:bg-azure/15 transition cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                    className="w-full py-2.5 rounded-xl border border-azure/40 bg-azure/10 text-azure text-xs font-semibold hover:bg-azure/15 active:scale-[0.98] transition cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     {draftLoading ? 'Escrevendo rascunho…' : '✨ Gerar rascunho do roteiro (grátis)'}
                   </button>
@@ -618,8 +640,10 @@ export default function GenerateForm({ onJobCreated, prefillTopic, prefillTrendC
                   <KineticPreviewPanel script={draftScenes.join('\n\n')} />
                 </>
               )}
-            </div>
-          )}
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
         </div>
       )}
 
@@ -682,7 +706,7 @@ export default function GenerateForm({ onJobCreated, prefillTopic, prefillTrendC
       <button
         onClick={handleGenerate}
         disabled={generating || !canSubmit}
-        className={`w-full py-3.5 rounded-xl border-none text-base font-semibold transition cursor-pointer ${
+        className={`w-full py-3.5 rounded-xl border-none text-base font-semibold enabled:active:scale-[0.98] transition cursor-pointer ${
           generating || !canSubmit
             ? 'bg-[var(--bg-surface-hover)] text-[var(--text-tertiary)] cursor-not-allowed'
             : 'bg-gradient-to-r from-coral to-azure text-white hover:opacity-90'
