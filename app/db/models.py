@@ -90,6 +90,120 @@ class CreditPurchase(Base):
     user: Mapped["User"] = relationship(back_populates="purchases")
 
 
+class PaymentCheckoutDispatch(Base):
+    """Durable authority for creating and binding one provider checkout."""
+
+    __tablename__ = "payment_checkout_dispatches"
+    __table_args__ = (
+        UniqueConstraint("purchase_id", name="uq_payment_checkout_dispatch_purchase"),
+        UniqueConstraint(
+            "provider_idempotency_key",
+            name="uq_payment_checkout_dispatch_provider_key",
+        ),
+        UniqueConstraint("request_key", name="uq_payment_checkout_dispatch_request_key"),
+        CheckConstraint(
+            "provider IN ('stripe', 'mercadopago')",
+            name="ck_payment_checkout_dispatch_provider",
+        ),
+        CheckConstraint(
+            "state IN ('pending', 'ready', 'failed', 'cancelled')",
+            name="ck_payment_checkout_dispatch_state",
+        ),
+        CheckConstraint("attempt_count >= 0", name="ck_payment_checkout_dispatch_attempts"),
+        CheckConstraint(
+            "LENGTH(request_payload_hash) = 64",
+            name="ck_payment_checkout_dispatch_payload_hash",
+        ),
+        CheckConstraint(
+            "request_key IS NULL OR LENGTH(request_key) = 64",
+            name="ck_payment_checkout_dispatch_request_key",
+        ),
+        CheckConstraint(
+            "request_fingerprint IS NULL OR LENGTH(request_fingerprint) = 64",
+            name="ck_payment_checkout_dispatch_fingerprint",
+        ),
+        CheckConstraint(
+            "(request_key IS NULL AND request_fingerprint IS NULL) OR "
+            "(request_key IS NOT NULL AND request_fingerprint IS NOT NULL)",
+            name="ck_payment_checkout_dispatch_request_pair",
+        ),
+        CheckConstraint(
+            "(publisher_token IS NULL AND publisher_lease_until IS NULL) OR "
+            "(publisher_token IS NOT NULL AND publisher_lease_until IS NOT NULL)",
+            name="ck_payment_checkout_dispatch_lease_pair",
+        ),
+        CheckConstraint(
+            "error_code IS NULL OR error_code IN "
+            "('provider_unavailable', 'rate_limited', 'provider_rejected', "
+            "'invalid_response', 'identity_collision', 'payload_corrupt', "
+            "'config_invalid', 'purchase_terminal', 'binding_failed')",
+            name="ck_payment_checkout_dispatch_error_code",
+        ),
+        CheckConstraint(
+            "(state = 'pending' AND provider_checkout_id IS NULL AND checkout_url IS NULL "
+            "AND checkout_expires_at IS NULL AND ready_at IS NULL AND failed_at IS NULL "
+            "AND next_attempt_at IS NOT NULL) OR "
+            "(state = 'ready' AND provider_checkout_id IS NOT NULL AND checkout_url IS NOT NULL "
+            "AND ready_at IS NOT NULL AND failed_at IS NULL AND next_attempt_at IS NULL "
+            "AND publisher_token IS NULL AND publisher_lease_until IS NULL "
+            "AND error_code IS NULL AND error_detail IS NULL) OR "
+            "(state IN ('failed', 'cancelled') AND provider_checkout_id IS NULL AND checkout_url IS NULL "
+            "AND checkout_expires_at IS NULL AND ready_at IS NULL AND failed_at IS NOT NULL "
+            "AND next_attempt_at IS NULL AND publisher_token IS NULL "
+            "AND publisher_lease_until IS NULL AND error_code IS NOT NULL)",
+            name="ck_payment_checkout_dispatch_terminal_fields",
+        ),
+        Index(
+            "ix_payment_checkout_dispatch_due",
+            "next_attempt_at",
+            "created_at",
+            postgresql_where=text("state = 'pending'"),
+            sqlite_where=text("state = 'pending'"),
+        ),
+        Index(
+            "uq_payment_checkout_dispatch_provider_checkout",
+            "provider",
+            "provider_checkout_id",
+            unique=True,
+            postgresql_where=text("provider_checkout_id IS NOT NULL"),
+            sqlite_where=text("provider_checkout_id IS NOT NULL"),
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(GUID(), primary_key=True, default=uuid.uuid4)
+    purchase_id: Mapped[uuid.UUID] = mapped_column(
+        GUID(),
+        ForeignKey("credit_purchases.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        GUID(),
+        ForeignKey("users.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    provider: Mapped[str] = mapped_column(String(20), nullable=False)
+    provider_idempotency_key: Mapped[str] = mapped_column(String(255), nullable=False)
+    request_key: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    request_fingerprint: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    request_payload: Mapped[str] = mapped_column(Text, nullable=False)
+    request_payload_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    state: Mapped[str] = mapped_column(String(20), nullable=False, default="pending", server_default="pending")
+    attempt_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    next_attempt_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_attempt_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    publisher_token: Mapped[uuid.UUID | None] = mapped_column(GUID(), nullable=True)
+    publisher_lease_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    provider_checkout_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    checkout_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    checkout_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    error_code: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    error_detail: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    ready_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    failed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
 class ProcessedPaymentEvent(Base):
     """Minimal idempotency claim for an authoritative provider event."""
 

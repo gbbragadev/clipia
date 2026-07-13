@@ -7,7 +7,8 @@ import stripe
 from mercadopago.config import RequestOptions
 from sqlalchemy import func, select
 
-from app.db.models import CreditPurchase, User
+from app.db.models import CreditPurchase, PaymentCheckoutDispatch, User
+from app.payments.checkout_outbox import CheckoutPending
 from app.payments.service import create_checkout, create_checkout_stripe, process_webhook
 from app.payments.snapshot import (
     PAYMENT_SNAPSHOT_VERSION,
@@ -289,7 +290,7 @@ async def test_checkout_rejects_malformed_provider_identity_or_untrusted_redirec
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("provider", ["mercadopago", "stripe"])
-async def test_provider_exception_terminalizes_the_durable_pending_purchase(
+async def test_ambiguous_provider_exception_keeps_purchase_and_dispatch_pending(
     test_db, db_session, verified_user, monkeypatch, provider
 ):
     if provider == "mercadopago":
@@ -315,14 +316,18 @@ async def test_provider_exception_terminalizes_the_durable_pending_purchase(
         )
         checkout = create_checkout_stripe
 
-    with pytest.raises(RuntimeError, match="provider unavailable"):
+    with pytest.raises(CheckoutPending):
         await checkout(verified_user, "starter", db_session)
 
     async with test_db["session_factory"]() as verification_session:
         purchase = await verification_session.scalar(select(CreditPurchase))
+        dispatch = await verification_session.scalar(select(PaymentCheckoutDispatch))
         assert purchase is not None
-        assert purchase.payment_state == "void"
+        assert purchase.payment_state == "pending"
         assert purchase.mp_preference_id is None
+        assert dispatch is not None
+        assert dispatch.state == "pending"
+        assert dispatch.error_code == "provider_unavailable"
 
 
 @pytest.mark.asyncio
@@ -357,7 +362,7 @@ async def test_initial_pending_commit_failure_never_calls_provider(db_session, v
 
 
 @pytest.mark.asyncio
-async def test_checkout_binding_commit_failure_keeps_durable_terminal_purchase_recoverable_by_webhook(
+async def test_checkout_binding_commit_failure_keeps_durable_pending_purchase_recoverable_by_webhook(
     test_db, db_session, verified_user, monkeypatch
 ):
     observed: dict = {}
@@ -403,21 +408,25 @@ async def test_checkout_binding_commit_failure_keeps_durable_terminal_purchase_r
     async def fail_only_checkout_binding_commit():
         nonlocal commit_calls
         commit_calls += 1
-        if commit_calls == 2:
+        if commit_calls == 3:
             raise RuntimeError("binding commit failed")
         await original_commit()
 
     monkeypatch.setattr(db_session, "commit", fail_only_checkout_binding_commit)
 
-    with pytest.raises(RuntimeError, match="binding commit failed"):
+    with pytest.raises(CheckoutPending):
         await create_checkout(verified_user, "starter", db_session)
 
     async with test_db["session_factory"]() as verification_session:
         purchase = await verification_session.scalar(select(CreditPurchase))
+        dispatch = await verification_session.scalar(select(PaymentCheckoutDispatch))
         assert purchase is not None
-        assert purchase.payment_state == "void"
+        assert purchase.payment_state == "pending"
         assert purchase.mp_preference_id is None
         assert purchase.snapshot_version == 1
+        assert dispatch is not None
+        assert dispatch.state == "pending"
+        assert dispatch.error_code == "binding_failed"
 
     assert (await process_webhook("123", db_session)).applied is True
     db_session.expire_all()

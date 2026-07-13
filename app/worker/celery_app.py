@@ -35,6 +35,10 @@ celery_app.conf.update(
             "task": "drain_refine_balance_outbox",
             "schedule": timedelta(minutes=10),
         },
+        "reconcile-payment-checkout-dispatches": {
+            "task": "reconcile_payment_checkout_dispatches",
+            "schedule": timedelta(minutes=5),
+        },
     },
 )
 

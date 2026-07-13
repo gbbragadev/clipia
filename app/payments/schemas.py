@@ -30,6 +30,13 @@ class CheckoutResponse(BaseModel):
     purchase_id: UUID = Field(..., description="Internal purchase ID")
 
 
+class CheckoutStatusResponse(BaseModel):
+    purchase_id: UUID = Field(..., description="Internal purchase ID")
+    dispatch_id: UUID = Field(..., description="Durable checkout dispatch ID")
+    state: str = Field(..., description="Checkout dispatch state")
+    checkout_url: str | None = Field(default=None, description="Safe provider URL when ready")
+
+
 class PurchaseHistoryItem(BaseModel):
     id: UUID = Field(..., description="Purchase ID")
     package_name: str = Field(..., description="Package name")

@@ -106,12 +106,14 @@ def test_postgres_migration_upgrades_from_dispatch_outbox_head(monkeypatch):
                         user_id,
                     )
                 }
-                return columns, statuses
+                dispatch_table = await connection.fetchval("SELECT to_regclass('public.payment_checkout_dispatches')")
+                return columns, statuses, dispatch_table
             finally:
                 await connection.close()
 
-        downgraded_columns, downgraded_statuses = asyncio.run(inspect_downgrade())
+        downgraded_columns, downgraded_statuses, downgraded_dispatch_table = asyncio.run(inspect_downgrade())
         assert {"payment_state", "currency", "snapshot_version", "snapshot_hash"}.isdisjoint(downgraded_columns)
+        assert downgraded_dispatch_table is None
         assert downgraded_statuses == {
             row_id: expected_legacy
             for row_id, _legacy, _payment_state, expected_legacy, _expected_round_trip in divergent_rows
@@ -144,17 +146,73 @@ def test_postgres_migration_upgrades_from_dispatch_outbox_head(monkeypatch):
                         user_id,
                     )
                 }
-                return revision, columns, indexes, round_trip_states
+                dispatch_columns = {
+                    row["column_name"]
+                    for row in await connection.fetch(
+                        "SELECT column_name FROM information_schema.columns "
+                        "WHERE table_schema = 'public' AND table_name = 'payment_checkout_dispatches'"
+                    )
+                }
+                dispatch_indexes = {
+                    row["indexname"]: row["indexdef"]
+                    for row in await connection.fetch(
+                        "SELECT indexname, indexdef FROM pg_indexes "
+                        "WHERE schemaname = 'public' AND tablename = 'payment_checkout_dispatches'"
+                    )
+                }
+                dispatch_constraints = {
+                    row["conname"]: row["definition"]
+                    for row in await connection.fetch(
+                        "SELECT conname, pg_get_constraintdef(oid) AS definition FROM pg_constraint "
+                        "WHERE conrelid = 'payment_checkout_dispatches'::regclass"
+                    )
+                }
+                return (
+                    revision,
+                    columns,
+                    indexes,
+                    round_trip_states,
+                    dispatch_columns,
+                    dispatch_indexes,
+                    dispatch_constraints,
+                )
             finally:
                 await connection.close()
 
-        revision, columns, indexes, round_trip_states = asyncio.run(inspect_migration())
-        assert revision == "c9d0e1f2a3b4"
+        (
+            revision,
+            columns,
+            indexes,
+            round_trip_states,
+            dispatch_columns,
+            dispatch_indexes,
+            dispatch_constraints,
+        ) = asyncio.run(inspect_migration())
+        assert revision == "d0e1f2a3b4c5"
         assert {"payment_state", "currency", "snapshot_version", "snapshot_hash"} <= columns
         assert "uq_credit_purchase_provider_checkout" in indexes
         assert "mp_preference_id IS NOT NULL" in indexes["uq_credit_purchase_provider_checkout"]
         assert "<> 'pending'::text" in indexes["uq_credit_purchase_provider_checkout"]
         assert "uq_credit_purchase_provider_payment" in indexes
+        assert {
+            "purchase_id",
+            "provider_idempotency_key",
+            "request_payload",
+            "request_payload_hash",
+            "publisher_token",
+            "publisher_lease_until",
+            "provider_checkout_id",
+            "checkout_url",
+            "ready_at",
+            "failed_at",
+        } <= dispatch_columns
+        assert "ix_payment_checkout_dispatch_due" in dispatch_indexes
+        due_index = dispatch_indexes["ix_payment_checkout_dispatch_due"]
+        assert "WHERE" in due_index and "state" in due_index and "pending" in due_index
+        assert "uq_payment_checkout_dispatch_provider_checkout" in dispatch_indexes
+        assert "ck_payment_checkout_dispatch_terminal_fields" in dispatch_constraints
+        assert "payment_checkout_dispatches_purchase_id_fkey" in dispatch_constraints
+        assert "ON DELETE RESTRICT" in dispatch_constraints["payment_checkout_dispatches_purchase_id_fkey"]
         assert round_trip_states == {
             row_id: expected_round_trip
             for row_id, _legacy, _payment_state, _expected_legacy, expected_round_trip in divergent_rows

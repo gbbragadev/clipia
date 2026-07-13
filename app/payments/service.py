@@ -6,11 +6,10 @@ from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
 from typing import Callable
 from urllib.parse import urlsplit
-from uuid import UUID, uuid4
+from uuid import UUID
 
 import mercadopago
 import stripe
-from mercadopago.config import RequestOptions
 from sqlalchemy import case, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -18,12 +17,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import settings
 from app.db.models import CreditPurchase, ProcessedPaymentEvent, User
 from app.observability import record_credit_metric
-from app.payments.schemas import CREDIT_PACKAGES
-from app.payments.snapshot import (
-    build_snapshot_metadata,
-    freeze_purchase_snapshot,
-    validate_snapshot_metadata,
-)
+from app.payments.schemas import CREDIT_PACKAGES  # noqa: F401 - compatibility export
+from app.payments.snapshot import validate_snapshot_metadata
 from app.payments.states import canonical_payment_state, payment_state_values
 from app.utils.locks import get_lock
 
@@ -296,89 +291,41 @@ async def _apply_payment_event(
     return PaymentEventResult(applied=applied, balance_delta=delta, state=result_state)
 
 
-async def create_checkout(user: User, package_key: str, db: AsyncSession) -> tuple[str, UUID]:
-    """Create MP preference and return (checkout_url, purchase_id)."""
-    pkg = CREDIT_PACKAGES[package_key]
-
-    purchase = CreditPurchase(
-        id=uuid4(),
-        user_id=user.id,
-        package_name=package_key,
-        credits_amount=pkg["credits"],
-        bonus_credits=pkg["credits"] * settings.PURCHASE_BONUS_PERCENT // 100,
-        price_brl=pkg["price_brl"],
-        provider="mercadopago",
-        mp_preference_id=None,
-        currency="BRL",
-        **payment_state_values("pending"),
+async def _checkout_legacy_result(
+    user: User,
+    package_key: str,
+    provider: str,
+    db: AsyncSession,
+    request_key: str | None,
+) -> tuple[str, UUID]:
+    from app.payments.checkout_outbox import (
+        CheckoutFailed,
+        CheckoutPending,
+        create_or_resume_checkout,
     )
-    freeze_purchase_snapshot(purchase)
-    db.add(purchase)
-    try:
-        await db.commit()
-    except Exception:
-        await db.rollback()
-        raise
 
-    metadata = build_snapshot_metadata(purchase)
+    outcome = await create_or_resume_checkout(
+        user,
+        package_key,
+        provider,
+        db,
+        request_key=request_key,
+    )
+    if outcome.state == "ready" and outcome.checkout_url:
+        return outcome.checkout_url, outcome.purchase_id
+    if outcome.state == "pending":
+        raise CheckoutPending(outcome)
+    raise CheckoutFailed(outcome, detail=outcome.error_detail or "checkout dispatch failed")
 
-    preference_data: dict = {
-        "items": [
-            {
-                "title": f"ClipIA - {pkg['name']} ({pkg['credits']} creditos)",
-                "id": package_key,
-                "quantity": 1,
-                "unit_price": pkg["price_brl"] / 100,
-                "currency_id": "BRL",
-            }
-        ],
-        "external_reference": str(purchase.id),
-        "metadata": metadata,
-    }
 
-    frontend = settings.FRONTEND_URL
-    if frontend.startswith("https://"):
-        preference_data["back_urls"] = {
-            "success": f"{frontend}/dashboard/credits?status=success",
-            "failure": f"{frontend}/dashboard/credits?status=failure",
-            "pending": f"{frontend}/dashboard/credits?status=pending",
-        }
-        preference_data["auto_return"] = "approved"
-
-    backend_url = settings.BACKEND_URL
-    if backend_url and backend_url.startswith("https://"):
-        preference_data["notification_url"] = f"{backend_url}/api/v1/webhooks/mercadopago"
-
-    try:
-        sdk = _get_sdk()
-        idempotency_key = f"clipia:checkout:mercadopago:{purchase.id}"
-        request_options = RequestOptions(
-            access_token=settings.MP_ACCESS_TOKEN,
-            custom_headers={"x-idempotency-key": idempotency_key},
-        )
-        result = await asyncio.to_thread(
-            sdk.preference().create,
-            preference_data,
-            request_options,
-        )
-        if result.get("status") != 201 or not isinstance(result.get("response"), dict):
-            logger.error("MP preference creation failed: %s", result)
-            raise ValueError(f"MercadoPago error: {result.get('response')}")
-
-        response = result["response"]
-        checkout_id = str(response.get("id") or "").strip()
-        checkout_url = str(response.get("init_point") or response.get("sandbox_init_point") or "").strip()
-        if not checkout_id or not checkout_url:
-            raise ValueError("Provider response missing checkout identity or URL")
-        if not _valid_checkout_response("mercadopago", checkout_id, checkout_url):
-            raise ValueError("Provider response has invalid checkout identity or URL")
-
-        purchase.mp_preference_id = checkout_id
-        await db.commit()
-        return checkout_url, purchase.id
-    except Exception:
-        await _terminalize_failed_checkout(db, purchase.id)
-        raise
+async def create_checkout(
+    user: User,
+    package_key: str,
+    db: AsyncSession,
+    request_key: str | None = None,
+) -> tuple[str, UUID]:
+    """Create/resume a durable MP checkout while preserving the ready tuple API."""
+    return await _checkout_legacy_result(user, package_key, "mercadopago", db, request_key)
 
 
 async def process_webhook(payment_id: str, db: AsyncSession) -> PaymentEventResult:
@@ -564,88 +511,14 @@ def _to_plain(obj) -> dict:
     return dict(obj)
 
 
-async def create_checkout_stripe(user: User, package_key: str, db: AsyncSession) -> tuple[str, UUID]:
-    """Create a Stripe Checkout Session and return (checkout_url, purchase_id)."""
-    if not settings.STRIPE_SECRET_KEY:
-        raise ValueError("Stripe nao configurado")
-    pkg = CREDIT_PACKAGES[package_key]
-
-    purchase = CreditPurchase(
-        id=uuid4(),
-        user_id=user.id,
-        package_name=package_key,
-        credits_amount=pkg["credits"],
-        bonus_credits=pkg["credits"] * settings.PURCHASE_BONUS_PERCENT // 100,
-        price_brl=pkg["price_brl"],
-        provider="stripe",
-        mp_preference_id=None,
-        currency="BRL",
-        **payment_state_values("pending"),
-    )
-    freeze_purchase_snapshot(purchase)
-    db.add(purchase)
-    try:
-        await db.commit()
-    except Exception:
-        await db.rollback()
-        raise
-
-    metadata = build_snapshot_metadata(purchase)
-
-    frontend = settings.FRONTEND_URL
-    _init_stripe()
-    try:
-        session = await asyncio.to_thread(
-            lambda: stripe.checkout.Session.create(
-                mode="payment",
-                line_items=[
-                    {
-                        "price_data": {
-                            "currency": "brl",
-                            "product_data": {"name": f"ClipIA - {pkg['name']} ({pkg['credits']} creditos)"},
-                            "unit_amount": pkg["price_brl"],
-                        },
-                        "quantity": 1,
-                    }
-                ],
-                client_reference_id=str(purchase.id),
-                metadata=metadata,
-                payment_intent_data={"metadata": metadata},
-                success_url=f"{frontend}/dashboard/credits?status=success",
-                cancel_url=f"{frontend}/dashboard/credits?status=failure",
-                idempotency_key=f"clipia:checkout:stripe:{purchase.id}",
-            )
-        )
-        checkout_id = str(getattr(session, "id", "") or "").strip()
-        checkout_url = str(getattr(session, "url", "") or "").strip()
-        if not checkout_id or not checkout_url:
-            raise ValueError("Provider response missing checkout identity or URL")
-        if not _valid_checkout_response("stripe", checkout_id, checkout_url):
-            raise ValueError("Provider response has invalid checkout identity or URL")
-
-        purchase.mp_preference_id = checkout_id
-        await db.commit()
-        return checkout_url, purchase.id
-    except Exception:
-        await _terminalize_failed_checkout(db, purchase.id)
-        raise
-
-
-async def _terminalize_failed_checkout(db: AsyncSession, purchase_id: UUID) -> None:
-    """Best-effort durable terminal state after an external checkout failure."""
-    try:
-        await db.rollback()
-        await db.execute(
-            update(CreditPurchase)
-            .where(CreditPurchase.id == purchase_id)
-            .values(**payment_state_values("void"), mp_preference_id=None, mp_payment_id=None)
-            .execution_options(synchronize_session=False)
-        )
-        await db.commit()
-        db.expire_all()
-    except Exception:
-        await db.rollback()
-        logger.exception("Failed to terminalize checkout purchase %s", purchase_id)
+async def create_checkout_stripe(
+    user: User,
+    package_key: str,
+    db: AsyncSession,
+    request_key: str | None = None,
+) -> tuple[str, UUID]:
+    """Create/resume a durable Stripe checkout while preserving the ready tuple API."""
+    return await _checkout_legacy_result(user, package_key, "stripe", db, request_key)
 
 
 async def verify_stripe_event_via_api(parsed: dict) -> dict | None:

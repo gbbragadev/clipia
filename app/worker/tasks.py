@@ -1087,6 +1087,13 @@ def _has_live_post_claim_worker_heartbeat(data: dict[str, str], dispatch, *, now
     }
 
 
+async def _reconcile_payment_checkout_dispatches_async() -> dict[str, int]:
+    from app.db.engine import worker_session
+    from app.payments.checkout_outbox import reconcile_checkout_dispatches
+
+    return await reconcile_checkout_dispatches(worker_session)
+
+
 async def _reconcile_undispatched_job_operations_async() -> dict[str, int]:
     """Replay durable outbox rows, then close legacy pre-outbox operations."""
     from sqlalchemy import or_, select
@@ -1701,6 +1708,11 @@ def cleanup_old_jobs() -> dict[str, int]:
 @celery_app.task(name="reconcile_undispatched_job_operations")
 def reconcile_undispatched_job_operations() -> dict[str, int]:
     return asyncio.run(_reconcile_undispatched_job_operations_async())
+
+
+@celery_app.task(name="reconcile_payment_checkout_dispatches")
+def reconcile_payment_checkout_dispatches() -> dict[str, int]:
+    return asyncio.run(_reconcile_payment_checkout_dispatches_async())
 
 
 @celery_app.task(name="drain_refine_balance_outbox")

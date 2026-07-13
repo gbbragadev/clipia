@@ -4,9 +4,11 @@ import json
 import logging
 import time
 from json import JSONDecodeError
+from uuid import UUID
 
 import stripe
 from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.responses import JSONResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -18,6 +20,7 @@ from app.payments.schemas import (
     CREDIT_PACKAGES,
     CheckoutRequest,
     CheckoutResponse,
+    CheckoutStatusResponse,
     PackageResponse,
     PurchaseHistoryItem,
     PurchaseHistoryResponse,
@@ -97,22 +100,65 @@ async def list_packages(user: User = Depends(get_current_user)):
 )
 async def checkout(
     req: CheckoutRequest,
+    request: Request,
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Initiate a credit purchase via Mercado Pago (default) ou Stripe."""
     if not user.email_verified:
         raise HTTPException(status_code=403, detail="email_verification_required")
-    if req.package not in CREDIT_PACKAGES:
-        raise HTTPException(status_code=400, detail="Pacote invalido")
     if req.provider not in ("mercadopago", "stripe"):
         raise HTTPException(status_code=400, detail="Provedor invalido")
 
+    from app.payments.checkout_outbox import (
+        CheckoutFailed,
+        CheckoutIdempotencyConflict,
+        CheckoutPending,
+    )
+
+    request_key = request.headers.get("idempotency-key")
     try:
         if req.provider == "stripe":
-            checkout_url, purchase_id = await create_checkout_stripe(user, req.package, db)
+            if request_key is None:
+                checkout_url, purchase_id = await create_checkout_stripe(user, req.package, db)
+            else:
+                checkout_url, purchase_id = await create_checkout_stripe(
+                    user,
+                    req.package,
+                    db,
+                    request_key=request_key,
+                )
         else:
-            checkout_url, purchase_id = await create_checkout(user, req.package, db)
+            if request_key is None:
+                checkout_url, purchase_id = await create_checkout(user, req.package, db)
+            else:
+                checkout_url, purchase_id = await create_checkout(
+                    user,
+                    req.package,
+                    db,
+                    request_key=request_key,
+                )
+    except CheckoutPending as exc:
+        return JSONResponse(
+            status_code=202,
+            content={
+                "purchase_id": str(exc.outcome.purchase_id),
+                "dispatch_id": str(exc.outcome.dispatch_id),
+                "state": "pending",
+            },
+        )
+    except CheckoutIdempotencyConflict:
+        raise HTTPException(status_code=409, detail="idempotency_key_conflict")
+    except CheckoutFailed as exc:
+        logger.error("Checkout (%s) failed permanently: %s", req.provider, exc)
+        raise HTTPException(
+            status_code=502,
+            detail="NÃ£o foi possÃ­vel iniciar o pagamento. Tente novamente em instantes.",
+        )
+    except ValueError as exc:
+        if str(exc) == "Invalid credit package":
+            raise HTTPException(status_code=400, detail="Pacote invalido")
+        raise
     except Exception as e:  # noqa: BLE001
         logger.error("Checkout (%s) falhou: %s", req.provider, e)
         raise HTTPException(
@@ -120,6 +166,31 @@ async def checkout(
             detail="Não foi possível iniciar o pagamento. Tente novamente em instantes.",
         )
     return CheckoutResponse(checkout_url=checkout_url, purchase_id=purchase_id)
+
+
+@router.get(
+    "/credits/checkout/{purchase_id}",
+    response_model=CheckoutStatusResponse,
+    response_model_exclude_none=True,
+    summary="Checkout status",
+    responses={200: {"description": "Checkout dispatch status"}, 404: {"description": "Not found"}},
+)
+async def checkout_status(
+    purchase_id: UUID,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    from app.payments.checkout_outbox import get_checkout_outcome
+
+    outcome = await get_checkout_outcome(db, purchase_id=purchase_id, user_id=user.id)
+    if outcome is None:
+        raise HTTPException(status_code=404, detail="checkout_not_found")
+    return CheckoutStatusResponse(
+        purchase_id=outcome.purchase_id,
+        dispatch_id=outcome.dispatch_id,
+        state=outcome.state,
+        checkout_url=outcome.checkout_url if outcome.state == "ready" else None,
+    )
 
 
 @router.post(
