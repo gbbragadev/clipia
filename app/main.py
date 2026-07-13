@@ -11,6 +11,7 @@ from slowapi import Limiter
 from slowapi.errors import RateLimitExceeded
 from starlette.middleware.base import BaseHTTPMiddleware
 
+from app.analytics.routes import router as analytics_router
 from app.api.routes import router
 from app.auth.routes import router as auth_router
 from app.config import BASE_DIR, settings
@@ -100,6 +101,7 @@ def create_app() -> FastAPI:
     app.include_router(auth_router, prefix="/api/v1")
     app.include_router(router, prefix="/api/v1")
     app.include_router(payments_router, prefix="/api/v1")
+    app.include_router(analytics_router, prefix="/api/v1")
 
     jobs_dir = settings.STORAGE_DIR / "jobs"
     jobs_dir.mkdir(parents=True, exist_ok=True)

@@ -54,21 +54,21 @@ async def access_log_middleware(request: Request, call_next):
     record_request_metric(request.method, path, response.status_code)
 
     if path not in {"/health", "/health/deep"}:
-        user_id = None
-        auth_header = request.headers.get("authorization", "")
-        if auth_header.lower().startswith("bearer "):
-            user_id = decode_access_token(auth_header.split(" ", 1)[1])
-
         payload = {
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "method": request.method,
             "path": path,
             "status_code": response.status_code,
             "duration_ms": duration_ms,
-            "client_ip": request.client.host if request.client else None,
-            "user_id": user_id,
             "request_id": request_id,
         }
+        if path != "/api/v1/analytics/events":
+            user_id = None
+            auth_header = request.headers.get("authorization", "")
+            if auth_header.lower().startswith("bearer "):
+                user_id = decode_access_token(auth_header.split(" ", 1)[1])
+            payload["client_ip"] = request.client.host if request.client else None
+            payload["user_id"] = user_id
         logger.info(json.dumps(payload, ensure_ascii=False, separators=(",", ":")))
 
     response.headers["X-Request-ID"] = request_id

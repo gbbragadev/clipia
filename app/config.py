@@ -192,6 +192,8 @@ class Settings(BaseSettings):
     RATE_LIMIT_AUTH: str = "5/minute"
     RATE_LIMIT_GENERATE: str = "10/minute"
     RATE_LIMIT_DEFAULT: str = "60/minute"
+    ANALYTICS_ENABLED: bool = False
+    ANALYTICS_RATE_LIMIT: str = "30/minute"
 
     # CORS
     CORS_ORIGINS: str = "http://localhost:3003"  # comma-separated, "*" for dev

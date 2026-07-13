@@ -233,6 +233,68 @@ class CreditAdjustment(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
+class AnalyticsEvent(Base):
+    """Append-only first-party product event without raw network identifiers."""
+
+    __tablename__ = "analytics_events"
+    __table_args__ = (
+        CheckConstraint(
+            "event_name IN ('landing_viewed', 'hero_cta_clicked', 'example_played', "
+            "'example_completed', 'pricing_viewed', 'pricing_package_selected', "
+            "'support_opened', 'signup_started', 'credits_viewed', 'credits_low', "
+            "'user_returned', 'referral_shared', 'feedback_submitted')",
+            name="ck_analytics_event_name",
+        ),
+        CheckConstraint("schema_version = 1", name="ck_analytics_schema_version"),
+        CheckConstraint("authority IN ('client', 'server')", name="ck_analytics_authority"),
+        CheckConstraint(
+            "page IN ('landing', 'examples', 'niche', 'blog', 'support', 'auth_register', "
+            "'credits', 'dashboard', 'editor', 'viewer')",
+            name="ck_analytics_page",
+        ),
+        CheckConstraint(
+            "acquisition_source IN ('direct', 'organic', 'referral', 'social', 'email', 'paid', 'campaign')",
+            name="ck_analytics_acquisition_source",
+        ),
+        CheckConstraint(
+            "device_class IN ('desktop', 'mobile', 'tablet', 'unknown')",
+            name="ck_analytics_device_class",
+        ),
+        CheckConstraint("LENGTH(payload_hash) = 64", name="ck_analytics_payload_hash"),
+        Index("ix_analytics_events_event_time", "event_name", "occurred_at"),
+        Index("ix_analytics_events_session_time", "anonymous_session_id", "occurred_at"),
+        Index(
+            "ix_analytics_events_user_time",
+            "user_id",
+            "occurred_at",
+            postgresql_where=text("user_id IS NOT NULL"),
+            sqlite_where=text("user_id IS NOT NULL"),
+        ),
+        Index("ix_analytics_events_event_user_time", "event_name", "user_id", "occurred_at"),
+    )
+
+    event_id: Mapped[uuid.UUID] = mapped_column(GUID(), primary_key=True)
+    event_name: Mapped[str] = mapped_column(String(50), nullable=False)
+    schema_version: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default="1")
+    authority: Mapped[str] = mapped_column(String(10), nullable=False)
+    occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    anonymous_session_id: Mapped[uuid.UUID | None] = mapped_column(GUID(), nullable=True)
+    user_id: Mapped[uuid.UUID | None] = mapped_column(
+        GUID(), ForeignKey("users.id", ondelete="RESTRICT"), nullable=True
+    )
+    page: Mapped[str] = mapped_column(String(30), nullable=False)
+    acquisition_source: Mapped[str] = mapped_column(String(20), nullable=False)
+    utm_source: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    utm_medium: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    utm_campaign: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    utm_content: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    utm_term: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    device_class: Mapped[str] = mapped_column(String(10), nullable=False)
+    properties: Mapped[dict] = mapped_column(JsonType, nullable=False)
+    payload_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+
+
 class User(Base):
     __tablename__ = "users"
     __table_args__ = (
