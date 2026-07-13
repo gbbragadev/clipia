@@ -3,7 +3,7 @@ import secrets
 import uuid
 from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, Response, status
 from slowapi import Limiter
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -34,6 +34,7 @@ from app.auth.schemas import (
     VerifyResetCodeRequest,
 )
 from app.auth.service import create_access_token, create_reset_token, decode_reset_token, hash_password, verify_password
+from app.auth.session import clear_auth_cookies, new_csrf_token, set_auth_cookies
 from app.auth.turnstile import verify_turnstile
 from app.config import settings
 from app.db.engine import get_db
@@ -63,7 +64,7 @@ def _ensure_utc(dt: datetime) -> datetime:
     responses={201: {"description": "User created"}, 409: {"description": "Email already exists"}},
 )
 @limiter.limit(settings.RATE_LIMIT_AUTH)
-async def register(request: Request, body: RegisterRequest, db: AsyncSession = Depends(get_db)):
+async def register(request: Request, response: Response, body: RegisterRequest, db: AsyncSession = Depends(get_db)):
     """Register a new user and return an access token."""
     if not await verify_turnstile(body.turnstile_token, client_ip(request), request.headers.get("x-readiness-bypass")):
         raise HTTPException(
@@ -117,8 +118,10 @@ async def register(request: Request, body: RegisterRequest, db: AsyncSession = D
 
         await asyncio.to_thread(send_verification_email, body.email, code, body.name)
 
-        token = create_access_token(str(user.id))
-        return TokenResponse(access_token=token)
+        csrf_token = new_csrf_token()
+        token = create_access_token(str(user.id), csrf_token=csrf_token)
+        set_auth_cookies(response, access_token=token, csrf_token=csrf_token)
+        return TokenResponse(access_token=token, csrf_token=csrf_token)
 
 
 @router.post(
@@ -129,7 +132,7 @@ async def register(request: Request, body: RegisterRequest, db: AsyncSession = D
     responses={200: {"description": "Login successful"}, 401: {"description": "Invalid credentials"}},
 )
 @limiter.limit(settings.RATE_LIMIT_AUTH)
-async def login(request: Request, body: LoginRequest, db: AsyncSession = Depends(get_db)):
+async def login(request: Request, response: Response, body: LoginRequest, db: AsyncSession = Depends(get_db)):
     """Authenticate user."""
     result = await db.execute(select(User).where(User.email == body.email))
     user = result.scalar_one_or_none()
@@ -137,8 +140,16 @@ async def login(request: Request, body: LoginRequest, db: AsyncSession = Depends
     if user is None or not verify_password(body.password, user.password_hash):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Email ou senha incorretos")
 
-    token = create_access_token(str(user.id))
-    return TokenResponse(access_token=token)
+    csrf_token = new_csrf_token()
+    token = create_access_token(str(user.id), csrf_token=csrf_token)
+    set_auth_cookies(response, access_token=token, csrf_token=csrf_token)
+    return TokenResponse(access_token=token, csrf_token=csrf_token)
+
+
+@router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
+async def logout(response: Response, _user: User = Depends(get_current_user)) -> None:
+    """End the browser session; Bearer clients remain compatible."""
+    clear_auth_cookies(response)
 
 
 @router.post(
@@ -482,6 +493,7 @@ async def change_password(
 )
 async def delete_account(
     body: DeleteAccountRequest,
+    response: Response,
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -511,6 +523,7 @@ async def delete_account(
     await invalidate_password_reset_tokens(db, user_id=user.id, used_at=now)
     await db.commit()
 
+    clear_auth_cookies(response)
     await asyncio.to_thread(send_account_deleted_email, original_email, original_name)
     return {"status": "account_deleted"}
 

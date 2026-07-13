@@ -9,6 +9,7 @@ from app import observability
 def reset_metrics_state():
     observability._REQUEST_COUNTS.clear()
     observability._CREDIT_TOTALS.clear()
+    observability._AUTH_TRANSPORT_COUNTS.clear()
 
 
 @pytest.mark.asyncio
@@ -25,6 +26,7 @@ async def test_metrics_exposes_prometheus_format(client):
     assert "# HELP clipia_credits_total Authoritative credits from durable database state" in body
     assert 'clipia_credit_mutations_process_total{type="credit"} 7' in body
     assert 'clipia_credit_mutations_process_total{type="debit"} 3' in body
+    assert "# HELP clipia_auth_transport_total" in body
 
 
 @pytest.mark.asyncio
@@ -43,3 +45,4 @@ async def test_metrics_counts_requests_by_method_path_and_status(client, verifie
     assert str(missing_job_id) not in body
     assert 'clipia_active_jobs{status="queued"}' in body
     assert 'clipia_active_jobs{status="processing"}' in body
+    assert 'clipia_auth_transport_total{transport="bearer"} 2' in body

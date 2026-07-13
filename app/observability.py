@@ -28,6 +28,7 @@ logger = logging.getLogger("clipia.access")
 _START_TIME = time.monotonic()
 _REQUEST_COUNTS: Counter[tuple[str, str, str]] = Counter()
 _CREDIT_TOTALS: Counter[str] = Counter()
+_AUTH_TRANSPORT_COUNTS: Counter[str] = Counter()
 _METRIC_LOCK = Lock()
 _HEALTH_CACHE: dict[str, Any] = {"expires_at": 0.0, "payload": None}
 
@@ -42,6 +43,13 @@ def record_credit_metric(kind: str, amount: float) -> None:
         return
     with _METRIC_LOCK:
         _CREDIT_TOTALS[kind] += amount
+
+
+def record_auth_transport(transport: str) -> None:
+    if transport not in {"bearer", "cookie"}:
+        return
+    with _METRIC_LOCK:
+        _AUTH_TRANSPORT_COUNTS[transport] += 1
 
 
 def _metric_path(request: Request) -> str:
@@ -201,6 +209,7 @@ async def render_metrics() -> str:
     credit_totals = await _get_credit_totals()
     process_credit_totals = _snapshot_credit_totals()
     request_counts = _snapshot_request_counts()
+    auth_transport_counts = _snapshot_auth_transport_counts()
 
     lines = [
         "# HELP clipia_requests_total Total requests",
@@ -239,6 +248,16 @@ async def render_metrics() -> str:
     for kind, amount in sorted(process_credit_totals.items()):
         lines.append(f'clipia_credit_mutations_process_total{{type="{kind}"}} {amount}')
 
+    lines.extend(
+        [
+            "",
+            "# HELP clipia_auth_transport_total Authenticated requests by phase-one transport",
+            "# TYPE clipia_auth_transport_total counter",
+        ]
+    )
+    for transport, count in sorted(auth_transport_counts.items()):
+        lines.append(f'clipia_auth_transport_total{{transport="{transport}"}} {count}')
+
     return "\n".join(lines) + "\n"
 
 
@@ -250,6 +269,11 @@ def _snapshot_request_counts() -> Counter[tuple[str, str, str]]:
 def _snapshot_credit_totals() -> Counter[str]:
     with _METRIC_LOCK:
         return Counter(_CREDIT_TOTALS)
+
+
+def _snapshot_auth_transport_counts() -> Counter[str]:
+    with _METRIC_LOCK:
+        return Counter(_AUTH_TRANSPORT_COUNTS)
 
 
 async def _get_active_job_counts() -> dict[str, int]:

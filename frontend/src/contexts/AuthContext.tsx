@@ -8,9 +8,11 @@ import {
   getMe,
   login as authLogin,
   register as authRegister,
+  logout as authLogout,
   setToken,
+  setCsrfToken,
   clearToken,
-  getToken,
+  hasSessionCandidate,
   NetworkError,
 } from "@/lib/auth";
 import type { SelectedPackage } from "@/lib/package-intent";
@@ -36,8 +38,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const { info } = useToast();
 
   useEffect(() => {
-    const token = getToken();
-    if (!token) {
+    if (!hasSessionCandidate()) {
       setLoading(false);
       return;
     }
@@ -67,8 +68,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [info, pathname, router]);
 
   useEffect(() => {
-    const token = getToken();
-    if (!token) return;
+    if (!hasSessionCandidate()) return;
 
     const interval = window.setInterval(() => {
       getMe()
@@ -89,6 +89,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const login = useCallback(async (email: string, password: string) => {
     const res = await authLogin(email, password);
     setToken(res.access_token);
+    setCsrfToken(res.csrf_token);
     // Erro transitório em /auth/me logo após o login não deve impedir o redirect
     // para o dashboard: o token já foi gravado e o efeito de carregamento inicial
     // vai revalidar. Só repassamos 401 (sessão expirada de verdade).
@@ -120,6 +121,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
     clearStoredUTM();
     setToken(res.access_token);
+    setCsrfToken(res.csrf_token);
     try {
       const me = await getMe();
       setUser(me);
@@ -133,6 +135,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const logout = useCallback(() => {
+    void authLogout().catch(() => undefined);
     clearToken();
     setUser(null);
   }, []);

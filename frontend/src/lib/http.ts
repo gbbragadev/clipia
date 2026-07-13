@@ -1,6 +1,8 @@
+import { clearAuthSession, getCsrfToken } from './session'
+
 export function notifySessionExpired(): void {
   if (typeof window === 'undefined') return
-  window.localStorage.removeItem('clipia_token')
+  clearAuthSession()
   window.dispatchEvent(new CustomEvent('clipia:session-expired'))
 }
 
@@ -74,12 +76,17 @@ export async function fetchJson<T>(
   fallbackMessage = 'Erro na requisição',
 ): Promise<T> {
   try {
+    const headers = new Headers(init.headers)
+    if (!headers.has('Content-Type')) headers.set('Content-Type', 'application/json')
+    const method = (init.method || 'GET').toUpperCase()
+    if (!['GET', 'HEAD', 'OPTIONS', 'TRACE'].includes(method) && !headers.has('X-CSRF-Token')) {
+      const csrf = getCsrfToken()
+      if (csrf) headers.set('X-CSRF-Token', csrf)
+    }
     const response = await fetch(input, {
       ...init,
-      headers: {
-        'Content-Type': 'application/json',
-        ...init.headers,
-      },
+      credentials: 'include',
+      headers,
     })
 
     if (!response.ok) {

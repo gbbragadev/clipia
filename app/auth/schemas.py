@@ -77,6 +77,7 @@ class LoginRequest(BaseModel):
 class TokenResponse(BaseModel):
     access_token: str = Field(..., description="JWT access token")
     token_type: str = Field(default="bearer", description="Token type (bearer)")
+    csrf_token: str = Field(..., description="CSRF token bound to the HttpOnly session")
 
 
 class UserResponse(BaseModel):
