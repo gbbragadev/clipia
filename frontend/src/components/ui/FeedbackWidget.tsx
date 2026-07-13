@@ -6,6 +6,7 @@ import { MessageSquare, Star, X } from 'lucide-react'
 
 import { submitFeedback } from '@/lib/feedback'
 import { useToast } from '@/components/ui/feedback'
+import { trackProductEvent } from '@/lib/analytics'
 
 /**
  * Botão flutuante de feedback (beta): abre painel com nota 1-5 + comentário opcional.
@@ -34,6 +35,12 @@ export default function FeedbackWidget() {
         comment: comment.trim() || undefined,
         source_url: pathname ?? undefined,
       })
+      if (rating >= 1 && rating <= 5) {
+        trackProductEvent('feedback_submitted', {
+          score: rating as 1 | 2 | 3 | 4 | 5,
+          context: 'general',
+        })
+      }
       success('Feedback enviado', 'Obrigado por ajudar a melhorar o ClipIA! 💛')
       setOpen(false)
       setRating(0)

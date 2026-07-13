@@ -21,7 +21,7 @@ export function NicheGallery({ videos }: { videos: ShowcaseVideo[] }) {
   return (
     <div data-niche-video-grid className="flex md:grid md:grid-cols-2 lg:grid-cols-3 gap-6 max-w-6xl mx-auto overflow-x-auto md:overflow-visible snap-x snap-mandatory px-4 md:px-0 overscroll-x-contain scroll-px-4 [&>*]:w-[80vw] md:[&>*]:w-auto [&>*]:shrink-0 md:[&>*]:shrink">
       {videos.map((item) => (
-        <ShowcaseCard key={item.id} item={item} />
+        <ShowcaseCard key={item.id} item={item} placement="niche" />
       ))}
     </div>
   )

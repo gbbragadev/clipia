@@ -4,7 +4,8 @@ from datetime import datetime, timedelta, timezone
 import pytest
 from sqlalchemy import update
 
-from app.db.models import CreditPurchase, Job, JobDispatch, User
+from app.config import settings
+from app.db.models import AnalyticsEvent, CreditPurchase, Job, JobDispatch, User
 
 
 def _write_file(path, size: int) -> None:
@@ -139,6 +140,16 @@ async def test_admin_dashboard_aggregates_finance_funnel_operations_and_recent_a
     assert body["funnel"]["paying"] == 1
     assert body["funnel"]["verification_rate"] == 50.0
     assert body["funnel"]["payer_conversion_rate"] == 50.0
+    assert body["funnel"]["visited"] == 0
+    assert body["funnel"]["cta_clicked"] == 0
+    assert body["funnel"]["first_generation"] == 2
+    assert body["funnel"]["exported"] == 0
+    assert body["funnel"]["checkout_started"] == 2
+    assert body["funnel"]["second_generation"] == 1
+    assert body["funnel"]["analytics_enabled"] is False
+    assert body["funnel"]["baseline_days"] == 0
+    assert body["funnel"]["onboarding_gate_ready"] is False
+    assert {"weekly", "source", "niche", "device"} == set(body["cohorts"])
 
     assert body["operations"]["queued_jobs"] == 1
     assert body["operations"]["processing_jobs"] == 1
@@ -216,3 +227,90 @@ async def test_admin_dashboard_uses_canonical_payment_precedence(
     recent_states = {item["id"]: item["status"] for item in body["recent_activity"]["recent_purchases"]}
     assert recent_states[str(stale_approved.id)] == "refunded"
     assert recent_states[str(rolling_paid.id)] == "paid"
+
+
+@pytest.mark.asyncio
+async def test_admin_dashboard_links_anonymous_session_and_segments_cohort_without_pii(
+    client,
+    db_session,
+    verified_user,
+    admin_user,
+    auth_headers,
+    job_factory,
+    monkeypatch,
+):
+    monkeypatch.setattr(settings, "ANALYTICS_ENABLED", True)
+    now = datetime.now(timezone.utc)
+    session_id = uuid.uuid4()
+    job = await job_factory(user_id=verified_user.id, status="completed")
+    await db_session.execute(
+        update(User)
+        .where(User.id == verified_user.id)
+        .values(
+            created_at=now - timedelta(days=2),
+            utm_source="youtube",
+            utm_medium="paid_social",
+            utm_campaign="nicho-curiosidades",
+        )
+    )
+    await db_session.execute(update(Job).where(Job.id == job.id).values(exported_at=now))
+    db_session.add_all(
+        [
+            AnalyticsEvent(
+                event_id=uuid.uuid4(),
+                event_name="landing_viewed",
+                schema_version=1,
+                authority="client",
+                occurred_at=now - timedelta(days=2),
+                received_at=now - timedelta(days=2),
+                anonymous_session_id=session_id,
+                user_id=None,
+                page="landing",
+                acquisition_source="paid",
+                utm_source="youtube",
+                utm_medium="paid_social",
+                utm_campaign="nicho-curiosidades",
+                device_class="mobile",
+                properties={"landing_variant": "control", "niche": "curiosidades", "referrer_domain": None},
+                payload_hash="a" * 64,
+            ),
+            AnalyticsEvent(
+                event_id=uuid.uuid4(),
+                event_name="hero_cta_clicked",
+                schema_version=1,
+                authority="client",
+                occurred_at=now - timedelta(days=2),
+                received_at=now - timedelta(days=2),
+                anonymous_session_id=session_id,
+                user_id=verified_user.id,
+                page="landing",
+                acquisition_source="paid",
+                utm_source="youtube",
+                utm_medium="paid_social",
+                utm_campaign="nicho-curiosidades",
+                device_class="mobile",
+                properties={"placement": "hero", "cta_variant": "control", "selected_package": None},
+                payload_hash="b" * 64,
+            ),
+        ]
+    )
+    await db_session.commit()
+
+    response = await client.get("/api/v1/admin/dashboard?range=30d", headers=auth_headers(admin_user))
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["funnel"]["visited"] == 1
+    assert body["funnel"]["cta_clicked"] == 1
+    assert body["funnel"]["first_generation"] == 1
+    assert body["funnel"]["exported"] == 1
+    assert body["funnel"]["analytics_enabled"] is True
+    assert body["funnel"]["baseline_days"] == 3
+    assert body["funnel"]["onboarding_gate_ready"] is False
+    source_cohorts = {item["key"]: item for item in body["cohorts"]["source"]}
+    niche_cohorts = {item["key"]: item for item in body["cohorts"]["niche"]}
+    device_cohorts = {item["key"]: item for item in body["cohorts"]["device"]}
+    assert source_cohorts["youtube"]["registered"] == 1
+    assert niche_cohorts["curiosidades"]["registered"] == 1
+    assert device_cohorts["mobile"]["registered"] == 1
+    assert "email" not in source_cohorts["youtube"]

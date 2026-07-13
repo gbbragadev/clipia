@@ -23,6 +23,7 @@ import CreditPackageCard from '@/components/dashboard/CreditPackageCard'
 import PurchaseHistory from '@/components/dashboard/PurchaseHistory'
 import { InlineError } from '@/components/ui/feedback'
 import { useToast } from '@/components/ui/feedback'
+import { trackProductEvent } from '@/lib/analytics'
 
 const CHECKOUT_ATTEMPT_STORAGE_KEY = 'clipia_checkout_attempt'
 const CHECKOUT_POLL_DELAYS_MS = [250, 500, 1_000, 2_000] as const
@@ -114,6 +115,21 @@ export default function CreditsPage() {
   const checkoutRunRef = useRef(0)
   const checkoutBusyRef = useRef(false)
   const pollCancelRef = useRef<(() => void) | null>(null)
+
+  useEffect(() => {
+    if (!user) return
+    const balanceBucket = user.credits <= 0 ? 'zero' : user.credits <= 2 ? 'low' : user.credits <= 30 ? 'medium' : 'high'
+    trackProductEvent(
+      'credits_viewed',
+      { balance_bucket: balanceBucket, placement: 'credits' },
+      { once: `credits-viewed:${balanceBucket}`, page: 'credits' },
+    )
+    trackProductEvent(
+      'pricing_viewed',
+      { placement: 'credits', pricing_variant: 'control' },
+      { once: 'pricing-viewed:credits', page: 'credits' },
+    )
+  }, [user])
 
   const cancelPollDelay = useCallback(() => {
     const cancel = pollCancelRef.current
@@ -386,6 +402,11 @@ export default function CreditsPage() {
                     selected={packageIntent === selectedPackageIntent}
                     onSelect={() => {
                       if (!packageIntent) return
+                      trackProductEvent(
+                        'pricing_package_selected',
+                        { package: packageIntent, placement: 'credits' },
+                        { page: 'credits' },
+                      )
                       invalidateCheckoutRun()
                       selectionChangedByUserRef.current = true
                       setSelectedPackageIntent(packageIntent)

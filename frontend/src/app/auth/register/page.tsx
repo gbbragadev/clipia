@@ -9,7 +9,6 @@ import Link from "next/link";
 import { useAuth } from "@/contexts/AuthContext";
 import Logo from "@/components/brand/Logo";
 import { FilmstripBackground } from "@/components/ui/FilmstripBackground";
-import { trackEvent, trackGA } from "@/components/TrackingScripts";
 import { TurnstileWidget } from "@/components/auth/TurnstileWidget";
 import { fetchPublicConfig } from "@/lib/config";
 import { FREE_CLAIM } from "@/components/landing/lib/data";
@@ -49,8 +48,6 @@ function RegisterForm() {
     setLoading(true);
     try {
       await register(email, name, password, captchaToken, consentAccepted, selectedPackage ?? undefined);
-      trackEvent("CompleteRegistration");
-      trackGA("sign_up", { method: "email" });
       const verifyParams = new URLSearchParams({ email });
       if (selectedPackage) verifyParams.set("selected_package", selectedPackage);
       router.push(`/auth/verify?${verifyParams.toString()}`);

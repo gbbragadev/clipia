@@ -21,7 +21,17 @@ from app.auth.dependencies import get_current_admin_user, get_current_user
 from app.config import settings
 from app.credits import CREDIT_TARIFFS
 from app.db.engine import get_db
-from app.db.models import CreditAdjustment, CreditPurchase, Feedback, Job, JobDispatch, User, VoiceClone, WaitlistEntry
+from app.db.models import (
+    AnalyticsEvent,
+    CreditAdjustment,
+    CreditPurchase,
+    Feedback,
+    Job,
+    JobDispatch,
+    User,
+    VoiceClone,
+    WaitlistEntry,
+)
 from app.errors import ErrorMessages, not_found_error, validate_uuid
 from app.models import (
     AdminCreditAdjustRequest,
@@ -82,6 +92,7 @@ router = APIRouter(tags=["jobs"])
 _redis = get_redis()
 
 _ADMIN_DASHBOARD_RANGES = {"7d": 7, "30d": 30, "90d": 90}
+_ANALYTICS_NICHES = {"curiosidades", "religioso", "motivacional", "financas", "historias", "humor", "drama"}
 
 
 def _validate_audio_upload(content_type: str | None, filename: str | None, size: int, max_mb: int = 50) -> str:
@@ -2345,6 +2356,10 @@ async def admin_dashboard(
     dispatches_result = await db.execute(select(JobDispatch).where(JobDispatch.created_at >= window_start))
     dispatches_in_range = list(dispatches_result.scalars().all())
 
+    analytics_result = await db.execute(select(AnalyticsEvent).where(AnalyticsEvent.occurred_at >= window_start))
+    analytics_events = list(analytics_result.scalars().all())
+    analytics_started_at = await db.scalar(select(func.min(AnalyticsEvent.occurred_at)))
+
     def in_window(value: datetime | None) -> bool:
         utc_value = _coerce_utc(value)
         return utc_value is not None and utc_value >= window_start
@@ -2484,6 +2499,126 @@ async def admin_dashboard(
     verification_rate = _round2((verified_users / registered) * 100) if registered else 0.0
     payer_conversion_rate = _round2((paying_users / registered) * 100) if registered else 0.0
 
+    cohort_uuid_ids = {user.id for user in users_in_range}
+    cohort_jobs: list[Job] = []
+    cohort_purchases: list[CreditPurchase] = []
+    if cohort_uuid_ids:
+        cohort_jobs = list((await db.execute(select(Job).where(Job.user_id.in_(cohort_uuid_ids)))).scalars().all())
+        cohort_purchases = list(
+            (await db.execute(select(CreditPurchase).where(CreditPurchase.user_id.in_(cohort_uuid_ids))))
+            .scalars()
+            .all()
+        )
+
+    job_counts_by_user: dict[str, int] = defaultdict(int)
+    first_generation_user_ids: set[str] = set()
+    exported_user_ids: set[str] = set()
+    for job in cohort_jobs:
+        user_id = str(job.user_id)
+        job_counts_by_user[user_id] += 1
+        first_generation_user_ids.add(user_id)
+        if job.exported_at is not None:
+            exported_user_ids.add(user_id)
+    second_generation_user_ids = {
+        user_id for user_id, generation_count in job_counts_by_user.items() if generation_count >= 2
+    }
+    checkout_user_ids = {str(purchase.user_id) for purchase in cohort_purchases}
+
+    session_user_ids: dict[str, str] = {}
+    for event in analytics_events:
+        if event.anonymous_session_id is not None and event.user_id is not None:
+            session_user_ids[str(event.anonymous_session_id)] = str(event.user_id)
+
+    def analytics_identity(event: AnalyticsEvent) -> str | None:
+        if event.user_id is not None:
+            return f"user:{event.user_id}"
+        if event.anonymous_session_id is None:
+            return None
+        session_id = str(event.anonymous_session_id)
+        linked_user_id = session_user_ids.get(session_id)
+        return f"user:{linked_user_id}" if linked_user_id else f"session:{session_id}"
+
+    visited_identities = {
+        identity
+        for event in analytics_events
+        if event.event_name == "landing_viewed" and (identity := analytics_identity(event)) is not None
+    }
+    cta_identities = {
+        identity
+        for event in analytics_events
+        if event.event_name == "hero_cta_clicked" and (identity := analytics_identity(event)) is not None
+    }
+
+    device_by_user: dict[str, tuple[datetime, str]] = {}
+    for event in analytics_events:
+        identity = analytics_identity(event)
+        if not identity or not identity.startswith("user:") or event.device_class == "unknown":
+            continue
+        user_id = identity.removeprefix("user:")
+        if user_id not in cohort_user_ids:
+            continue
+        occurred_at = _coerce_utc(event.occurred_at) or now
+        current = device_by_user.get(user_id)
+        if current is None or occurred_at < current[0]:
+            device_by_user[user_id] = (occurred_at, event.device_class)
+
+    def safe_cohort_token(value: str | None, fallback: str) -> str:
+        normalized = value.strip().lower() if value else ""
+        if normalized and len(normalized) <= 100 and all(char.isalnum() or char in "._-" for char in normalized):
+            return normalized
+        return fallback
+
+    def user_niche(user: User) -> str:
+        campaign = safe_cohort_token(user.utm_campaign, "")
+        if campaign.startswith("nicho-"):
+            niche = campaign.removeprefix("nicho-")
+            if niche in _ANALYTICS_NICHES:
+                return niche
+        return "unknown"
+
+    def weekly_key(user: User) -> str:
+        created_at = _coerce_utc(user.created_at) or now
+        return (created_at.date() - timedelta(days=created_at.weekday())).isoformat()
+
+    def cohort_metrics(key: str, user_ids: set[str]) -> dict[str, int | float | str]:
+        cohort_registered = len(user_ids)
+        cohort_verified = sum(1 for user in users_in_range if str(user.id) in user_ids and user.email_verified)
+        cohort_first = len(user_ids & first_generation_user_ids)
+        cohort_exported = len(user_ids & exported_user_ids)
+        cohort_checkout = len(user_ids & checkout_user_ids)
+        cohort_paying = len(user_ids & approved_user_ids)
+        cohort_second = len(user_ids & second_generation_user_ids)
+        return {
+            "key": key,
+            "registered": cohort_registered,
+            "verified": cohort_verified,
+            "first_generation": cohort_first,
+            "exported": cohort_exported,
+            "checkout_started": cohort_checkout,
+            "paying": cohort_paying,
+            "second_generation": cohort_second,
+            "verification_rate": _round2((cohort_verified / cohort_registered) * 100) if cohort_registered else 0.0,
+            "activation_rate": _round2((cohort_first / cohort_verified) * 100) if cohort_verified else 0.0,
+            "payer_conversion_rate": _round2((cohort_paying / cohort_registered) * 100) if cohort_registered else 0.0,
+        }
+
+    def grouped_cohorts(group_key) -> list[dict[str, int | float | str]]:
+        groups: dict[str, set[str]] = defaultdict(set)
+        for user in users_in_range:
+            groups[group_key(user)].add(str(user.id))
+        return [cohort_metrics(key, groups[key]) for key in sorted(groups)]
+
+    baseline_start = _coerce_utc(analytics_started_at)
+    baseline_days = (
+        max((now.date() - baseline_start.date()).days + 1, 0)
+        if settings.ANALYTICS_ENABLED and baseline_start is not None
+        else 0
+    )
+    first_generation_users = len(cohort_user_ids & first_generation_user_ids)
+    exported_users = len(cohort_user_ids & exported_user_ids)
+    checkout_users = len(cohort_user_ids & checkout_user_ids)
+    second_generation_users = len(cohort_user_ids & second_generation_user_ids)
+
     return {
         "range": range,
         "window_start": window_start.date().isoformat(),
@@ -2518,11 +2653,33 @@ async def admin_dashboard(
             ],
         },
         "funnel": {
+            "visited": len(visited_identities),
+            "cta_clicked": len(cta_identities),
             "registered": registered,
             "verified": verified_users,
+            "first_generation": first_generation_users,
+            "exported": exported_users,
+            "checkout_started": checkout_users,
             "paying": paying_users,
+            "second_generation": second_generation_users,
             "verification_rate": verification_rate,
             "payer_conversion_rate": payer_conversion_rate,
+            "cta_registration_rate": _round2((registered / len(cta_identities)) * 100) if cta_identities else 0.0,
+            "activation_rate": _round2((first_generation_users / verified_users) * 100) if verified_users else 0.0,
+            "export_payment_rate": _round2((paying_users / exported_users) * 100) if exported_users else 0.0,
+            "second_generation_rate": _round2((second_generation_users / first_generation_users) * 100)
+            if first_generation_users
+            else 0.0,
+            "analytics_enabled": settings.ANALYTICS_ENABLED,
+            "baseline_started_at": baseline_start.date().isoformat() if baseline_start else None,
+            "baseline_days": baseline_days,
+            "onboarding_gate_ready": settings.ANALYTICS_ENABLED and baseline_days >= 14,
+        },
+        "cohorts": {
+            "weekly": grouped_cohorts(weekly_key),
+            "source": grouped_cohorts(lambda user: safe_cohort_token(user.utm_source, "direct")),
+            "niche": grouped_cohorts(user_niche),
+            "device": grouped_cohorts(lambda user: device_by_user.get(str(user.id), (now, "unknown"))[1]),
         },
         "operations": {
             "queued_jobs": int(current_job_statuses["queued"]),

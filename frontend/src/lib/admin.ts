@@ -41,11 +41,31 @@ export interface AdminDashboardResponse {
     approved_orders_by_day: AdminSeriesPoint[]
   }
   funnel: {
+    visited: number
+    cta_clicked: number
     registered: number
     verified: number
+    first_generation: number
+    exported: number
+    checkout_started: number
     paying: number
+    second_generation: number
     verification_rate: number
     payer_conversion_rate: number
+    cta_registration_rate: number
+    activation_rate: number
+    export_payment_rate: number
+    second_generation_rate: number
+    analytics_enabled: boolean
+    baseline_started_at: string | null
+    baseline_days: number
+    onboarding_gate_ready: boolean
+  }
+  cohorts: {
+    weekly: AdminCohortRow[]
+    source: AdminCohortRow[]
+    niche: AdminCohortRow[]
+    device: AdminCohortRow[]
   }
   operations: {
     queued_jobs: number
@@ -96,6 +116,20 @@ export interface AdminDashboardResponse {
       created_at: string | null
     }>
   }
+}
+
+export interface AdminCohortRow {
+  key: string
+  registered: number
+  verified: number
+  first_generation: number
+  exported: number
+  checkout_started: number
+  paying: number
+  second_generation: number
+  verification_rate: number
+  activation_rate: number
+  payer_conversion_rate: number
 }
 
 export async function fetchAdminDashboard(range: AdminRange): Promise<AdminDashboardResponse> {

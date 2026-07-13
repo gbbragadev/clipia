@@ -18,6 +18,7 @@ import {
 import type { SelectedPackage } from "@/lib/package-intent";
 import { getStoredUTM, clearStoredUTM } from "@/hooks/useUTM";
 import { useToast } from "@/components/ui/feedback";
+import { setOnboardingAnalyticsEntry } from "@/lib/analytics";
 
 interface AuthContextType {
   user: User | null;
@@ -119,6 +120,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (utm.utm_campaign?.startsWith("nicho-")) {
       localStorage.setItem("clipia_signup_intent", utm.utm_campaign.slice("nicho-".length));
     }
+    setOnboardingAnalyticsEntry(selectedPackage ? "package" : utm.utm_campaign?.startsWith("nicho-") ? "niche" : "direct");
     clearStoredUTM();
     setToken(res.access_token);
     setCsrfToken(res.csrf_token);
