@@ -95,17 +95,19 @@ async def test_admin_adjust_credits_creates_audit(client, db_session, admin_user
 
 
 @pytest.mark.asyncio
-async def test_admin_adjust_credits_clamps_at_zero(client, db_session, admin_user, verified_user, auth_headers):
+async def test_admin_adjust_credits_rejects_negative_balance(
+    client, db_session, admin_user, verified_user, auth_headers
+):
     response = await client.post(
         f"/api/v1/admin/users/{verified_user.id}/adjust-credits",
         json={"delta": -100, "reason": "estorno manual"},
         headers=auth_headers(admin_user),
     )
 
-    assert response.status_code == 200
-    assert response.json()["new_balance"] == 0, "Saldo nunca fica negativo."
+    assert response.status_code == 409
+    assert response.json()["detail"] == "insufficient_credits"
     db_session.expire_all()
-    assert (await db_session.get(User, verified_user.id)).credits == 0
+    assert (await db_session.get(User, verified_user.id)).credits == 5
 
 
 @pytest.mark.asyncio

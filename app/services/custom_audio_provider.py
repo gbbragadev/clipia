@@ -5,7 +5,7 @@ import logging
 import subprocess
 from pathlib import Path
 
-from app.config import settings
+from app.credits import CREDIT_TARIFFS
 from app.services.voice_provider import VoiceInfo, VoiceProvider
 
 logger = logging.getLogger(__name__)
@@ -44,7 +44,7 @@ class CustomAudioProvider(VoiceProvider):
         ]
 
     def estimate_cost(self, text: str) -> int:
-        return settings.CREDIT_COST_CUSTOM_AUDIO
+        return int(CREDIT_TARIFFS.standard_voice)
 
 
 def validate_audio_file(file_path: str) -> dict:

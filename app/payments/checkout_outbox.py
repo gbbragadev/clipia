@@ -18,6 +18,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.config import settings
+from app.credits import normalize_checkout_package
 from app.db.models import CreditPurchase, PaymentCheckoutDispatch, User
 from app.payments.schemas import CREDIT_PACKAGES
 from app.payments.snapshot import build_snapshot_metadata, freeze_purchase_snapshot
@@ -246,7 +247,7 @@ async def create_or_resume_checkout(
 ) -> CheckoutOutcome:
     """Commit purchase + frozen request before any provider call, then optionally dispatch."""
     normalized_provider = str(provider).strip().lower()
-    normalized_package = str(package_key).strip()
+    normalized_package = normalize_checkout_package(package_key)
     user_id = user.id
     if normalized_provider not in {"mercadopago", "stripe"}:
         raise ValueError("Invalid payment provider")

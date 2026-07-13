@@ -5,7 +5,7 @@ from pathlib import Path
 
 import edge_tts
 
-from app.config import settings
+from app.credits import CREDIT_TARIFFS
 from app.services.tts import _fit_to_duration
 from app.services.voice_provider import VoiceInfo, VoiceProvider
 
@@ -71,4 +71,4 @@ class EdgeTTSProvider(VoiceProvider):
         return EDGE_VOICES
 
     def estimate_cost(self, text: str) -> int:
-        return settings.CREDIT_COST_EDGE
+        return int(CREDIT_TARIFFS.standard_voice)

@@ -1,5 +1,6 @@
 import logging
 from pathlib import Path
+from typing import Literal
 
 from pydantic_settings import BaseSettings
 
@@ -138,24 +139,21 @@ class Settings(BaseSettings):
     # Ajuste junto com OPENROUTER_VIDEO_MODEL/VIDEO_GEN_RESOLUTION.
 
     # Credit costs
-    CREDIT_COST_EDGE: int = 1
-    CREDIT_COST_ELEVENLABS: int = 2
-    CREDIT_COST_CUSTOM_AUDIO: int = 1
-    CREDIT_COST_AI_IMAGE: int = 5
-    CREDIT_COST_AI_VIDEO: int = 30  # template premium de video IA (ver nota de precificacao acima)
+    CREDIT_COST_EDGE: Literal[1] = 1
+    CREDIT_COST_ELEVENLABS: Literal[2] = 2
+    CREDIT_COST_CUSTOM_AUDIO: Literal[1] = 1
+    CREDIT_COST_AI_IMAGE: Literal[5] = 5
+    CREDIT_COST_AI_VIDEO: Literal[30] = 30  # template premium de video IA (ver nota de precificacao acima)
     CREDIT_COST_VOICE_DESIGN: int = 5  # criar voz custom (ElevenLabs Voice Design) — operacao paga
     CREDIT_COST_VOICE_CLONE: int = 5  # clonar voz (ElevenLabs Instant Voice Clone) — operacao paga
 
-    # Bonus de creditos ao verificar email. Default 2 (publico). Elevar temporariamente
-    # para um beta fechado (ex: 20) para que testadores consigam gerar varios videos sem
-    # comprar; voltar para 2 antes do lancamento publico. Nao afeta o bonus do referrer
-    # (sempre +2 fixo, ver app/auth/routes.py).
-    WELCOME_CREDIT_BONUS: int = 2
+    # Oferta publica fixa: 2 creditos depois da verificacao. Testadores recebem +18
+    # somente pelo ajuste admin auditado, com reason=beta_invite_2026.
+    WELCOME_CREDIT_BONUS: Literal[2] = 2
 
-    # Promocao de compra (beta): % de creditos BONUS sobre o pacote comprado, aplicado no
-    # credito pos-webhook (_credit_once — ponto unico MP+Stripe). 0 desliga. Ex.: 20 -> pacote
-    # popular (30) credita 36. Nao mexe em preco cobrado; rollback = voltar a 0 no .env + restart.
-    PURCHASE_BONUS_PERCENT: int = 0
+    # Oferta publica de compra: o bonus de 20% e congelado no checkout e aplicado pelo
+    # webhook canonico para que API, cobranca e credito nunca divirjam.
+    PURCHASE_BONUS_PERCENT: Literal[20] = 20
 
     # Guardrail anti-burn: teto DIARIO de geracoes de video IA (Seedance ~R$0,67/s, ~R$20/Short) por
     # usuario. 0 desliga. Mesmo conta admin/seed (999k creditos) nao queima $ ilimitado num dia — foi

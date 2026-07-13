@@ -45,9 +45,7 @@ async def test_edge_list_voices():
     assert [voice.name for voice in voices] == ["Antonio", "Francisca", "Thalita"]
 
 
-def test_edge_estimate_cost(monkeypatch):
-    monkeypatch.setattr("app.services.edge_provider.settings.CREDIT_COST_EDGE", 1)
-
+def test_edge_estimate_cost():
     assert EdgeTTSProvider().estimate_cost("texto") == 1
 
 
@@ -154,9 +152,7 @@ async def test_elevenlabs_list_voices_uncached():
     assert redis_client.set_calls[0][0] == _VOICES_CACHE_KEY
 
 
-def test_elevenlabs_estimate_cost(monkeypatch):
-    monkeypatch.setattr("app.services.elevenlabs_provider.settings.CREDIT_COST_ELEVENLABS", 2)
-
+def test_elevenlabs_estimate_cost():
     assert ElevenLabsProvider().estimate_cost("texto") == 2
 
 
@@ -267,9 +263,7 @@ def test_elevenlabs_no_api_key_raises(monkeypatch):
         _get_client()
 
 
-def test_custom_estimate_cost(monkeypatch):
-    monkeypatch.setattr("app.services.custom_audio_provider.settings.CREDIT_COST_CUSTOM_AUDIO", 1)
-
+def test_custom_estimate_cost():
     assert CustomAudioProvider().estimate_cost("texto") == 1
 
 

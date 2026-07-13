@@ -103,6 +103,7 @@ async def register(request: Request, body: RegisterRequest, db: AsyncSession = D
             utm_source=body.utm_source,
             utm_medium=body.utm_medium,
             utm_campaign=body.utm_campaign,
+            selected_package=body.selected_package,
             referral_code=uuid.uuid4().hex[:8],
             referred_by=referrer_id,
             consented_at=consented_at,
@@ -382,6 +383,7 @@ async def get_me(user: User = Depends(get_current_user)):
         plan=user.plan,
         email_verified=user.email_verified,
         referral_code=user.referral_code,
+        selected_package=user.selected_package,
     )
 
 
@@ -409,6 +411,7 @@ async def update_me(
         plan=user.plan,
         email_verified=user.email_verified,
         referral_code=user.referral_code,
+        selected_package=user.selected_package,
     )
 
 
@@ -490,6 +493,7 @@ async def export_data(
             "credits": user.credits,
             "plan": user.plan,
             "email_verified": user.email_verified,
+            "selected_package": user.selected_package,
             "created_at": user.created_at.isoformat() if user.created_at else None,
         },
         "jobs": [

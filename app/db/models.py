@@ -235,12 +235,18 @@ class CreditAdjustment(Base):
 
 class User(Base):
     __tablename__ = "users"
+    __table_args__ = (
+        CheckConstraint(
+            "selected_package IS NULL OR selected_package IN ('starter', 'popular', 'professional')",
+            name="ck_users_selected_package",
+        ),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(GUID(), primary_key=True, default=uuid.uuid4)
     email: Mapped[str] = mapped_column(String(255), unique=True, nullable=False, index=True)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
-    credits: Mapped[int] = mapped_column(Integer, default=2)
+    credits: Mapped[int] = mapped_column(Integer, default=0, server_default="0", nullable=False)
     script_refine_pending: Mapped[float] = mapped_column(Float, default=0.0, server_default="0", nullable=False)
     script_refine_version: Mapped[int] = mapped_column(Integer, default=0, server_default="0", nullable=False)
     script_refine_redis_migrated: Mapped[bool] = mapped_column(default=False, server_default="false", nullable=False)
@@ -252,6 +258,7 @@ class User(Base):
     utm_source: Mapped[str | None] = mapped_column(String(100), nullable=True)
     utm_medium: Mapped[str | None] = mapped_column(String(100), nullable=True)
     utm_campaign: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    selected_package: Mapped[str | None] = mapped_column(String(20), nullable=True)
     otp_attempts: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     referral_code: Mapped[str] = mapped_column(
         String(12), unique=True, nullable=False, default=lambda: uuid.uuid4().hex[:8]

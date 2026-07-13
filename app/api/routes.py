@@ -18,6 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.security import get_owned_job
 from app.auth.dependencies import get_current_admin_user, get_current_user
 from app.config import settings
+from app.credits import CREDIT_TARIFFS
 from app.db.engine import get_db
 from app.db.models import CreditAdjustment, CreditPurchase, Feedback, Job, JobDispatch, User, VoiceClone, WaitlistEntry
 from app.errors import ErrorMessages, not_found_error, validate_uuid
@@ -862,7 +863,11 @@ async def script_preview(
 
     await db.refresh(locked_user, attribute_names=["script_refine_pending"])
     refine_owed = float(locked_user.script_refine_pending or 0.0)
-    return {"script": script, "refine_cost": 0.5, "refine_pending": refine_owed}
+    return {
+        "script": script,
+        "refine_cost": float(CREDIT_TARIFFS.script_refinement),
+        "refine_pending": refine_owed,
+    }
 
 
 @router.post(
@@ -895,7 +900,7 @@ async def script_preview_refine(
 
     # Debita os 0,5 SOMENTE com refino entregue. O incremento SQL aritmetico
     # serializa com a reserva da geracao e preserva refinamentos concorrentes.
-    projection = await adjust_refine_balance(db, user.id, 0.5)
+    projection = await adjust_refine_balance(db, user.id, float(CREDIT_TARIFFS.script_refinement))
     pending = float(projection.balance_after)
     await db.commit()
     await _sync_refine_projection_best_effort(db, projection.id)
@@ -1529,7 +1534,7 @@ async def regenerate_tts(
             raise HTTPException(status_code=503, detail="ELEVENLABS_API_KEY not configured")
         from app.services.elevenlabs_provider import ElevenLabsProvider
 
-        cost = settings.CREDIT_COST_ELEVENLABS
+        cost = int(CREDIT_TARIFFS.dialogue)
         await _debit_credits(db, user.id, cost)
         provider = ElevenLabsProvider()
         try:
@@ -1665,7 +1670,7 @@ Regras:
         pending_result = await db.execute(
             update(Job)
             .where(Job.id == job.id)
-            .values(pending_credits=func.coalesce(Job.pending_credits, 0.0) + 0.5)
+            .values(pending_credits=func.coalesce(Job.pending_credits, 0.0) + float(CREDIT_TARIFFS.script_refinement))
             .returning(Job.pending_credits)
         )
         pending_credits = float(pending_result.scalar_one())
@@ -2596,13 +2601,19 @@ async def admin_adjust_credits(
     admin_user: User = Depends(get_current_admin_user),
     db: AsyncSession = Depends(get_db),
 ):
-    target = await db.get(User, validate_uuid(user_id))
+    target = await db.scalar(select(User).where(User.id == validate_uuid(user_id)).with_for_update())
     if not target:
         raise not_found_error()
 
     previous = target.credits
-    new_balance = max(0, previous + req.delta)  # clamp: saldo nunca fica negativo
-    target.credits = new_balance
+    if previous + req.delta < 0:
+        await db.rollback()
+        raise HTTPException(status_code=409, detail="insufficient_credits")
+
+    balance_result = await db.execute(
+        update(User).where(User.id == target.id).values(credits=User.credits + req.delta).returning(User.credits)
+    )
+    new_balance = int(balance_result.scalar_one())
     db.add(
         CreditAdjustment(
             admin_user_id=admin_user.id,

@@ -47,6 +47,10 @@ line-length = 120
 select = ["E", "F", "I", "W"]
 ignore = ["E501"]
 
+[tool.ruff.lint.isort]
+known-first-party = ["app"]
+known-third-party = ["alembic"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests", "app/services"]
 asyncio_mode = "auto"

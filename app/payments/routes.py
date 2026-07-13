@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.dependencies import get_current_user
 from app.config import settings
+from app.credits import credit_equivalences, public_package_intent
 from app.db.engine import get_db
 from app.db.models import CreditPurchase, User
 from app.payments.schemas import (
@@ -70,23 +71,29 @@ def _stripe_timestamp_within_tolerance(signature: str) -> bool:
     description="Returns available credit packages.",
     responses={200: {"description": "List of packages"}},
 )
-async def list_packages(user: User = Depends(get_current_user)):
+async def list_packages():
     """Get available credit packages."""
     packages = []
     for key, pkg in CREDIT_PACKAGES.items():
+        public_key = public_package_intent(key)
         price = pkg["price_brl"]
         reais = price // 100
         centavos = price % 100
         bonus = pkg["credits"] * settings.PURCHASE_BONUS_PERCENT // 100
+        total = pkg["credits"] + bonus
         packages.append(
             PackageResponse(
-                id=key,
+                id=public_key,
+                selected_package=public_key,
                 name=pkg["name"],
                 credits=pkg["credits"],
+                base_credits=pkg["credits"],
                 price_brl=price,
                 price_display=f"R$ {reais},{centavos:02d}",
                 bonus_percent=settings.PURCHASE_BONUS_PERCENT if bonus else 0,
                 bonus_credits=bonus,
+                total_credits=total,
+                equivalences=credit_equivalences(total),
             )
         )
     return packages
@@ -121,9 +128,6 @@ async def checkout(
     """Initiate a credit purchase via Mercado Pago (default) ou Stripe."""
     if not user.email_verified:
         raise HTTPException(status_code=403, detail="email_verification_required")
-    if req.provider not in ("mercadopago", "stripe"):
-        raise HTTPException(status_code=400, detail="Provedor invalido")
-
     from app.payments.checkout_outbox import (
         CheckoutFailed,
         CheckoutIdempotencyConflict,

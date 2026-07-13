@@ -127,7 +127,7 @@ async def test_packages_endpoint_exposes_bonus(client, verified_user, auth_heade
     pkgs = {p["id"]: p for p in response.json()}
     assert pkgs["starter"]["bonus_credits"] == 2
     assert pkgs["popular"]["bonus_credits"] == 6
-    assert pkgs["pro"]["bonus_credits"] == 20
+    assert pkgs["professional"]["bonus_credits"] == 20
     assert pkgs["popular"]["bonus_percent"] == 20
 
 

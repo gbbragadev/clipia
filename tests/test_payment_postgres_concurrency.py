@@ -11,10 +11,11 @@ import stripe
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-from app.api.routes import _debit_credits
+from app.api.routes import _debit_credits, admin_adjust_credits
 from app.db.base import Base
-from app.db.models import CreditPurchase, ProcessedPaymentEvent, User
-from app.payments.service import process_webhook_stripe
+from app.db.models import CreditAdjustment, CreditPurchase, ProcessedPaymentEvent, User
+from app.models import AdminCreditAdjustRequest
+from app.payments.service import _apply_payment_event, process_webhook_stripe
 
 _ADMIN_DSN = os.getenv(
     "POSTGRES_PAYMENT_TEST_ADMIN_DSN",
@@ -44,7 +45,7 @@ async def postgres_payment_sessions():
     finally:
         await engine.dispose()
         await admin.execute(
-            "SELECT pg_terminate_backend(pid) FROM pg_stat_activity " "WHERE datname = $1 AND pid <> pg_backend_pid()",
+            "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = $1 AND pid <> pg_backend_pid()",
             database_name,
         )
         await admin.execute(f'DROP DATABASE "{database_name}"')
@@ -101,6 +102,58 @@ async def _seed_purchase(
         session.add(purchase)
         await session.commit()
         return purchase
+
+
+@pytest.mark.asyncio
+async def test_postgres_admin_beta_adjustment_racing_payment_and_generation_has_no_lost_update(
+    postgres_payment_sessions,
+):
+    sessions = postgres_payment_sessions
+    user = await _seed_user(sessions, credits=20)
+    admin = await _seed_user(sessions, credits=0)
+    purchase = await _seed_purchase(sessions, user, checkout_id=f"checkout_{uuid.uuid4().hex}")
+
+    async def adjust_beta():
+        async with sessions() as session:
+            return await admin_adjust_credits(
+                str(user.id),
+                AdminCreditAdjustRequest(delta=18, reason="beta_invite_2026"),
+                admin,
+                session,
+            )
+
+    async def credit_payment():
+        async with sessions() as session:
+            return await _apply_payment_event(
+                session,
+                purchase_id=purchase.id,
+                provider="stripe",
+                event_key=f"evt_{uuid.uuid4().hex}",
+                event_type="checkout.session.completed",
+                transition="paid",
+                external_payment_id=f"pi_{uuid.uuid4().hex}",
+                external_checkout_id=purchase.mp_preference_id,
+                validate=lambda _purchase: True,
+            )
+
+    async def debit_generation():
+        async with sessions() as session:
+            await _debit_credits(session, user.id, 3)
+
+    adjustment, payment, _debit = await asyncio.gather(adjust_beta(), credit_payment(), debit_generation())
+
+    assert adjustment["delta"] == 18
+    assert payment.applied is True
+    async with sessions() as verification:
+        assert (await verification.get(User, user.id)).credits == 45
+        adjustments = (
+            (await verification.execute(select(CreditAdjustment).where(CreditAdjustment.target_user_id == user.id)))
+            .scalars()
+            .all()
+        )
+        assert len(adjustments) == 1
+        assert adjustments[0].delta == 18
+        assert adjustments[0].reason == "beta_invite_2026"
 
 
 def _paid_event(purchase: CreditPurchase, *, event_id: str, payment_intent: str) -> dict:

@@ -5,9 +5,9 @@ import uuid
 
 import asyncpg
 import pytest
-
 from alembic import command
 from alembic.config import Config
+
 from app.config import settings
 
 _ADMIN_DSN = os.getenv(
@@ -28,7 +28,7 @@ async def _drop_database(database_name: str) -> None:
     connection = await asyncpg.connect(_ADMIN_DSN)
     try:
         await connection.execute(
-            "SELECT pg_terminate_backend(pid) FROM pg_stat_activity " "WHERE datname = $1 AND pid <> pg_backend_pid()",
+            "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = $1 AND pid <> pg_backend_pid()",
             database_name,
         )
         await connection.execute(f'DROP DATABASE "{database_name}"')
@@ -188,7 +188,7 @@ def test_postgres_migration_upgrades_from_dispatch_outbox_head(monkeypatch):
             dispatch_indexes,
             dispatch_constraints,
         ) = asyncio.run(inspect_migration())
-        assert revision == "d0e1f2a3b4c5"
+        assert revision == "e1f2a3b4c5d6"
         assert {"payment_state", "currency", "snapshot_version", "snapshot_hash"} <= columns
         assert "uq_credit_purchase_provider_checkout" in indexes
         assert "mp_preference_id IS NOT NULL" in indexes["uq_credit_purchase_provider_checkout"]
@@ -217,5 +217,87 @@ def test_postgres_migration_upgrades_from_dispatch_outbox_head(monkeypatch):
             row_id: expected_round_trip
             for row_id, _legacy, _payment_state, _expected_legacy, expected_round_trip in divergent_rows
         }
+    finally:
+        asyncio.run(_drop_database(database_name))
+
+
+def test_postgres_selected_package_upgrade_downgrade_upgrade_from_payment_head(monkeypatch):
+    if os.getenv("RUN_POSTGRES_PAYMENT_TESTS") != "1":
+        pytest.skip("set RUN_POSTGRES_PAYMENT_TESTS=1 to run real PostgreSQL migration")
+
+    database_name = f"clipia_package_migration_{uuid.uuid4().hex[:12]}"
+    assert re.fullmatch(r"clipia_package_migration_[0-9a-f]{12}", database_name)
+    database_url = f"postgresql+asyncpg://clipia:clipia_dev@localhost:5435/{database_name}"
+    asyncio.run(_create_database(database_name))
+    try:
+        monkeypatch.setattr(settings, "DATABASE_URL", database_url)
+        config = Config("alembic.ini")
+        command.upgrade(config, "d0e1f2a3b4c5")
+
+        async def selected_package_state():
+            connection = await asyncpg.connect(f"postgresql://clipia:clipia_dev@localhost:5435/{database_name}")
+            try:
+                revision = await connection.fetchval("SELECT version_num FROM alembic_version")
+                column_exists = await connection.fetchval(
+                    "SELECT EXISTS (SELECT 1 FROM information_schema.columns "
+                    "WHERE table_schema = 'public' AND table_name = 'users' AND column_name = 'selected_package')"
+                )
+                constraint = await connection.fetchval(
+                    "SELECT pg_get_constraintdef(oid) FROM pg_constraint "
+                    "WHERE conrelid = 'users'::regclass AND conname = 'ck_users_selected_package'"
+                )
+                return revision, column_exists, constraint
+            finally:
+                await connection.close()
+
+        revision, column_exists, constraint = asyncio.run(selected_package_state())
+        assert revision == "d0e1f2a3b4c5"
+        assert column_exists is False
+        assert constraint is None
+
+        seeded_user_id = uuid.uuid4()
+
+        async def seed_existing_balance():
+            connection = await asyncpg.connect(f"postgresql://clipia:clipia_dev@localhost:5435/{database_name}")
+            try:
+                await connection.execute(
+                    "INSERT INTO users (id, email, name, password_hash, credits, plan, referral_code) "
+                    "VALUES ($1, $2, 'Existing User', 'test', 77, 'free', $3)",
+                    seeded_user_id,
+                    f"existing-{seeded_user_id.hex}@example.com",
+                    seeded_user_id.hex[:8],
+                )
+            finally:
+                await connection.close()
+
+        async def existing_balance():
+            connection = await asyncpg.connect(f"postgresql://clipia:clipia_dev@localhost:5435/{database_name}")
+            try:
+                return await connection.fetchval("SELECT credits FROM users WHERE id = $1", seeded_user_id)
+            finally:
+                await connection.close()
+
+        asyncio.run(seed_existing_balance())
+
+        command.upgrade(config, "head")
+        revision, column_exists, constraint = asyncio.run(selected_package_state())
+        assert revision == "e1f2a3b4c5d6"
+        assert column_exists is True
+        assert constraint is not None and "professional" in constraint
+        assert asyncio.run(existing_balance()) == 77
+
+        command.downgrade(config, "d0e1f2a3b4c5")
+        revision, column_exists, constraint = asyncio.run(selected_package_state())
+        assert revision == "d0e1f2a3b4c5"
+        assert column_exists is False
+        assert constraint is None
+        assert asyncio.run(existing_balance()) == 77
+
+        command.upgrade(config, "head")
+        revision, column_exists, constraint = asyncio.run(selected_package_state())
+        assert revision == "e1f2a3b4c5d6"
+        assert column_exists is True
+        assert constraint is not None and "professional" in constraint
+        assert asyncio.run(existing_balance()) == 77
     finally:
         asyncio.run(_drop_database(database_name))

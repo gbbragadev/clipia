@@ -2,6 +2,8 @@ import re
 
 from pydantic import BaseModel, Field, field_validator
 
+from app.credits import PublicPackageIntent
+
 
 def _validate_password_strength(v: str) -> str:
     """Política de senha uniforme em todo o sistema (cadastro, redefinição e troca).
@@ -33,6 +35,10 @@ class RegisterRequest(BaseModel):
     utm_source: str | None = Field(default=None, max_length=100)
     utm_medium: str | None = Field(default=None, max_length=100)
     utm_campaign: str | None = Field(default=None, max_length=100)
+    selected_package: PublicPackageIntent | None = Field(
+        default=None,
+        description="Optional public package intent to resume after email verification",
+    )
     turnstile_token: str | None = Field(
         default=None, max_length=2048, description="Cloudflare Turnstile token (anti-bot)"
     )
@@ -80,6 +86,7 @@ class UserResponse(BaseModel):
     plan: str = Field(..., description="Current plan")
     email_verified: bool = Field(..., description="Email verification status")
     referral_code: str = Field(..., description="User's unique referral code")
+    selected_package: PublicPackageIntent | None = Field(default=None, description="Saved public package intent")
 
 
 class VerifyEmailRequest(BaseModel):
