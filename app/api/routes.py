@@ -42,6 +42,12 @@ from app.payments.states import (
 )
 from app.pricing import get_generation_credit_cost
 from app.redis_pool import get_redis
+from app.services.audio_uploads import (
+    declared_audio_extension,
+    parse_limited_multipart,
+    read_limited_audio,
+    write_limited_audio,
+)
 from app.services.dispatch_outbox import DispatchPayload, create_dispatch, publish_dispatch
 from app.services.job_operations import (
     InsufficientCredits,
@@ -75,24 +81,12 @@ _redis = get_redis()
 
 _ADMIN_DASHBOARD_RANGES = {"7d": 7, "30d": 30, "90d": 90}
 
-_ALLOWED_AUDIO_MIMES: dict[str, str] = {
-    "audio/wav": ".wav",
-    "audio/x-wav": ".wav",
-    "audio/mpeg": ".mp3",
-    "audio/mp3": ".mp3",
-    "audio/webm": ".webm",
-    "audio/ogg": ".ogg",
-}
-
 
 def _validate_audio_upload(content_type: str | None, filename: str | None, size: int, max_mb: int = 50) -> str:
     """Validate audio upload. Returns safe extension. Raises ValueError on failure."""
     if size > max_mb * 1024 * 1024:
         raise ValueError(f"Arquivo muito grande (max {max_mb}MB)")
-    ct = (content_type or "").lower().split(";")[0].strip()
-    if ct not in _ALLOWED_AUDIO_MIMES:
-        raise ValueError(f"Tipo de audio nao suportado: {ct}. Envie WAV, MP3, WebM ou OGG.")
-    return _ALLOWED_AUDIO_MIMES[ct]
+    return declared_audio_extension(content_type)
 
 
 def _coerce_utc(dt: datetime | None) -> datetime | None:
@@ -1200,7 +1194,14 @@ async def clone_voice(
         raise HTTPException(status_code=400, detail="Máximo de 5 vozes clonadas por usuário")
 
     # Get uploaded files + metadata from multipart
-    form = await request.form()
+    max_file_bytes = 10 * 1024 * 1024
+    form = await parse_limited_multipart(
+        request,
+        max_file_bytes=max_file_bytes,
+        max_total_bytes=5 * max_file_bytes + 64 * 1024,
+        max_files=5,
+        max_fields=2,
+    )
     files = form.getlist("files")
     if not files:
         raise HTTPException(status_code=400, detail="Envie pelo menos 1 arquivo de áudio")
@@ -1216,9 +1217,13 @@ async def clone_voice(
 
     audio_bytes = []
     for f in files:
-        content = await f.read()
         try:
-            _validate_audio_upload(content_type=f.content_type, filename=f.filename, size=len(content), max_mb=10)
+            extension = declared_audio_extension(f.content_type)
+            content = await read_limited_audio(
+                f,
+                max_bytes=max_file_bytes,
+                extension=extension,
+            )
         except ValueError as e:
             raise HTTPException(status_code=400, detail=str(e))
         audio_bytes.append(content)
@@ -1303,39 +1308,54 @@ async def upload_audio(
     job = await get_owned_job(db, user, job_id)
     job_id = str(job.id)
 
-    form = await request.form()
+    max_file_bytes = 50 * 1024 * 1024
+    form = await parse_limited_multipart(
+        request,
+        max_file_bytes=max_file_bytes,
+        max_total_bytes=max_file_bytes + 64 * 1024,
+        max_files=1,
+        max_fields=1,
+    )
     file = form.get("file")
     if file is None:
         raise HTTPException(status_code=400, detail="Envie um arquivo de áudio")
 
-    content = await file.read()
     try:
-        ext = _validate_audio_upload(content_type=file.content_type, filename=file.filename, size=len(content))
+        ext = declared_audio_extension(file.content_type)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
     job_dir = Path(settings.STORAGE_DIR) / "jobs" / job_id
     job_dir.mkdir(parents=True, exist_ok=True)
 
-    # Save uploaded file
-    upload_path = str(job_dir / f"upload{ext}")
-    with open(upload_path, "wb") as f:
-        f.write(content)
+    # Stream to a temporary server-owned path, validate the signature, then publish atomically.
+    upload_path = job_dir / f"upload{ext}"
+    upload_temp_path = job_dir / f".upload{ext}.part"
+    try:
+        await write_limited_audio(
+            file,
+            upload_temp_path,
+            max_bytes=max_file_bytes,
+            extension=ext,
+        )
+        upload_temp_path.replace(upload_path)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
     # Validate
     from app.services.custom_audio_provider import validate_audio_file
 
     try:
-        meta = validate_audio_file(upload_path)
+        meta = validate_audio_file(str(upload_path))
     except ValueError as e:
-        Path(upload_path).unlink(missing_ok=True)
+        upload_path.unlink(missing_ok=True)
         raise HTTPException(status_code=400, detail=str(e))
 
     # Normalize to WAV
     output_path = str(job_dir / "narration.wav")
     from app.services.custom_audio_provider import normalize_audio
 
-    await asyncio.to_thread(normalize_audio, upload_path, output_path)
+    await asyncio.to_thread(normalize_audio, str(upload_path), output_path)
 
     # Transcribe with Whisper for word timestamps
     words = []
