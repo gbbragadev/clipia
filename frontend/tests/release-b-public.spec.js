@@ -17,6 +17,68 @@ const firstPurchaseId = '00000000-0000-4000-8000-000000000001'
 const secondPurchaseId = '00000000-0000-4000-8000-000000000002'
 const dispatchId = '00000000-0000-4000-8000-000000000101'
 const checkoutAttemptStorageKey = 'clipia_checkout_attempt'
+const landingPackages = [
+  {
+    id: 'starter',
+    selected_package: 'starter',
+    name: 'Starter',
+    credits: 10,
+    base_credits: 10,
+    price_brl: 1990,
+    price_display: 'R$ 19,90',
+    bonus_percent: 20,
+    bonus_credits: 2,
+    total_credits: 12,
+    equivalences: {
+      standard_voice: 12,
+      premium_voice: 6,
+      dialogue: 6,
+      script_refinement: 24,
+      ai_image: 2,
+      ai_video: 0,
+    },
+  },
+  {
+    id: 'popular',
+    selected_package: 'popular',
+    name: 'Popular',
+    credits: 30,
+    base_credits: 30,
+    price_brl: 4990,
+    price_display: 'R$ 49,90',
+    bonus_percent: 20,
+    bonus_credits: 6,
+    total_credits: 36,
+    equivalences: {
+      standard_voice: 36,
+      premium_voice: 18,
+      dialogue: 18,
+      script_refinement: 72,
+      ai_image: 7,
+      ai_video: 1,
+    },
+  },
+  {
+    id: 'professional',
+    selected_package: 'professional',
+    name: 'Profissional',
+    credits: 100,
+    base_credits: 100,
+    price_brl: 12990,
+    price_display: 'R$ 129,90',
+    bonus_percent: 20,
+    bonus_credits: 20,
+    total_credits: 120,
+    equivalences: {
+      standard_voice: 120,
+      premium_voice: 60,
+      dialogue: 60,
+      script_refinement: 240,
+      ai_image: 24,
+      ai_video: 4,
+    },
+  },
+]
 
 const STATIC_INDEXABLE_ROUTES = ['/', '/exemplos', '/blog', '/suporte', '/termos', '/privacidade']
 const NICHE_ROUTES = NICHES.map((niche) => `/criar/${niche.slug}`)
@@ -221,10 +283,10 @@ test('todos os artigos usam Markdown GFM sem HTML cru e protegem links externos'
   expect(source).not.toContain('dangerouslySetInnerHTML')
 })
 
-test('as 24 rotas indexaveis publicam um canonical apex autorreferente', async ({ page }) => {
+test('as 25 rotas indexaveis publicam um canonical apex autorreferente', async ({ page }) => {
   test.setTimeout(180_000)
-  expect(INDEXABLE_ROUTES).toHaveLength(24)
-  expect(new Set(INDEXABLE_ROUTES).size).toBe(24)
+  expect(INDEXABLE_ROUTES).toHaveLength(25)
+  expect(new Set(INDEXABLE_ROUTES).size).toBe(25)
 
   for (const route of INDEXABLE_ROUTES) {
     await page.goto(`${appBaseUrl}${route}`, { waitUntil: 'domcontentloaded' })
@@ -283,11 +345,11 @@ test('www redireciona estatico, dinamico, auth e viewer preservando rota e query
   }
 })
 
-test('matriz real cobre 29 rotas em desktop e 320/390/393 sem erro ou overflow', async ({ browser }) => {
+test('matriz real cobre 30 rotas em desktop e 320/390/393 sem erro ou overflow', async ({ browser }) => {
   test.setTimeout(600_000)
-  expect(PUBLIC_ROUTE_SPECS).toHaveLength(29)
-  expect(new Set(PUBLIC_ROUTE_SPECS.map((route) => route.path)).size).toBe(29)
-  expect(PUBLIC_ROUTE_SPECS.length * ROUTE_MATRIX_VIEWPORTS.length).toBe(116)
+  expect(PUBLIC_ROUTE_SPECS).toHaveLength(30)
+  expect(new Set(PUBLIC_ROUTE_SPECS.map((route) => route.path)).size).toBe(30)
+  expect(PUBLIC_ROUTE_SPECS.length * ROUTE_MATRIX_VIEWPORTS.length).toBe(120)
 
   for (const viewport of ROUTE_MATRIX_VIEWPORTS) {
     for (const route of PUBLIC_ROUTE_SPECS) {
@@ -496,6 +558,103 @@ test('landing cabe em 320, 390 e 393 px sem mascarar overflow global', async ({ 
     // Force a document boundary between viewport cases so a closing menu
     // transition from the previous width cannot overlap the next hydration.
     await page.goto('about:blank')
+  }
+})
+
+test('landing apresenta prova operacional e garantias honestas perto do primeiro CTA', async ({ page }) => {
+  await page.route('**/api/v1/credits/packages', (route) =>
+    route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(landingPackages) }),
+  )
+  await page.goto(`${appBaseUrl}/`)
+
+  await expect(page.getByText('Uso comercial liberado', { exact: true })).toBeVisible()
+  await expect(page.getByText('Sem marca d\u2019\u00e1gua no conte\u00fado', { exact: true })).toBeVisible()
+  await expect(page.getByRole('link', { name: 'Pol\u00edtica de reembolso', exact: true })).toHaveAttribute(
+    'href',
+    '/termos#creditos-e-reembolsos',
+  )
+
+  const proof = page.getByRole('region', { name: 'Prova operacional ClipIA' })
+  await expect(proof).toContainText('3 fatos surpreendentes sobre o c\u00e9rebro')
+  await expect(proof).toContainText('Narra\u00e7\u00e3o + Stock')
+  await expect(proof).toContainText('Gera\u00e7\u00e3o autom\u00e1tica')
+  await expect(proof).toContainText('2 ajustes manuais')
+  await expect(proof).toContainText('Estilo das legendas')
+  await expect(proof).toContainText('Trilha sonora')
+  await expect(proof.locator('video')).toHaveAttribute('src', /showcase\/prova-operacional-cerebro\.mp4$/)
+})
+
+test('calculadora usa equivalencias publicas para voz e midia', async ({ page }) => {
+  await page.route('**/api/v1/credits/packages', (route) =>
+    route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(landingPackages) }),
+  )
+  await page.goto(`${appBaseUrl}/`)
+
+  const calculator = page.getByRole('region', { name: 'Calculadora de cr\u00e9ditos' })
+  await expect(calculator.getByTestId('calculator-starter')).toContainText('At\u00e9 12 v\u00eddeos')
+  await expect(calculator.getByTestId('calculator-popular')).toContainText('At\u00e9 36 v\u00eddeos')
+  await expect(calculator.getByTestId('calculator-professional')).toContainText('At\u00e9 120 v\u00eddeos')
+
+  await calculator.getByRole('radio', { name: 'Imagens por IA' }).check()
+  await expect(calculator.getByTestId('calculator-starter')).toContainText('At\u00e9 2 v\u00eddeos')
+  await expect(calculator.getByTestId('calculator-popular')).toContainText('At\u00e9 7 v\u00eddeos')
+  await expect(calculator.getByTestId('calculator-professional')).toContainText('At\u00e9 24 v\u00eddeos')
+
+  await calculator.getByRole('radio', { name: 'V\u00eddeo por IA' }).check()
+  await expect(calculator.getByTestId('calculator-starter')).toContainText('0 v\u00eddeos completos')
+  await expect(calculator.getByTestId('calculator-popular')).toContainText('At\u00e9 1 v\u00eddeo')
+  await expect(calculator.getByTestId('calculator-professional')).toContainText('At\u00e9 4 v\u00eddeos')
+
+  await calculator.getByRole('radio', { name: 'Banco de v\u00eddeos' }).check()
+  await calculator.getByRole('radio', { name: 'Voz premium' }).check()
+  await expect(calculator.getByTestId('calculator-starter')).toContainText('At\u00e9 6 v\u00eddeos')
+  await expect(calculator.getByTestId('calculator-popular')).toContainText('At\u00e9 18 v\u00eddeos')
+  await expect(calculator.getByTestId('calculator-professional')).toContainText('At\u00e9 60 v\u00eddeos')
+
+  await calculator.getByRole('radio', { name: 'Imagens por IA' }).check()
+  await expect(calculator.getByTestId('calculator-starter')).toContainText('At\u00e9 2 v\u00eddeos')
+  await expect(calculator.getByTestId('calculator-popular')).toContainText('At\u00e9 7 v\u00eddeos')
+  await expect(calculator.getByTestId('calculator-professional')).toContainText('At\u00e9 24 v\u00eddeos')
+
+  await calculator.getByRole('radio', { name: 'V\u00eddeo por IA' }).check()
+  await expect(calculator.getByTestId('calculator-starter')).toContainText('0 v\u00eddeos completos')
+  await expect(calculator.getByTestId('calculator-popular')).toContainText('At\u00e9 1 v\u00eddeo')
+  await expect(calculator.getByTestId('calculator-professional')).toContainText('At\u00e9 4 v\u00eddeos')
+})
+
+test('calculadora falha de forma segura sem estimativa hardcoded', async ({ page }) => {
+  await page.route('**/api/v1/credits/packages', (route) =>
+    route.fulfill({ status: 503, contentType: 'application/json', body: '{}' }),
+  )
+  await page.goto(`${appBaseUrl}/`)
+
+  await expect(page.getByText('Calculadora temporariamente indispon\u00edvel.', { exact: true })).toBeVisible()
+  await expect(page.getByRole('region', { name: 'Calculadora de cr\u00e9ditos' }).getByText(/At\u00e9 \d+ v\u00eddeos/)).toHaveCount(0)
+})
+
+test('mobile encurta a jornada e mantem personas acessiveis', async ({ page }) => {
+  for (const width of [320, 390, 393]) {
+    await page.setViewportSize({ width, height: 844 })
+    await page.goto(`${appBaseUrl}/`)
+
+    const shortcuts = page.getByRole('navigation', { name: 'Atalhos da landing' })
+    await expect(shortcuts.getByRole('link', { name: 'Como funciona' })).toHaveAttribute('href', '#como-funciona')
+    await expect(shortcuts.getByRole('link', { name: 'Pre\u00e7os' })).toHaveAttribute('href', '#preco')
+    await expect(shortcuts.getByRole('link', { name: 'Exemplos' })).toHaveAttribute('href', '/exemplos')
+
+    const creator = page.getByRole('button', { name: /Criador de conte\u00fado/ })
+    const agency = page.getByRole('button', { name: /Ag\u00eancia/ })
+    await expect(creator).toHaveAttribute('aria-expanded', 'true')
+    await expect(agency).toHaveAttribute('aria-expanded', 'false')
+    await agency.click()
+    await expect(creator).toHaveAttribute('aria-expanded', 'false')
+    await expect(agency).toHaveAttribute('aria-expanded', 'true')
+  }
+
+  await page.setViewportSize({ width: 1280, height: 900 })
+  await expect(page.locator('[data-persona-content]')).toHaveCount(3)
+  for (const content of await page.locator('[data-persona-content]').all()) {
+    await expect(content).toBeVisible()
   }
 })
 

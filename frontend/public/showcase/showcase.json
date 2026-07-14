@@ -38,6 +38,19 @@
   ],
   "videos": [
     {
+      "id": "prova-operacional-cerebro",
+      "title": "3 fatos surpreendentes sobre o cérebro",
+      "template": "Narração + Stock",
+      "niche": "curiosidades",
+      "video": "/showcase/prova-operacional-cerebro.mp4",
+      "phrase": "3 fatos surpreendentes sobre o cérebro",
+      "captionStyle": "impact",
+      "captionAccent": "#22d3ee",
+      "gradient": "from-cyan-900/60 to-blue-950/60",
+      "icon": "🧠",
+      "poster": "/showcase/posters/prova-operacional-cerebro.jpg"
+    },
+    {
       "id": "o-fato-historico-que-quase-ninguem-conhece",
       "title": "O fato histórico que quase ninguém conhece",
       "template": "Drama Histórico",

@@ -15,6 +15,7 @@ CREDIT_PACKAGES = {
 
 class PackageEquivalences(BaseModel):
     standard_voice: int
+    premium_voice: int
     dialogue: int
     script_refinement: int
     ai_image: int

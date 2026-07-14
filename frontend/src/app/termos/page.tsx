@@ -35,7 +35,7 @@ export default function TermosPage() {
         Para usar o serviço, você deve ter pelo menos 18 anos de idade. Você é responsável por manter a confidencialidade das credenciais de sua conta.
       </p>
 
-      <h2>4. Créditos e Pagamentos</h2>
+      <h2 id="creditos-e-reembolsos" className="scroll-mt-24">4. Créditos e Pagamentos</h2>
       <p>
         O uso dos serviços de geração de vídeo consome créditos. Os créditos podem ser adquiridos em pacotes por meio dos nossos processadores de pagamento: <strong>Stripe</strong> (provedor primário, com suporte a cartão de crédito e Pix) e <strong>Mercado Pago</strong> (provedor secundário). A escolha do provedor pode variar conforme a disponibilidade da plataforma. O ClipIA não armazena nem tem acesso aos dados completos do seu cartão de crédito — o processamento financeiro é realizado integralmente pelos provedores acima.
       </p>

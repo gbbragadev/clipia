@@ -6,12 +6,23 @@ const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{
 
 export interface CreditPackage {
   id: string
+  selected_package: 'starter' | 'popular' | 'professional'
   name: string
   credits: number
+  base_credits: number
   price_brl: number
   price_display: string
   bonus_percent: number
   bonus_credits: number
+  total_credits: number
+  equivalences: {
+    standard_voice: number
+    premium_voice: number
+    dialogue: number
+    script_refinement: number
+    ai_image: number
+    ai_video: number
+  }
 }
 
 export interface PurchaseHistoryItem {
@@ -180,7 +191,7 @@ function normalizeCheckoutStatus(
 export async function fetchPackages(): Promise<CreditPackage[]> {
   return fetchJson(
     `${API_BASE}/api/v1/credits/packages`,
-    { headers: authHeaders() },
+    undefined,
     'Erro ao carregar pacotes',
   )
 }

@@ -3,6 +3,8 @@ import { SkipLink } from "@/components/landing/SkipLink";
 import { Nav } from "@/components/landing/Nav";
 import { StickyCta } from "@/components/landing/StickyCta";
 import { Hero } from "@/components/landing/sections/Hero";
+import { OperationalProof } from "@/components/landing/sections/OperationalProof";
+import { LandingShortcuts } from "@/components/landing/sections/LandingShortcuts";
 import { BeforeAfter } from "@/components/landing/sections/BeforeAfter";
 import { FactsBar } from "@/components/landing/sections/FactsBar";
 import { Personas } from "@/components/landing/sections/Personas";
@@ -45,6 +47,8 @@ export default function Home() {
       <Nav />
       <main id="conteudo">
         <Hero />
+        <OperationalProof />
+        <LandingShortcuts />
         <BeforeAfter />
         <FactsBar />
         <Personas />

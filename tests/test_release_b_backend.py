@@ -149,6 +149,7 @@ async def test_public_packages_are_authoritative_and_need_no_token(client, monke
             "total_credits": 12,
             "equivalences": {
                 "standard_voice": 12,
+                "premium_voice": 6,
                 "dialogue": 6,
                 "script_refinement": 24,
                 "ai_image": 2,
@@ -168,6 +169,7 @@ async def test_public_packages_are_authoritative_and_need_no_token(client, monke
             "total_credits": 36,
             "equivalences": {
                 "standard_voice": 36,
+                "premium_voice": 18,
                 "dialogue": 18,
                 "script_refinement": 72,
                 "ai_image": 7,
@@ -187,6 +189,7 @@ async def test_public_packages_are_authoritative_and_need_no_token(client, monke
             "total_credits": 120,
             "equivalences": {
                 "standard_voice": 120,
+                "premium_voice": 60,
                 "dialogue": 60,
                 "script_refinement": 240,
                 "ai_image": 24,
