@@ -78,6 +78,12 @@ export function Hero() {
                   <Icon name="check" className="h-3.5 w-3.5 text-mint" />
                   Uso comercial liberado
                 </span>
+                <a
+                  href="/termos#uso-comercial-e-privacidade"
+                  className="underline decoration-white/20 underline-offset-4 transition-colors hover:text-cloud"
+                >
+                  Licenças e privacidade
+                </a>
                 <span className="flex items-center gap-1.5">
                   <Icon name="check" className="h-3.5 w-3.5 text-mint" />
                   <span>Sem marca d’água no conteúdo</span>

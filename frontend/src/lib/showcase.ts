@@ -1,5 +1,17 @@
 import showcaseManifest from "../../public/showcase/showcase.json";
 
+export interface ShowcaseOperationCase {
+  label: string
+  periodStart: string
+  periodEnd: string
+  disclaimer: string
+}
+
+export interface ShowcaseOperationCaseStats extends ShowcaseOperationCase {
+  videoCount: number
+  nicheCount: number
+}
+
 export interface ShowcaseNiche {
   id: string
   label: string
@@ -24,6 +36,7 @@ export interface ShowcaseVideo {
 }
 
 export interface ShowcaseManifest {
+  operationCase: ShowcaseOperationCase
   niches: ShowcaseNiche[]
   videos: ShowcaseVideo[]
 }
@@ -48,6 +61,22 @@ function isNonEmptyString(value: unknown): value is string {
 
 function isOwnedAssetPath(value: unknown): value is string {
   return isNonEmptyString(value) && value.startsWith('/') && !value.startsWith('//')
+}
+
+function isIsoDate(value: unknown): value is string {
+  if (!isNonEmptyString(value) || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false
+  return !Number.isNaN(Date.parse(`${value}T00:00:00Z`))
+}
+
+function isShowcaseOperationCase(value: unknown): value is ShowcaseOperationCase {
+  return (
+    isRecord(value) &&
+    isNonEmptyString(value.label) &&
+    isIsoDate(value.periodStart) &&
+    isIsoDate(value.periodEnd) &&
+    value.periodStart <= value.periodEnd &&
+    isNonEmptyString(value.disclaimer)
+  )
 }
 
 function isShowcaseNiche(value: unknown): value is ShowcaseNiche {
@@ -82,11 +111,22 @@ function isShowcaseVideo(value: unknown): value is ShowcaseVideo {
 function isShowcaseManifest(value: unknown): value is ShowcaseManifest {
   return (
     isRecord(value) &&
+    isShowcaseOperationCase(value.operationCase) &&
     Array.isArray(value.niches) &&
     value.niches.every(isShowcaseNiche) &&
     Array.isArray(value.videos) &&
     value.videos.every(isShowcaseVideo)
   )
+}
+
+export function getOperationCaseStats(
+  manifest: ShowcaseManifest = SHOWCASE_CATALOG,
+): ShowcaseOperationCaseStats {
+  return {
+    ...manifest.operationCase,
+    videoCount: manifest.videos.length,
+    nicheCount: new Set(manifest.videos.map((video) => video.niche)).size,
+  }
 }
 
 export function getShowcaseVideosForNiche(niche: string): ShowcaseVideo[] {

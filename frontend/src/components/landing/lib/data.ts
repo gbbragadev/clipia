@@ -300,7 +300,7 @@ export const FAQ_ITEMS = [
   },
   {
     q: "O vídeo é meu? Posso usar comercialmente?",
-    a: "Sim. A mídia vem de banco com licença livre (Pexels) ou é gerada por IA, e o uso comercial é liberado.",
+    a: "Sim. A mídia vem do Pexels ou é gerada por IA, e o uso comercial é permitido conforme os termos dos provedores e os direitos do material que você enviar. O conteúdo fica privado por padrão e só entra em showcase ou marketing com autorização expressa.",
   },
   {
     q: "Os vídeos levam marca do ClipIA?",
@@ -329,7 +329,7 @@ export const AB_DEFAULTS: Record<AbSection, Record<AbVariant, string>> = {
   hero: {
     A: "Digite o tema. *Baixe o vídeo pronto.*",
     B: "Sua ideia vira um *Reel narrado e legendado* em minutos.",
-    C: "Este vídeo foi feito *inteiro por IA*. Crie o seu.",
+    C: "A IA faz o primeiro corte. *Você ajusta só o que quiser.*",
   },
   criador: {
     A: "Você não precisa de editor. *Precisa de volume.*",

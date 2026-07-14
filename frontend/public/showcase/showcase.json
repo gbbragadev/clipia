@@ -1,4 +1,10 @@
 {
+  "operationCase": {
+    "label": "Operação própria ClipIA",
+    "periodStart": "2026-06-11",
+    "periodEnd": "2026-07-14",
+    "disclaimer": "Dados do showcase próprio; não é resultado de cliente nem promessa de alcance."
+  },
   "niches": [
     {
       "id": "curiosidades",

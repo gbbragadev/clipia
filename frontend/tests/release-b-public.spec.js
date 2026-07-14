@@ -206,6 +206,12 @@ test('links de artigo distinguem mesma origem, externos e protocol-relative', ()
 test('catalogo da landing usa o manifesto runtime e recua ao canonico quando inseguro', async () => {
   const originalFetch = globalThis.fetch
   const runtimeCatalog = {
+    operationCase: {
+      label: 'Opera\u00e7\u00e3o runtime',
+      periodStart: '2026-07-01',
+      periodEnd: '2026-07-02',
+      disclaimer: 'Dados internos de teste.',
+    },
     niches: [{ id: 'runtime', label: 'Runtime', icon: 'sparkles' }],
     videos: [],
   }
@@ -232,9 +238,54 @@ test('catalogo da landing usa o manifesto runtime e recua ao canonico quando ins
         headers: { 'content-type': 'application/json' },
       })
     await expect(loadShowcase()).resolves.toEqual(SHOWCASE_CATALOG)
+
+    globalThis.fetch = async () =>
+      new Response(JSON.stringify({ niches: [], videos: [] }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      })
+    await expect(loadShowcase()).resolves.toEqual(SHOWCASE_CATALOG)
+
+    globalThis.fetch = async () =>
+      new Response(
+        JSON.stringify({
+          ...runtimeCatalog,
+          operationCase: {
+            ...runtimeCatalog.operationCase,
+            periodStart: '2026-07-03',
+            periodEnd: '2026-07-02',
+          },
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      )
+    await expect(loadShowcase()).resolves.toEqual(SHOWCASE_CATALOG)
   } finally {
     globalThis.fetch = originalFetch
   }
+})
+
+test('manifesto deriva os numeros auditaveis da operacao propria', async () => {
+  const manifestPath = path.join(frontendRoot, 'public', 'showcase', 'showcase.json')
+  const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'))
+  const showcase = await import('../src/lib/showcase')
+
+  expect(manifest.operationCase).toEqual({
+    label: 'Opera\u00e7\u00e3o pr\u00f3pria ClipIA',
+    periodStart: '2026-06-11',
+    periodEnd: '2026-07-14',
+    disclaimer: 'Dados do showcase pr\u00f3prio; n\u00e3o \u00e9 resultado de cliente nem promessa de alcance.',
+  })
+  expect(manifest.operationCase).not.toHaveProperty('videoCount')
+  expect(manifest.operationCase).not.toHaveProperty('nicheCount')
+  expect(Date.parse(manifest.operationCase.periodStart)).toBeLessThanOrEqual(
+    Date.parse(manifest.operationCase.periodEnd),
+  )
+  expect(showcase.getOperationCaseStats).toBeDefined()
+  expect(showcase.getOperationCaseStats?.(manifest)).toEqual({
+    ...manifest.operationCase,
+    videoCount: 9,
+    nicheCount: 5,
+  })
 })
 
 test('todos os artigos usam Markdown GFM sem HTML cru e protegem links externos', async ({ page }) => {
@@ -573,15 +624,68 @@ test('landing apresenta prova operacional e garantias honestas perto do primeiro
     'href',
     '/termos#creditos-e-reembolsos',
   )
+  await expect(page.getByRole('link', { name: 'Licen\u00e7as e privacidade', exact: true })).toHaveAttribute(
+    'href',
+    '/termos#uso-comercial-e-privacidade',
+  )
 
   const proof = page.getByRole('region', { name: 'Prova operacional ClipIA' })
   await expect(proof).toContainText('3 fatos surpreendentes sobre o c\u00e9rebro')
   await expect(proof).toContainText('Narra\u00e7\u00e3o + Stock')
-  await expect(proof).toContainText('Gera\u00e7\u00e3o autom\u00e1tica')
-  await expect(proof).toContainText('2 ajustes manuais')
-  await expect(proof).toContainText('Estilo das legendas')
-  await expect(proof).toContainText('Trilha sonora')
+  const generation = proof.getByTestId('proof-generation')
+  await expect(generation).toContainText('Tempo de processamento \u00b7 gera\u00e7\u00e3o autom\u00e1tica')
+  await expect(generation).toContainText('1 min 25 s')
+
+  const adjustments = proof.getByTestId('proof-adjustments')
+  await expect(adjustments).toContainText('Ajustes realizados')
+  await expect(adjustments.getByText('2', { exact: true })).toBeVisible()
+  await expect(adjustments).toContainText('Estilo das legendas')
+  await expect(adjustments).toContainText('Trilha sonora')
+  await expect(adjustments).not.toContainText('6 min 48 s')
+
+  const finalExport = proof.getByTestId('proof-export')
+  await expect(finalExport).toContainText('Tempo de processamento \u00b7 export final')
+  await expect(finalExport).toContainText('6 min 48 s')
+
+  const operationCase = proof.getByTestId('operation-case')
+  await expect(operationCase).toContainText('Opera\u00e7\u00e3o pr\u00f3pria ClipIA')
+  await expect(operationCase).toContainText('9 v\u00eddeos')
+  await expect(operationCase).toContainText('5 nichos')
+  await expect(operationCase).toContainText('11/06 a 14/07')
+  await expect(operationCase).toContainText('n\u00e3o \u00e9 resultado de cliente nem promessa de alcance')
   await expect(proof.locator('video')).toHaveAttribute('src', /showcase\/prova-operacional-cerebro\.mp4$/)
+})
+
+test('headline C descreve automacao com honestidade', async ({ page }) => {
+  await page.addInitScript(() => localStorage.setItem('clipia_ab', 'C'))
+  await page.route('**/api/v1/credits/packages', (route) =>
+    route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(landingPackages) }),
+  )
+  await page.goto(`${appBaseUrl}/`)
+
+  await expect(page.getByRole('heading', { level: 1 })).toContainText(
+    'A IA faz o primeiro corte. Voc\u00ea ajusta s\u00f3 o que quiser.',
+  )
+  await expect(page.getByText(/inteiro por IA/i)).toHaveCount(0)
+})
+
+test('termos e FAQ deixam licencas e conteudo privado por padrao', async ({ page }) => {
+  await page.goto(`${appBaseUrl}/`)
+  await page
+    .locator('details')
+    .filter({ hasText: /O v\u00eddeo \u00e9 meu\? Posso usar comercialmente\?/ })
+    .locator('summary')
+    .click()
+  await expect(page.getByText(/A m\u00eddia vem do Pexels ou \u00e9 gerada por IA/)).toBeVisible()
+  await expect(page.getByText(/conte\u00fado fica privado por padr\u00e3o/)).toBeVisible()
+
+  await page.goto(`${appBaseUrl}/termos#uso-comercial-e-privacidade`)
+  const policy = page.locator('#uso-comercial-e-privacidade')
+  await expect(policy).toContainText('Uso Comercial, Licen\u00e7as e Privacidade')
+  await expect(page.getByText(/privados por padr\u00e3o/i)).toBeVisible()
+  await expect(page.getByText(/autoriza\u00e7\u00e3o expressa, espec\u00edfica e registrada/i)).toBeVisible()
+  await expect(page.getByText(/revogar a autoriza\u00e7\u00e3o/i)).toBeVisible()
+  await expect(page.getByText(/licen\u00e7a irrevog\u00e1vel/i)).toHaveCount(0)
 })
 
 test('calculadora usa equivalencias publicas para voz e midia', async ({ page }) => {
@@ -656,6 +760,47 @@ test('mobile encurta a jornada e mantem personas acessiveis', async ({ page }) =
   for (const content of await page.locator('[data-persona-content]').all()) {
     await expect(content).toBeVisible()
   }
+})
+
+test('sticky mobile oferece precos e comecar sem perder atribuicao', async ({ page }) => {
+  await page.addInitScript(() => localStorage.setItem('clipia_ab', 'C'))
+
+  for (const width of [320, 390, 393]) {
+    await page.setViewportSize({ width, height: 844 })
+    await page.goto(
+      `${appBaseUrl}/?utm_source=sticky-qa&utm_campaign=mobile-final&ref=QA-REF`,
+    )
+    await page.locator('#prova-operacional').first().scrollIntoViewIfNeeded()
+
+    const sticky = page.getByRole('region', { name: 'A\u00e7\u00f5es r\u00e1pidas' })
+    await expect(sticky).toBeVisible()
+    await expect(sticky.getByRole('link', { name: 'Pre\u00e7os', exact: true })).toHaveAttribute(
+      'href',
+      '#preco',
+    )
+
+    const signup = sticky.getByRole('link', { name: 'Come\u00e7ar', exact: true })
+    await expect(signup).toBeVisible()
+    await expect
+      .poll(async () => new URL((await signup.getAttribute('href')) || '', appBaseUrl).searchParams.get('utm_source'))
+      .toBe('sticky-qa')
+    const signupUrl = new URL((await signup.getAttribute('href')) || '', appBaseUrl)
+    expect(signupUrl.pathname).toBe('/auth/register')
+    expect(signupUrl.searchParams.get('utm_campaign')).toBe('mobile-final')
+    expect(signupUrl.searchParams.get('ref')).toBe('QA-REF')
+    expect(signupUrl.searchParams.get('placement')).toBe('sticky')
+    expect(signupUrl.searchParams.get('ab_variant')).toBe('c')
+
+    const stickyBox = await sticky.boundingBox()
+    expect(stickyBox).not.toBeNull()
+    expect(stickyBox.x).toBeGreaterThanOrEqual(-1)
+    expect(stickyBox.x + stickyBox.width).toBeLessThanOrEqual(width + 1)
+    await page.goto('about:blank')
+  }
+
+  await page.setViewportSize({ width: 1280, height: 900 })
+  await page.goto(`${appBaseUrl}/`)
+  await expect(page.getByRole('region', { name: 'A\u00e7\u00f5es r\u00e1pidas' })).toBeHidden()
 })
 
 test('todas as rotas de autenticacao bloqueiam indexacao e seguimento', async ({ page }) => {
