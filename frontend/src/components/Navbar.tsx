@@ -9,6 +9,7 @@ import { EASE, DURATIONS, useReducedMotionState } from '@/lib/motion'
 import ScrollProgress from './ScrollProgress'
 import Logo from './brand/Logo'
 import { useAuth } from '@/contexts/AuthContext'
+import { creditLabel } from '@/lib/format-count'
 
 /** Número de créditos com tick animado: conta do valor antigo pro novo e dá um
  *  pop sutil quando muda. Reduced-motion: troca direta. */
@@ -83,7 +84,7 @@ export default function Navbar() {
                     {user.name?.charAt(0).toUpperCase() || '?'}
                   </span>
                   <CreditsValue value={user.credits} className="text-coral font-semibold text-xs" />
-                  <span className="text-xs text-3">créditos</span>
+                  <span className="text-xs text-3">{creditLabel(user.credits)}</span>
                 </div>
                 {/* Dashboard button */}
                 <a
@@ -140,7 +141,7 @@ export default function Navbar() {
                       {user.name?.charAt(0).toUpperCase() || '?'}
                     </span>
                     <CreditsValue value={user.credits} className="text-coral font-semibold text-sm" />
-                    <span className="text-sm text-3">créditos</span>
+                    <span className="text-sm text-3">{creditLabel(user.credits)}</span>
                   </div>
                   <a href="/dashboard" onClick={() => setOpen(false)} className="w-full text-center px-4 py-3 rounded-lg bg-gradient-to-r from-coral to-azure text-white font-medium active:scale-[0.97] transition">
                     Dashboard

@@ -21,6 +21,7 @@ from app.db.engine import build_engine
 from app.db.models import CreditPurchase, Job, JobDispatch
 from app.payments.states import canonical_payment_state_expression
 from app.redis_pool import get_redis
+from app.storage_contract import worker_storage_matches
 from app.worker.celery_app import celery_app
 
 logger = logging.getLogger("clipia.access")
@@ -122,7 +123,7 @@ async def _compute_deep_health(version: str) -> dict[str, Any]:
         "storage": storage["status"],
         "celery": celery["status"],
     }
-    if statuses["database"] == "down" or statuses["redis"] == "down":
+    if statuses["database"] == "down" or statuses["redis"] == "down" or statuses["storage"] == "down":
         overall = "unhealthy"
     elif statuses["celery"] == "down":
         overall = "degraded"
@@ -184,11 +185,19 @@ def _storage_check() -> dict[str, Any]:
     settings.STORAGE_DIR.mkdir(parents=True, exist_ok=True)
     writable = os.access(settings.STORAGE_DIR, os.W_OK)
     usage = shutil.disk_usage(settings.STORAGE_DIR)
-    status = "up" if writable else "down"
+    redis_client = get_redis()
+    try:
+        worker_match = worker_storage_matches(redis_client, settings.STORAGE_DIR)
+    except Exception:
+        worker_match = None
+    finally:
+        redis_client.close()
+    status = "up" if writable and worker_match is True else "down"
     return {
         "status": status,
         "writable": writable,
         "free_gb": round(usage.free / (1024**3), 2),
+        "worker_match": worker_match,
     }
 
 

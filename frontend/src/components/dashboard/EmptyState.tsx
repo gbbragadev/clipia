@@ -21,7 +21,7 @@ export default function EmptyState() {
 
       <p className="text-lg font-bold text-white">Seus vídeos vão aparecer aqui</p>
       <p className="mt-1 max-w-xs text-sm text-slate-400">
-        Escolha um tema, aperte gerar e em ~2 minutos seu primeiro Short está pronto para baixar.
+        Escolha um tema, aperte gerar e acompanhe cada etapa até seu primeiro Short ficar pronto para baixar.
       </p>
 
       <a

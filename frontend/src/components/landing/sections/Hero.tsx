@@ -72,6 +72,32 @@ export function Hero() {
               <p className="mt-3 text-[13px] text-mist-2">{ab.freeClaim}</p>
             </Reveal>
 
+            <Reveal delay={305}>
+              <div className="mt-4 flex max-w-xl flex-wrap gap-x-4 gap-y-2 text-[12px] text-mist">
+                <span className="flex items-center gap-1.5">
+                  <Icon name="check" className="h-3.5 w-3.5 text-mint" />
+                  Uso comercial liberado
+                </span>
+                <a
+                  href="/termos#uso-comercial-e-privacidade"
+                  className="underline decoration-white/20 underline-offset-4 transition-colors hover:text-cloud"
+                >
+                  Licenças e privacidade
+                </a>
+                <span className="flex items-center gap-1.5">
+                  <Icon name="check" className="h-3.5 w-3.5 text-mint" />
+                  <span>Sem marca d’água no conteúdo</span>
+                  <span className="text-mist-2">· outro ClipIA de ~1,5 s</span>
+                </span>
+                <a
+                  href="/termos#creditos-e-reembolsos"
+                  className="underline decoration-white/20 underline-offset-4 transition-colors hover:text-cloud"
+                >
+                  Política de reembolso
+                </a>
+              </div>
+            </Reveal>
+
             <Reveal delay={330}>
               <ul className="mt-7 flex flex-wrap gap-x-5 gap-y-2.5">
                 {HERO_FACTS.map((f) => (

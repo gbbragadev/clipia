@@ -21,11 +21,22 @@ class ErrorMessages:
     INVALID_INPUT = "Dados invalidos"
     SERVER_ERROR = "Erro interno. Tente novamente."
     DISK_FULL = "Servidor temporariamente indisponivel. Tente mais tarde."
+    ARTIFACT_UNAVAILABLE = (
+        "O arquivo deste video esta temporariamente indisponivel. "
+        "Tente novamente; se persistir, informe o codigo da solicitacao ao suporte."
+    )
     PAYLOAD_TOO_LARGE = "Payload muito grande"
 
 
 def not_found_error() -> HTTPException:
     return HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=ErrorMessages.NOT_FOUND)
+
+
+def artifact_unavailable_error() -> HTTPException:
+    return HTTPException(
+        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        detail=ErrorMessages.ARTIFACT_UNAVAILABLE,
+    )
 
 
 def invalid_input_error(detail: str = ErrorMessages.INVALID_INPUT) -> HTTPException:
@@ -48,10 +59,12 @@ def build_validation_error_details(exc: RequestValidationError) -> list[dict[str
     for error in exc.errors():
         location = [str(part) for part in error.get("loc", []) if part != "body"]
         field = ".".join(location) if location else "body"
-        details.append({
-            "field": field,
-            "message": error.get("msg", ErrorMessages.INVALID_INPUT),
-        })
+        details.append(
+            {
+                "field": field,
+                "message": error.get("msg", ErrorMessages.INVALID_INPUT),
+            }
+        )
     return details
 
 

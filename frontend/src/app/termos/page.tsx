@@ -35,7 +35,7 @@ export default function TermosPage() {
         Para usar o serviço, você deve ter pelo menos 18 anos de idade. Você é responsável por manter a confidencialidade das credenciais de sua conta.
       </p>
 
-      <h2>4. Créditos e Pagamentos</h2>
+      <h2 id="creditos-e-reembolsos" className="scroll-mt-24">4. Créditos e Pagamentos</h2>
       <p>
         O uso dos serviços de geração de vídeo consome créditos. Os créditos podem ser adquiridos em pacotes por meio dos nossos processadores de pagamento: <strong>Stripe</strong> (provedor primário, com suporte a cartão de crédito e Pix) e <strong>Mercado Pago</strong> (provedor secundário). A escolha do provedor pode variar conforme a disponibilidade da plataforma. O ClipIA não armazena nem tem acesso aos dados completos do seu cartão de crédito — o processamento financeiro é realizado integralmente pelos provedores acima.
       </p>
@@ -48,10 +48,27 @@ export default function TermosPage() {
         <li><strong>Falha técnica:</strong> se um vídeo não for entregue em razão de falha comprovada da plataforma (job com erro do lado do ClipIA), o crédito consumido na tentativa é devolvido à sua conta automaticamente.</li>
       </ul>
 
-      <h2>5. Conteúdo Gerado e Direitos Autorais</h2>
-      <p>
-        Os vídeos gerados através da plataforma são de propriedade do usuário. No entanto, o usuário concorda em conceder ao ClipIA uma licença irrevogável para usar vídeos gerados de forma anonimizada para fins de showcase, marketing e exibição na plataforma (exceto se o usuário expressamente solicitar opt-out).
-      </p>
+      <section id="uso-comercial-e-privacidade" className="scroll-mt-24">
+        <h2>5. Uso Comercial, Licenças e Privacidade</h2>
+        <p>
+          Os vídeos gerados através da plataforma são de propriedade do usuário e podem
+          ser usados comercialmente. Esse uso permanece sujeito aos termos de licença dos
+          provedores de mídia e de inteligência artificial utilizados na geração. O
+          usuário é responsável por ter os direitos necessários sobre textos, imagens,
+          marcas, rostos ou outros materiais enviados ao ClipIA.
+        </p>
+        <p>
+          Os vídeos e projetos da conta permanecem <strong>privados por padrão</strong>.
+          O ClipIA não publica conteúdo de usuários em showcase, publicidade ou materiais
+          de marketing sem uma <strong>autorização expressa, específica e registrada</strong>
+          para essa finalidade.
+        </p>
+        <p>
+          O usuário pode revogar a autorização para exposições futuras entrando em contato
+          com o suporte. A revogação não altera materiais próprios criados e publicados
+          diretamente pela operação interna do ClipIA.
+        </p>
+      </section>
 
       <h2>6. Uso Aceitável</h2>
       <p>

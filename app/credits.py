@@ -34,6 +34,7 @@ def public_package_intent(internal_key: str) -> PublicPackageIntent:
 @dataclass(frozen=True)
 class CreditTariffs:
     standard_voice: Decimal = Decimal("1")
+    premium_voice: Decimal = Decimal("2")
     dialogue: Decimal = Decimal("2")
     script_refinement: Decimal = Decimal("0.5")
     ai_image: Decimal = Decimal("5")
@@ -47,6 +48,7 @@ def credit_equivalences(total_credits: int) -> dict[str, int]:
     available = Decimal(total_credits)
     return {
         "standard_voice": int(available // CREDIT_TARIFFS.standard_voice),
+        "premium_voice": int(available // CREDIT_TARIFFS.premium_voice),
         "dialogue": int(available // CREDIT_TARIFFS.dialogue),
         "script_refinement": int(available // CREDIT_TARIFFS.script_refinement),
         "ai_image": int(available // CREDIT_TARIFFS.ai_image),

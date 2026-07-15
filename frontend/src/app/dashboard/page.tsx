@@ -14,6 +14,7 @@ import { InlineError, useToast } from '@/components/ui/feedback'
 import { PretextHeading } from '@/components/ui/PretextHeading'
 import { fetchPublicConfig } from '@/lib/config'
 import { getNicheBySlug } from '@/lib/niches'
+import { creditLabel, videoLabel } from '@/lib/format-count'
 
 export default function DashboardPage() {
   const router = useRouter()
@@ -140,7 +141,7 @@ export default function DashboardPage() {
               onClick={() => router.push('/dashboard/credits')}
               className="flex items-center gap-2 rounded-full border border-coral/25 bg-coral/10 px-3.5 py-1.5 text-[13px] text-coral transition hover:bg-coral/15"
             >
-              <span className="font-bold tabular-nums">{user.credits}</span> créditos
+              <span className="font-bold tabular-nums">{user.credits}</span> {creditLabel(user.credits)}
             </button>
             <button
               type="button"
@@ -214,7 +215,7 @@ export default function DashboardPage() {
         <div className="flex items-center justify-between mb-8 border-b border-white/5 pb-4">
           <h2 className="font-display text-2xl font-extrabold text-white">Seus vídeos</h2>
           <div className="text-sm text-slate-500 font-medium bg-white/5 px-3 py-1 rounded-full border border-white/5">
-            {jobs.length} vídeos
+            {jobs.length} {videoLabel(jobs.length)}
           </div>
         </div>
         

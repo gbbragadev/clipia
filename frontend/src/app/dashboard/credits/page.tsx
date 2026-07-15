@@ -24,6 +24,7 @@ import PurchaseHistory from '@/components/dashboard/PurchaseHistory'
 import { InlineError } from '@/components/ui/feedback'
 import { useToast } from '@/components/ui/feedback'
 import { trackProductEvent } from '@/lib/analytics'
+import { creditLabel } from '@/lib/format-count'
 
 const CHECKOUT_ATTEMPT_STORAGE_KEY = 'clipia_checkout_attempt'
 const CHECKOUT_POLL_DELAYS_MS = [250, 500, 1_000, 2_000] as const
@@ -341,7 +342,10 @@ export default function CreditsPage() {
               <span className="text-3xl font-bold" style={{ color: 'var(--accent-primary, #ff5638)' }}>
                 {user?.credits ?? 0}
               </span>
-              <span style={{ color: 'var(--text-secondary)' }}>créditos disponíveis</span>
+              <span style={{ color: 'var(--text-secondary)' }}>
+                {creditLabel(user?.credits ?? 0).replace(/^\d+\s/, '')}{' '}
+                {(user?.credits ?? 0) === 1 ? 'disponível' : 'disponíveis'}
+              </span>
             </div>
             {(() => {
               const bonusPercent = packages.find((p) => p.bonus_percent > 0)?.bonus_percent

@@ -14,6 +14,22 @@ const manifest = JSON.parse(fs.readFileSync(path.join(publicShowcaseDir, 'showca
 
 let errors = 0
 const nicheIds = new Set(manifest.niches.map((n) => n.id))
+const operationCase = manifest.operationCase
+const isoDatePattern = /^\d{4}-\d{2}-\d{2}$/
+
+if (
+  !operationCase ||
+  typeof operationCase.label !== 'string' ||
+  !operationCase.label.trim() ||
+  typeof operationCase.disclaimer !== 'string' ||
+  !operationCase.disclaimer.trim() ||
+  !isoDatePattern.test(operationCase.periodStart || '') ||
+  !isoDatePattern.test(operationCase.periodEnd || '') ||
+  operationCase.periodStart > operationCase.periodEnd
+) {
+  console.error('INVALID OPERATION CASE: identidade, período ISO e aviso são obrigatórios')
+  errors++
+}
 
 // Resolve o caminho fisico de um campo `video` do manifesto.
 function resolveVideoPath(video) {
@@ -51,4 +67,7 @@ if (errors) {
   console.error(`\n${errors} problema(s).`)
   process.exit(1)
 }
-console.log(`OK: ${manifest.videos.length} videos, ${manifest.niches.length} nichos, tudo em sincronia.`)
+const representedNiches = new Set(manifest.videos.map((video) => video.niche))
+console.log(
+  `OK: ${manifest.videos.length} videos, ${representedNiches.size} nichos representados, tudo em sincronia.`,
+)

@@ -1,4 +1,5 @@
 "use client";
+import { useState } from "react";
 import { Container } from "@/components/landing/ui/Container";
 import { SectionHeading } from "@/components/landing/ui/SectionHeading";
 import { Highlight } from "@/components/landing/ui/Highlight";
@@ -107,12 +108,49 @@ function PersonaVisual({ persona }: { persona: Persona }) {
   return <ShowcaseFan />;
 }
 
-function PersonaBlock({ persona, flip }: { persona: Persona; flip: boolean }) {
+function PersonaBlock({
+  persona,
+  flip,
+  open,
+  onToggle,
+}: {
+  persona: Persona;
+  flip: boolean;
+  open: boolean;
+  onToggle: () => void;
+}) {
   const ab = useAb();
   const a = accentMap[persona.accent];
+  const contentId = `persona-${persona.id}-content`;
+  const accessibleLabel = persona.id === "agencia" ? `Agência — ${persona.label}` : persona.label;
 
   return (
-    <div className="relative grid w-full min-w-0 items-center gap-10 lg:grid-cols-2 lg:gap-14">
+    <div className="rounded-2xl border border-white/8 bg-panel/45 p-3 lg:rounded-none lg:border-0 lg:bg-transparent lg:p-0">
+      <button
+        type="button"
+        aria-label={accessibleLabel}
+        aria-expanded={open}
+        aria-controls={contentId}
+        onClick={onToggle}
+        className="flex w-full items-center justify-between gap-4 rounded-xl px-2 py-3 text-left lg:hidden"
+      >
+        <span>
+          <span className={cn("font-mono text-[10px] uppercase tracking-wider", a.text)}>{persona.index} · {persona.label}</span>
+          <span className="mt-1 block font-display text-lg font-bold text-cloud">{ab.headline(persona.id).replaceAll("*", "")}</span>
+        </span>
+        <span className={cn("grid h-8 w-8 shrink-0 place-items-center rounded-lg transition-transform", a.soft, a.text, open && "rotate-180")}>
+          <Icon name="chevronDown" className="h-4 w-4" />
+        </span>
+      </button>
+
+      <div
+        id={contentId}
+        data-persona-content
+        className={cn(
+          "relative w-full min-w-0 items-center gap-10 pt-5 lg:grid lg:grid-cols-2 lg:gap-14 lg:pt-0",
+          open ? "grid" : "hidden",
+        )}
+      >
       <div className={cn("relative min-w-0", flip && "lg:order-2")}>
         <span
           aria-hidden
@@ -174,11 +212,14 @@ function PersonaBlock({ persona, flip }: { persona: Persona; flip: boolean }) {
       <Reveal delay={200} className={cn("w-full min-w-0", flip && "lg:order-1")}>
         <PersonaVisual persona={persona} />
       </Reveal>
+      </div>
     </div>
   );
 }
 
 export function Personas() {
+  const [openPersona, setOpenPersona] = useState<string | null>("criador");
+
   return (
     <section id="para-quem" className="relative scroll-mt-20 py-20 sm:py-24">
       <Container>
@@ -190,9 +231,15 @@ export function Personas() {
           title={<Highlight text="Feito para quem precisa postar *sem parar*." />}
           description="Três formas diferentes de usar a mesma máquina de vídeo — escolha a sua."
         />
-        <div className="mt-20 space-y-24 lg:space-y-32">
+        <div className="mt-10 space-y-3 lg:mt-20 lg:space-y-32">
           {PERSONAS.map((p, i) => (
-            <PersonaBlock key={p.id} persona={p} flip={i % 2 === 1} />
+            <PersonaBlock
+              key={p.id}
+              persona={p}
+              flip={i % 2 === 1}
+              open={openPersona === p.id}
+              onToggle={() => setOpenPersona((current) => current === p.id ? null : p.id)}
+            />
           ))}
         </div>
       </Container>

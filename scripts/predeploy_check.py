@@ -16,6 +16,7 @@ from app.config import settings, validate_production_settings  # noqa: E402
 from app.db.engine import build_engine  # noqa: E402
 from app.main import create_app  # noqa: E402
 from app.redis_pool import get_redis  # noqa: E402
+from app.storage_contract import worker_storage_matches  # noqa: E402
 
 
 class CheckFailure(Exception):
@@ -29,6 +30,7 @@ def main() -> int:
         ("Production security", check_production_security),
         ("Database URL", check_database_url),
         ("Redis URL", check_redis_url),
+        ("Worker storage", check_worker_storage_alignment),
         ("Error handlers", check_error_handlers),
         ("Protected routes", check_protected_routes),
         ("SQLAlchemy pool", check_engine_pool),
@@ -79,6 +81,20 @@ def check_database_url() -> None:
 def check_redis_url() -> None:
     if not settings.REDIS_URL:
         raise CheckFailure("REDIS_URL não configurada.")
+
+
+def check_worker_storage_alignment() -> None:
+    if not settings.STORAGE_DIR.is_absolute():
+        raise CheckFailure("storage da API deve usar caminho absoluto")
+    redis_client = get_redis()
+    try:
+        matches = worker_storage_matches(redis_client, settings.STORAGE_DIR)
+    finally:
+        redis_client.close()
+    if matches is None:
+        raise CheckFailure("worker ainda nao publicou seu storage; reinicie o worker candidato")
+    if not matches:
+        raise CheckFailure("storage da API e do worker sao diferentes")
 
 
 def check_error_handlers() -> None:

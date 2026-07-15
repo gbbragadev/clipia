@@ -23,6 +23,7 @@ from app.services.outro import append_outro
 from app.services.scriptwriter import generate_script
 from app.services.transcriber import transcribe_with_timestamps
 from app.services.tts import synthesize_narration
+from app.storage_contract import publish_worker_storage
 from app.templates import get_template
 from app.utils.files import bytes_to_gb, cleanup_job_dir, get_job_dir, get_output_dir, remove_path
 from app.worker.celery_app import celery_app
@@ -1676,6 +1677,7 @@ def _watchdog_pass() -> int:
 def _watchdog_loop() -> None:
     while True:
         try:
+            publish_worker_storage(_redis, settings.STORAGE_DIR)
             reaped = _watchdog_pass()
             if reaped:
                 logger.warning("Watchdog reaped %d stuck job(s)", reaped)
@@ -1689,6 +1691,7 @@ try:  # pragma: no cover - wiring do worker real; testes chamam _watchdog_pass d
 
     @worker_ready.connect
     def _start_watchdog_thread(**_kwargs):
+        publish_worker_storage(_redis, settings.STORAGE_DIR)
         thread = threading.Thread(target=_watchdog_loop, daemon=True, name="stuck-job-watchdog")
         thread.start()
         logger.info("Watchdog de jobs travados ativo (passada a cada %ds)", _WATCHDOG_INTERVAL_SECONDS)

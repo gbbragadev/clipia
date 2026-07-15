@@ -17,6 +17,68 @@ const firstPurchaseId = '00000000-0000-4000-8000-000000000001'
 const secondPurchaseId = '00000000-0000-4000-8000-000000000002'
 const dispatchId = '00000000-0000-4000-8000-000000000101'
 const checkoutAttemptStorageKey = 'clipia_checkout_attempt'
+const landingPackages = [
+  {
+    id: 'starter',
+    selected_package: 'starter',
+    name: 'Starter',
+    credits: 10,
+    base_credits: 10,
+    price_brl: 1990,
+    price_display: 'R$ 19,90',
+    bonus_percent: 20,
+    bonus_credits: 2,
+    total_credits: 12,
+    equivalences: {
+      standard_voice: 12,
+      premium_voice: 6,
+      dialogue: 6,
+      script_refinement: 24,
+      ai_image: 2,
+      ai_video: 0,
+    },
+  },
+  {
+    id: 'popular',
+    selected_package: 'popular',
+    name: 'Popular',
+    credits: 30,
+    base_credits: 30,
+    price_brl: 4990,
+    price_display: 'R$ 49,90',
+    bonus_percent: 20,
+    bonus_credits: 6,
+    total_credits: 36,
+    equivalences: {
+      standard_voice: 36,
+      premium_voice: 18,
+      dialogue: 18,
+      script_refinement: 72,
+      ai_image: 7,
+      ai_video: 1,
+    },
+  },
+  {
+    id: 'professional',
+    selected_package: 'professional',
+    name: 'Profissional',
+    credits: 100,
+    base_credits: 100,
+    price_brl: 12990,
+    price_display: 'R$ 129,90',
+    bonus_percent: 20,
+    bonus_credits: 20,
+    total_credits: 120,
+    equivalences: {
+      standard_voice: 120,
+      premium_voice: 60,
+      dialogue: 60,
+      script_refinement: 240,
+      ai_image: 24,
+      ai_video: 4,
+    },
+  },
+]
 
 const STATIC_INDEXABLE_ROUTES = ['/', '/exemplos', '/blog', '/suporte', '/termos', '/privacidade']
 const NICHE_ROUTES = NICHES.map((niche) => `/criar/${niche.slug}`)
@@ -144,6 +206,12 @@ test('links de artigo distinguem mesma origem, externos e protocol-relative', ()
 test('catalogo da landing usa o manifesto runtime e recua ao canonico quando inseguro', async () => {
   const originalFetch = globalThis.fetch
   const runtimeCatalog = {
+    operationCase: {
+      label: 'Opera\u00e7\u00e3o runtime',
+      periodStart: '2026-07-01',
+      periodEnd: '2026-07-02',
+      disclaimer: 'Dados internos de teste.',
+    },
     niches: [{ id: 'runtime', label: 'Runtime', icon: 'sparkles' }],
     videos: [],
   }
@@ -170,9 +238,54 @@ test('catalogo da landing usa o manifesto runtime e recua ao canonico quando ins
         headers: { 'content-type': 'application/json' },
       })
     await expect(loadShowcase()).resolves.toEqual(SHOWCASE_CATALOG)
+
+    globalThis.fetch = async () =>
+      new Response(JSON.stringify({ niches: [], videos: [] }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      })
+    await expect(loadShowcase()).resolves.toEqual(SHOWCASE_CATALOG)
+
+    globalThis.fetch = async () =>
+      new Response(
+        JSON.stringify({
+          ...runtimeCatalog,
+          operationCase: {
+            ...runtimeCatalog.operationCase,
+            periodStart: '2026-07-03',
+            periodEnd: '2026-07-02',
+          },
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      )
+    await expect(loadShowcase()).resolves.toEqual(SHOWCASE_CATALOG)
   } finally {
     globalThis.fetch = originalFetch
   }
+})
+
+test('manifesto deriva os numeros auditaveis da operacao propria', async () => {
+  const manifestPath = path.join(frontendRoot, 'public', 'showcase', 'showcase.json')
+  const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'))
+  const showcase = await import('../src/lib/showcase')
+
+  expect(manifest.operationCase).toEqual({
+    label: 'Opera\u00e7\u00e3o pr\u00f3pria ClipIA',
+    periodStart: '2026-06-11',
+    periodEnd: '2026-07-14',
+    disclaimer: 'Dados do showcase pr\u00f3prio; n\u00e3o \u00e9 resultado de cliente nem promessa de alcance.',
+  })
+  expect(manifest.operationCase).not.toHaveProperty('videoCount')
+  expect(manifest.operationCase).not.toHaveProperty('nicheCount')
+  expect(Date.parse(manifest.operationCase.periodStart)).toBeLessThanOrEqual(
+    Date.parse(manifest.operationCase.periodEnd),
+  )
+  expect(showcase.getOperationCaseStats).toBeDefined()
+  expect(showcase.getOperationCaseStats?.(manifest)).toEqual({
+    ...manifest.operationCase,
+    videoCount: 9,
+    nicheCount: 5,
+  })
 })
 
 test('todos os artigos usam Markdown GFM sem HTML cru e protegem links externos', async ({ page }) => {
@@ -221,10 +334,10 @@ test('todos os artigos usam Markdown GFM sem HTML cru e protegem links externos'
   expect(source).not.toContain('dangerouslySetInnerHTML')
 })
 
-test('as 24 rotas indexaveis publicam um canonical apex autorreferente', async ({ page }) => {
+test('as 25 rotas indexaveis publicam um canonical apex autorreferente', async ({ page }) => {
   test.setTimeout(180_000)
-  expect(INDEXABLE_ROUTES).toHaveLength(24)
-  expect(new Set(INDEXABLE_ROUTES).size).toBe(24)
+  expect(INDEXABLE_ROUTES).toHaveLength(25)
+  expect(new Set(INDEXABLE_ROUTES).size).toBe(25)
 
   for (const route of INDEXABLE_ROUTES) {
     await page.goto(`${appBaseUrl}${route}`, { waitUntil: 'domcontentloaded' })
@@ -283,11 +396,11 @@ test('www redireciona estatico, dinamico, auth e viewer preservando rota e query
   }
 })
 
-test('matriz real cobre 29 rotas em desktop e 320/390/393 sem erro ou overflow', async ({ browser }) => {
+test('matriz real cobre 30 rotas em desktop e 320/390/393 sem erro ou overflow', async ({ browser }) => {
   test.setTimeout(600_000)
-  expect(PUBLIC_ROUTE_SPECS).toHaveLength(29)
-  expect(new Set(PUBLIC_ROUTE_SPECS.map((route) => route.path)).size).toBe(29)
-  expect(PUBLIC_ROUTE_SPECS.length * ROUTE_MATRIX_VIEWPORTS.length).toBe(116)
+  expect(PUBLIC_ROUTE_SPECS).toHaveLength(30)
+  expect(new Set(PUBLIC_ROUTE_SPECS.map((route) => route.path)).size).toBe(30)
+  expect(PUBLIC_ROUTE_SPECS.length * ROUTE_MATRIX_VIEWPORTS.length).toBe(120)
 
   for (const viewport of ROUTE_MATRIX_VIEWPORTS) {
     for (const route of PUBLIC_ROUTE_SPECS) {
@@ -497,6 +610,197 @@ test('landing cabe em 320, 390 e 393 px sem mascarar overflow global', async ({ 
     // transition from the previous width cannot overlap the next hydration.
     await page.goto('about:blank')
   }
+})
+
+test('landing apresenta prova operacional e garantias honestas perto do primeiro CTA', async ({ page }) => {
+  await page.route('**/api/v1/credits/packages', (route) =>
+    route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(landingPackages) }),
+  )
+  await page.goto(`${appBaseUrl}/`)
+
+  await expect(page.getByText('Uso comercial liberado', { exact: true })).toBeVisible()
+  await expect(page.getByText('Sem marca d\u2019\u00e1gua no conte\u00fado', { exact: true })).toBeVisible()
+  await expect(page.getByRole('link', { name: 'Pol\u00edtica de reembolso', exact: true })).toHaveAttribute(
+    'href',
+    '/termos#creditos-e-reembolsos',
+  )
+  await expect(page.getByRole('link', { name: 'Licen\u00e7as e privacidade', exact: true })).toHaveAttribute(
+    'href',
+    '/termos#uso-comercial-e-privacidade',
+  )
+
+  const proof = page.getByRole('region', { name: 'Prova operacional ClipIA' })
+  await expect(proof).toContainText('3 fatos surpreendentes sobre o c\u00e9rebro')
+  await expect(proof).toContainText('Narra\u00e7\u00e3o + Stock')
+  const generation = proof.getByTestId('proof-generation')
+  await expect(generation).toContainText('Tempo de processamento \u00b7 gera\u00e7\u00e3o autom\u00e1tica')
+  await expect(generation).toContainText('1 min 25 s')
+
+  const adjustments = proof.getByTestId('proof-adjustments')
+  await expect(adjustments).toContainText('Ajustes realizados')
+  await expect(adjustments.getByText('2', { exact: true })).toBeVisible()
+  await expect(adjustments).toContainText('Estilo das legendas')
+  await expect(adjustments).toContainText('Trilha sonora')
+  await expect(adjustments).not.toContainText('6 min 48 s')
+
+  const finalExport = proof.getByTestId('proof-export')
+  await expect(finalExport).toContainText('Tempo de processamento \u00b7 export final')
+  await expect(finalExport).toContainText('6 min 48 s')
+
+  const operationCase = proof.getByTestId('operation-case')
+  await expect(operationCase).toContainText('Opera\u00e7\u00e3o pr\u00f3pria ClipIA')
+  await expect(operationCase).toContainText('9 v\u00eddeos')
+  await expect(operationCase).toContainText('5 nichos')
+  await expect(operationCase).toContainText('11/06 a 14/07')
+  await expect(operationCase).toContainText('n\u00e3o \u00e9 resultado de cliente nem promessa de alcance')
+  await expect(proof.locator('video')).toHaveAttribute('src', /showcase\/prova-operacional-cerebro\.mp4$/)
+})
+
+test('headline C descreve automacao com honestidade', async ({ page }) => {
+  await page.addInitScript(() => localStorage.setItem('clipia_ab', 'C'))
+  await page.route('**/api/v1/credits/packages', (route) =>
+    route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(landingPackages) }),
+  )
+  await page.goto(`${appBaseUrl}/`)
+
+  await expect(page.getByRole('heading', { level: 1 })).toContainText(
+    'A IA faz o primeiro corte. Voc\u00ea ajusta s\u00f3 o que quiser.',
+  )
+  await expect(page.getByText(/inteiro por IA/i)).toHaveCount(0)
+})
+
+test('termos e FAQ deixam licencas e conteudo privado por padrao', async ({ page }) => {
+  await page.goto(`${appBaseUrl}/`)
+  await page
+    .locator('details')
+    .filter({ hasText: /O v\u00eddeo \u00e9 meu\? Posso usar comercialmente\?/ })
+    .locator('summary')
+    .click()
+  await expect(page.getByText(/A m\u00eddia vem do Pexels ou \u00e9 gerada por IA/)).toBeVisible()
+  await expect(page.getByText(/conte\u00fado fica privado por padr\u00e3o/)).toBeVisible()
+
+  await page.goto(`${appBaseUrl}/termos#uso-comercial-e-privacidade`)
+  const policy = page.locator('#uso-comercial-e-privacidade')
+  await expect(policy).toContainText('Uso Comercial, Licen\u00e7as e Privacidade')
+  await expect(page.getByText(/privados por padr\u00e3o/i)).toBeVisible()
+  await expect(page.getByText(/autoriza\u00e7\u00e3o expressa, espec\u00edfica e registrada/i)).toBeVisible()
+  await expect(page.getByText(/revogar a autoriza\u00e7\u00e3o/i)).toBeVisible()
+  await expect(page.getByText(/licen\u00e7a irrevog\u00e1vel/i)).toHaveCount(0)
+})
+
+test('calculadora usa equivalencias publicas para voz e midia', async ({ page }) => {
+  await page.route('**/api/v1/credits/packages', (route) =>
+    route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(landingPackages) }),
+  )
+  await page.goto(`${appBaseUrl}/`)
+
+  const calculator = page.getByRole('region', { name: 'Calculadora de cr\u00e9ditos' })
+  await expect(calculator.getByTestId('calculator-starter')).toContainText('At\u00e9 12 v\u00eddeos')
+  await expect(calculator.getByTestId('calculator-popular')).toContainText('At\u00e9 36 v\u00eddeos')
+  await expect(calculator.getByTestId('calculator-professional')).toContainText('At\u00e9 120 v\u00eddeos')
+
+  await calculator.getByRole('radio', { name: 'Imagens por IA' }).check()
+  await expect(calculator.getByTestId('calculator-starter')).toContainText('At\u00e9 2 v\u00eddeos')
+  await expect(calculator.getByTestId('calculator-popular')).toContainText('At\u00e9 7 v\u00eddeos')
+  await expect(calculator.getByTestId('calculator-professional')).toContainText('At\u00e9 24 v\u00eddeos')
+
+  await calculator.getByRole('radio', { name: 'V\u00eddeo por IA' }).check()
+  await expect(calculator.getByTestId('calculator-starter')).toContainText('0 v\u00eddeos completos')
+  await expect(calculator.getByTestId('calculator-popular')).toContainText('At\u00e9 1 v\u00eddeo')
+  await expect(calculator.getByTestId('calculator-professional')).toContainText('At\u00e9 4 v\u00eddeos')
+
+  await calculator.getByRole('radio', { name: 'Banco de v\u00eddeos' }).check()
+  await calculator.getByRole('radio', { name: 'Voz premium' }).check()
+  await expect(calculator.getByTestId('calculator-starter')).toContainText('At\u00e9 6 v\u00eddeos')
+  await expect(calculator.getByTestId('calculator-popular')).toContainText('At\u00e9 18 v\u00eddeos')
+  await expect(calculator.getByTestId('calculator-professional')).toContainText('At\u00e9 60 v\u00eddeos')
+
+  await calculator.getByRole('radio', { name: 'Imagens por IA' }).check()
+  await expect(calculator.getByTestId('calculator-starter')).toContainText('At\u00e9 2 v\u00eddeos')
+  await expect(calculator.getByTestId('calculator-popular')).toContainText('At\u00e9 7 v\u00eddeos')
+  await expect(calculator.getByTestId('calculator-professional')).toContainText('At\u00e9 24 v\u00eddeos')
+
+  await calculator.getByRole('radio', { name: 'V\u00eddeo por IA' }).check()
+  await expect(calculator.getByTestId('calculator-starter')).toContainText('0 v\u00eddeos completos')
+  await expect(calculator.getByTestId('calculator-popular')).toContainText('At\u00e9 1 v\u00eddeo')
+  await expect(calculator.getByTestId('calculator-professional')).toContainText('At\u00e9 4 v\u00eddeos')
+})
+
+test('calculadora falha de forma segura sem estimativa hardcoded', async ({ page }) => {
+  await page.route('**/api/v1/credits/packages', (route) =>
+    route.fulfill({ status: 503, contentType: 'application/json', body: '{}' }),
+  )
+  await page.goto(`${appBaseUrl}/`)
+
+  await expect(page.getByText('Calculadora temporariamente indispon\u00edvel.', { exact: true })).toBeVisible()
+  await expect(page.getByRole('region', { name: 'Calculadora de cr\u00e9ditos' }).getByText(/At\u00e9 \d+ v\u00eddeos/)).toHaveCount(0)
+})
+
+test('mobile encurta a jornada e mantem personas acessiveis', async ({ page }) => {
+  for (const width of [320, 390, 393]) {
+    await page.setViewportSize({ width, height: 844 })
+    await page.goto(`${appBaseUrl}/`)
+
+    const shortcuts = page.getByRole('navigation', { name: 'Atalhos da landing' })
+    await expect(shortcuts.getByRole('link', { name: 'Como funciona' })).toHaveAttribute('href', '#como-funciona')
+    await expect(shortcuts.getByRole('link', { name: 'Pre\u00e7os' })).toHaveAttribute('href', '#preco')
+    await expect(shortcuts.getByRole('link', { name: 'Exemplos' })).toHaveAttribute('href', '/exemplos')
+
+    const creator = page.getByRole('button', { name: /Criador de conte\u00fado/ })
+    const agency = page.getByRole('button', { name: /Ag\u00eancia/ })
+    await expect(creator).toHaveAttribute('aria-expanded', 'true')
+    await expect(agency).toHaveAttribute('aria-expanded', 'false')
+    await agency.click()
+    await expect(creator).toHaveAttribute('aria-expanded', 'false')
+    await expect(agency).toHaveAttribute('aria-expanded', 'true')
+  }
+
+  await page.setViewportSize({ width: 1280, height: 900 })
+  await expect(page.locator('[data-persona-content]')).toHaveCount(3)
+  for (const content of await page.locator('[data-persona-content]').all()) {
+    await expect(content).toBeVisible()
+  }
+})
+
+test('sticky mobile oferece precos e comecar sem perder atribuicao', async ({ page }) => {
+  await page.addInitScript(() => localStorage.setItem('clipia_ab', 'C'))
+
+  for (const width of [320, 390, 393]) {
+    await page.setViewportSize({ width, height: 844 })
+    await page.goto(
+      `${appBaseUrl}/?utm_source=sticky-qa&utm_campaign=mobile-final&ref=QA-REF`,
+    )
+    await page.locator('#prova-operacional').first().scrollIntoViewIfNeeded()
+
+    const sticky = page.getByRole('region', { name: 'A\u00e7\u00f5es r\u00e1pidas' })
+    await expect(sticky).toBeVisible()
+    await expect(sticky.getByRole('link', { name: 'Pre\u00e7os', exact: true })).toHaveAttribute(
+      'href',
+      '#preco',
+    )
+
+    const signup = sticky.getByRole('link', { name: 'Come\u00e7ar', exact: true })
+    await expect(signup).toBeVisible()
+    await expect
+      .poll(async () => new URL((await signup.getAttribute('href')) || '', appBaseUrl).searchParams.get('utm_source'))
+      .toBe('sticky-qa')
+    const signupUrl = new URL((await signup.getAttribute('href')) || '', appBaseUrl)
+    expect(signupUrl.pathname).toBe('/auth/register')
+    expect(signupUrl.searchParams.get('utm_campaign')).toBe('mobile-final')
+    expect(signupUrl.searchParams.get('ref')).toBe('QA-REF')
+    expect(signupUrl.searchParams.get('placement')).toBe('sticky')
+    expect(signupUrl.searchParams.get('ab_variant')).toBe('c')
+
+    const stickyBox = await sticky.boundingBox()
+    expect(stickyBox).not.toBeNull()
+    expect(stickyBox.x).toBeGreaterThanOrEqual(-1)
+    expect(stickyBox.x + stickyBox.width).toBeLessThanOrEqual(width + 1)
+    await page.goto('about:blank')
+  }
+
+  await page.setViewportSize({ width: 1280, height: 900 })
+  await page.goto(`${appBaseUrl}/`)
+  await expect(page.getByRole('region', { name: 'A\u00e7\u00f5es r\u00e1pidas' })).toBeHidden()
 })
 
 test('todas as rotas de autenticacao bloqueiam indexacao e seguimento', async ({ page }) => {
@@ -1244,4 +1548,124 @@ test('resposta de checkout com ID ou URL insegura nunca redireciona', async ({ p
     await expect(continueButton).toBeEnabled()
     await expect(page).toHaveURL(/\/dashboard\/credits/)
   }
+})
+
+test('release autenticado cobre singular, editor mobile, ETA honesto e erro acionavel', async ({ page, request }) => {
+  const jobId = '00000000-0000-4000-8000-000000000999'
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.addInitScript(() => localStorage.setItem('clipia_token', 'qa-token'))
+
+  await page.route('**/api/v1/auth/me', (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        id: 'qa-dashboard-user',
+        email: 'qa-dashboard@clipia.com.br',
+        name: 'QA Dashboard',
+        credits: 1,
+        plan: 'free',
+        email_verified: true,
+        referral_code: 'QA-DASHBOARD',
+      }),
+    }),
+  )
+  await page.route('**/api/v1/config', (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ welcome_credit_bonus: 2, purchase_bonus_percent: 20 }),
+    }),
+  )
+  await page.route('**/api/v1/jobs', (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify([
+        {
+          job_id: jobId,
+          topic: 'Video QA',
+          style: 'educational',
+          status: 'editable',
+          duration_target: 15,
+          created_at: '2026-07-14T22:00:00Z',
+          download_url: `/api/v1/jobs/${jobId}/download`,
+        },
+      ]),
+    }),
+  )
+  await page.route('**/api/v1/templates', (route) =>
+    route.fulfill({ status: 200, contentType: 'application/json', body: '[]' }),
+  )
+  await page.route('**/api/v1/voices', (route) =>
+    route.fulfill({ status: 200, contentType: 'application/json', body: '[]' }),
+  )
+  await page.route('**/api/v1/trends**', (route) =>
+    route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ trends: [] }) }),
+  )
+
+  await page.goto(`${appBaseUrl}/dashboard`)
+  await expect(page.getByText('1 crédito', { exact: true }).first()).toBeVisible()
+  await expect(page.getByText('1 vídeo', { exact: true })).toBeVisible()
+  await expect(page.getByText('1 créditos', { exact: true })).toHaveCount(0)
+  await expect(page.getByText('1 vídeos', { exact: true })).toHaveCount(0)
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390)
+
+  await page.route(`**/api/v1/jobs/${jobId}/composition`, (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        job_id: jobId,
+        script: { title: 'Video QA', narration: 'Cena QA', scenes: [{ text: 'Cena QA', duration_hint: 3 }] },
+        words: [{ word: 'Cena', start: 0, end: 0.5 }],
+        audio_url: '',
+        media_urls: [],
+        subtitle_style: {},
+        editor_state: null,
+        template_id: 'stock_narration',
+        layout_type: 'fullscreen',
+        fps: 30,
+        width: 1080,
+        height: 1920,
+        pending_credits: 0,
+        music_asset_id: null,
+        music_volume: 0.3,
+      }),
+    }),
+  )
+  await page.route(`**/api/v1/jobs/${jobId}/status`, (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ status: 'idle', progress: 0, pending_credits: 0 }),
+    }),
+  )
+  await page.route(`**/api/v1/jobs/${jobId}/edit`, (route) =>
+    route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ status: 'saved' }) }),
+  )
+  await page.route(`**/api/v1/jobs/${jobId}/render`, (route) =>
+    route.fulfill({
+      status: 503,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        detail:
+          'O arquivo deste video esta temporariamente indisponivel. Tente novamente; se persistir, informe o codigo da solicitacao ao suporte.',
+      }),
+    }),
+  )
+
+  await page.goto(`${appBaseUrl}/editor/${jobId}`)
+  await page.getByRole('button', { name: 'Exportar' }).click()
+  const renderButton = page.getByRole('button', { name: /Aplicar edições e renderizar/ })
+  await expect(renderButton).toContainText('geralmente 2–5 min')
+  await expect(renderButton).not.toContainText('~2 min')
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390)
+
+  await renderButton.click()
+  await expect(page.getByText(/arquivo deste video esta temporariamente indisponivel/i)).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Tentar novamente' })).toBeVisible()
+
+  const csp = (await request.get(appBaseUrl)).headers()['content-security-policy'] || ''
+  expect(csp).toContain("media-src 'self' blob: data: https:")
 })

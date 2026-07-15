@@ -104,6 +104,33 @@ async def test_jobs_endpoint_falls_back_to_database_status_when_redis_is_empty(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("operation", ["edit", "render", "download"])
+async def test_delivered_job_reports_artifact_unavailable_when_shared_storage_is_missing(
+    operation, client, job_factory, verified_user, auth_headers
+):
+    """A DB row is not enough: a missing artifact is an operational 503, not an IDOR-like 404."""
+    job = await job_factory(status="editable", script={"scenes": [{"text": "scene 1"}]})
+    headers = auth_headers(verified_user)
+
+    if operation == "edit":
+        response = await client.post(
+            f"/api/v1/jobs/{job.id}/edit",
+            headers=headers,
+            json={"editor_state": {"composition": {"scenes": [{"text": "editada"}]}}},
+        )
+    elif operation == "render":
+        response = await client.post(f"/api/v1/jobs/{job.id}/render", headers=headers)
+    else:
+        response = await client.get(f"/api/v1/jobs/{job.id}/download", headers=headers)
+
+    assert response.status_code == 503
+    assert response.json()["detail"] == (
+        "O arquivo deste video esta temporariamente indisponivel. "
+        "Tente novamente; se persistir, informe o codigo da solicitacao ao suporte."
+    )
+
+
+@pytest.mark.asyncio
 async def test_foreign_key_constraints_block_orphan_jobs_and_purchases(db_session, verified_user):
     orphan_job = Job(user_id=verified_user.id, topic="x", style="educational", duration_target=45)
     orphan_purchase = CreditPurchase(
