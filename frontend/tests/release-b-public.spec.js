@@ -1549,3 +1549,123 @@ test('resposta de checkout com ID ou URL insegura nunca redireciona', async ({ p
     await expect(page).toHaveURL(/\/dashboard\/credits/)
   }
 })
+
+test('release autenticado cobre singular, editor mobile, ETA honesto e erro acionavel', async ({ page, request }) => {
+  const jobId = '00000000-0000-4000-8000-000000000999'
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.addInitScript(() => localStorage.setItem('clipia_token', 'qa-token'))
+
+  await page.route('**/api/v1/auth/me', (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        id: 'qa-dashboard-user',
+        email: 'qa-dashboard@clipia.com.br',
+        name: 'QA Dashboard',
+        credits: 1,
+        plan: 'free',
+        email_verified: true,
+        referral_code: 'QA-DASHBOARD',
+      }),
+    }),
+  )
+  await page.route('**/api/v1/config', (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ welcome_credit_bonus: 2, purchase_bonus_percent: 20 }),
+    }),
+  )
+  await page.route('**/api/v1/jobs', (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify([
+        {
+          job_id: jobId,
+          topic: 'Video QA',
+          style: 'educational',
+          status: 'editable',
+          duration_target: 15,
+          created_at: '2026-07-14T22:00:00Z',
+          download_url: `/api/v1/jobs/${jobId}/download`,
+        },
+      ]),
+    }),
+  )
+  await page.route('**/api/v1/templates', (route) =>
+    route.fulfill({ status: 200, contentType: 'application/json', body: '[]' }),
+  )
+  await page.route('**/api/v1/voices', (route) =>
+    route.fulfill({ status: 200, contentType: 'application/json', body: '[]' }),
+  )
+  await page.route('**/api/v1/trends**', (route) =>
+    route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ trends: [] }) }),
+  )
+
+  await page.goto(`${appBaseUrl}/dashboard`)
+  await expect(page.getByText('1 crédito', { exact: true }).first()).toBeVisible()
+  await expect(page.getByText('1 vídeo', { exact: true })).toBeVisible()
+  await expect(page.getByText('1 créditos', { exact: true })).toHaveCount(0)
+  await expect(page.getByText('1 vídeos', { exact: true })).toHaveCount(0)
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390)
+
+  await page.route(`**/api/v1/jobs/${jobId}/composition`, (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        job_id: jobId,
+        script: { title: 'Video QA', narration: 'Cena QA', scenes: [{ text: 'Cena QA', duration_hint: 3 }] },
+        words: [{ word: 'Cena', start: 0, end: 0.5 }],
+        audio_url: '',
+        media_urls: [],
+        subtitle_style: {},
+        editor_state: null,
+        template_id: 'stock_narration',
+        layout_type: 'fullscreen',
+        fps: 30,
+        width: 1080,
+        height: 1920,
+        pending_credits: 0,
+        music_asset_id: null,
+        music_volume: 0.3,
+      }),
+    }),
+  )
+  await page.route(`**/api/v1/jobs/${jobId}/status`, (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ status: 'idle', progress: 0, pending_credits: 0 }),
+    }),
+  )
+  await page.route(`**/api/v1/jobs/${jobId}/edit`, (route) =>
+    route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ status: 'saved' }) }),
+  )
+  await page.route(`**/api/v1/jobs/${jobId}/render`, (route) =>
+    route.fulfill({
+      status: 503,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        detail:
+          'O arquivo deste video esta temporariamente indisponivel. Tente novamente; se persistir, informe o codigo da solicitacao ao suporte.',
+      }),
+    }),
+  )
+
+  await page.goto(`${appBaseUrl}/editor/${jobId}`)
+  await page.getByRole('button', { name: 'Exportar' }).click()
+  const renderButton = page.getByRole('button', { name: /Aplicar edições e renderizar/ })
+  await expect(renderButton).toContainText('geralmente 2–5 min')
+  await expect(renderButton).not.toContainText('~2 min')
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390)
+
+  await renderButton.click()
+  await expect(page.getByText(/arquivo deste video esta temporariamente indisponivel/i)).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Tentar novamente' })).toBeVisible()
+
+  const csp = (await request.get(appBaseUrl)).headers()['content-security-policy'] || ''
+  expect(csp).toContain("media-src 'self' blob: data: https:")
+})

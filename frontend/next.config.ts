@@ -10,7 +10,9 @@ const contentSecurityPolicy = [
   "style-src 'self' 'unsafe-inline'",
   "img-src 'self' data: blob: https://images.pexels.com",
   "font-src 'self' data:",
-  "media-src 'self' blob: https:",
+  // Remotion Player usa um data:audio interno para sincronizacao; limitar data:
+  // a media-src evita o flood de CSP sem ampliar script/connect/img.
+  "media-src 'self' blob: data: https:",
   "connect-src 'self' https://challenges.cloudflare.com",
   "frame-src https://challenges.cloudflare.com",
   "worker-src 'self' blob:",

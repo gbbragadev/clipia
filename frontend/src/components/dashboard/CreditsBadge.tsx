@@ -1,5 +1,7 @@
 'use client'
 
+import { creditLabel } from '@/lib/format-count'
+
 interface CreditsBadgeProps {
   credits: number
 }
@@ -18,7 +20,7 @@ export default function CreditsBadge({ credits }: CreditsBadgeProps) {
       <span className={`font-semibold ${isEmpty ? 'text-red-300' : 'text-coral'}`}>
         {credits}
       </span>
-      créditos
+      {creditLabel(credits)}
     </span>
   )
 }

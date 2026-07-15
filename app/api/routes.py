@@ -32,7 +32,7 @@ from app.db.models import (
     VoiceClone,
     WaitlistEntry,
 )
-from app.errors import ErrorMessages, not_found_error, validate_uuid
+from app.errors import ErrorMessages, artifact_unavailable_error, not_found_error, validate_uuid
 from app.models import (
     AdminCreditAdjustRequest,
     AISuggestRequest,
@@ -1122,7 +1122,11 @@ async def get_job(
     "/jobs/{job_id}/download",
     summary="Download job",
     description="Downloads generated video.",
-    responses={200: {"description": "Video stream"}, 404: {"description": "Not found"}},
+    responses={
+        200: {"description": "Video stream"},
+        404: {"description": "Not found"},
+        503: {"description": "Delivered artifact temporarily unavailable"},
+    },
 )
 async def download_job(
     job_id: str,
@@ -1133,6 +1137,8 @@ async def download_job(
     job = await get_owned_job(db, user, job_id)
     file_path = Path(settings.STORAGE_DIR) / "output" / f"{job.id}.mp4"
     if not file_path.exists():
+        if job.status in {"editable", "completed"} or job.video_url or job.completed_at:
+            raise artifact_unavailable_error()
         raise not_found_error()
     if job.exported_at is None:
         exported_at = datetime.now(timezone.utc)
@@ -1632,12 +1638,15 @@ async def save_editor_state(
     job = await get_owned_job(db, user, job_id)
     job_id = str(job.id)
 
+    job_dir = Path(settings.STORAGE_DIR) / "jobs" / job_id
+    if not job_dir.exists():
+        raise artifact_unavailable_error()
+
     await db.execute(update(Job).where(Job.id == job.id).values(editor_state=req.editor_state))
     await db.commit()
 
     # Sync edited state to disk for the render pipeline
     try:
-        job_dir = Path(settings.STORAGE_DIR) / "jobs" / job_id
         if req.editor_state:
             # Save full editor_state for re-render (music, subtitleStyle, overlays)
             state_path = job_dir / "editor_state.json"
@@ -1681,7 +1690,7 @@ async def regenerate_tts(
     job_id = str(job.id)
     job_dir = Path(settings.STORAGE_DIR) / "jobs" / job_id
     if not job_dir.exists():
-        raise not_found_error()
+        raise artifact_unavailable_error()
 
     # Read current script
     script_path = job_dir / "script.json"
@@ -1880,7 +1889,7 @@ async def render_video(
     job_id = str(job_uuid)
     job_dir = Path(settings.STORAGE_DIR) / "jobs" / job_id
     if not job_dir.exists():
-        raise not_found_error()
+        raise artifact_unavailable_error()
 
     async with get_lock(f"render:{job_id}"):
         operation_id = uuid.uuid4()

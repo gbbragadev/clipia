@@ -259,11 +259,11 @@ export function ExportPanel({ onClose }: { onClose: () => void }) {
           </div>
         )}
 
-        {/* Confirmação explícita do render (custo + ~2 min ficam claros ANTES de disparar) */}
+        {/* Confirmacao explicita; faixa calibrada com telemetria real do worker solo. */}
         {renderState === 'idle' && !(narrationStale && !staleAccepted) && (
           <button type="button" className="export-download" onClick={handleRender}>
             <Clapperboard size={16} />
-            Aplicar edições e renderizar (~2 min)
+            Aplicar edições e renderizar (geralmente 2–5 min)
             {pendingCredits > 0 && ` · ${pendingCredits} créd.`}
           </button>
         )}
@@ -273,7 +273,7 @@ export function ExportPanel({ onClose }: { onClose: () => void }) {
           <div className="export-status export-status--rendering">
             <Loader2 size={14} className="export-status__spinner" />
             <div className="export-status__body">
-              <div>{renderDetail || 'Aplicando suas edições… (~2 min)'}</div>
+              <div>{renderDetail || 'Aplicando suas edições… geralmente leva de 2 a 5 min'}</div>
               <div className="export-progress">
                 <div className="export-progress__fill" style={{ transform: `scaleX(${Math.max(0.06, renderProgress)})` }} />
               </div>

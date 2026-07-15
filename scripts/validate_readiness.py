@@ -1,8 +1,8 @@
-"""Valida que um usuario NOVO (um estranho qualquer) consegue usar o ClipIA de ponta a ponta:
-cadastrar -> receber OTP -> verificar email -> gerar um video ate o MP4 final.
+"""Valida que um usuario NOVO consegue usar o ClipIA de ponta a ponta:
+cadastro -> OTP -> geracao -> preview -> duas edicoes -> rerender -> download.
 
 Roda contra o backend vivo (default http://127.0.0.1:8005). Cria uma conta de teste
-descartavel e a remove no fim (jobs + usuario). Use antes de divulgar / depois de deploy.
+descartavel, anonimiza a conta pela API e remove os arquivos no fim. Use depois de cada deploy.
 
 Uso (com o venv312 ativo, a partir da raiz do repo):
     python scripts/validate_readiness.py
@@ -15,11 +15,13 @@ Saida: relatorio [PASS]/[FAIL]/[WARN]. Exit code != 0 se algum check critico fal
 import argparse
 import asyncio
 import json
+import shutil
 import sys
 import urllib.error
 import urllib.request
 import uuid
 from pathlib import Path
+from urllib.parse import urljoin
 
 # raiz do repo no path para importar o app
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -68,6 +70,27 @@ def _http(
             return e.code, {"detail": raw}
     except Exception as e:  # conexao recusada etc
         return 0, {"detail": str(e)}
+
+
+def _http_bytes(
+    method: str,
+    url: str,
+    token: str | None = None,
+    extra_headers: dict | None = None,
+) -> tuple[int, bytes, dict[str, str]]:
+    req = urllib.request.Request(url, method=method)
+    req.add_header("User-Agent", "ClipIA-Readiness/1.0 (+https://clipia.com.br)")
+    if token:
+        req.add_header("Authorization", f"Bearer {token}")
+    for key, value in (extra_headers or {}).items():
+        req.add_header(key, value)
+    try:
+        with urllib.request.urlopen(req, timeout=90) as response:
+            return response.status, response.read(), {key.lower(): value for key, value in response.headers.items()}
+    except urllib.error.HTTPError as exc:
+        return exc.code, exc.read(), {key.lower(): value for key, value in exc.headers.items()}
+    except Exception as exc:
+        return 0, str(exc).encode("utf-8"), {}
 
 
 async def _db():
@@ -131,6 +154,18 @@ async def run(base: str, make_video: bool) -> None:
         _mark("FAIL", f"Backend /health falhou (status={st}). Suba o backend antes de validar.")
         return
 
+    if make_video:
+        st, deep = _http("GET", f"{base}/health/deep")
+        worker_match = deep.get("checks", {}).get("storage", {}).get("worker_match")
+        if st == 200 and deep.get("status") == "healthy" and worker_match is True:
+            _mark("PASS", "Health profundo confirma storage compartilhado entre API e worker.")
+        else:
+            _mark(
+                "FAIL",
+                f"Storage da API/worker nao esta alinhado (status={st}, worker_match={worker_match}).",
+            )
+            return
+
     # 2. Email: dominio verificado no Resend
     check_resend_domain()
 
@@ -138,6 +173,10 @@ async def run(base: str, make_video: bool) -> None:
     email = f"validacao+{uuid.uuid4().hex[:10]}@{DOMAIN}"
     password = "Valida!" + uuid.uuid4().hex[:8]
     conn = None
+    job_id = None
+    token = None
+    verified_credits = 0
+    generation_cost = 0
     try:
         # 3a. cadastro (bypass do Turnstile se READINESS_BYPASS_SECRET estiver configurado)
         bypass_headers = {}
@@ -168,6 +207,7 @@ async def run(base: str, make_video: bool) -> None:
         # 3c. verificacao do email -> ganha 2 creditos
         st, body = _http("POST", f"{api}/auth/verify-email", {"email": email, "code": code})
         if st == 200 and body.get("credits", 0) >= 1:
+            verified_credits = int(body.get("credits", 0))
             _mark("PASS", f"Email verificado e {body.get('credits')} creditos liberados.")
         else:
             _mark("FAIL", f"verify-email falhou (status={st}): {body.get('detail') or body}")
@@ -184,6 +224,7 @@ async def run(base: str, make_video: bool) -> None:
         st, body = _http("POST", f"{api}/generate", gen, token=token)
         job_id = body.get("job_id")
         if st in {200, 202} and job_id:
+            generation_cost = int(body.get("credit_cost") or 0)
             _mark("PASS", f"Geracao enfileirada (job {job_id[:8]}, custo {body.get('credit_cost')} credito).")
         else:
             _mark("FAIL", f"/generate recusou (status={st}): {body.get('detail') or body}")
@@ -193,8 +234,8 @@ async def run(base: str, make_video: bool) -> None:
             _mark("WARN", "--no-video: parei no enfileiramento, nao esperei o MP4.")
             return
 
-        # 3e. espera o worker processar ate o MP4 final
-        mp4 = Path(settings.STORAGE_DIR) / "output" / f"{job_id}.mp4"
+        # 3e. espera o worker processar. O gate consulta a API publica: olhar o
+        # filesystem local mascarava exatamente o split de storage entre API/worker.
         terminal = {"completed", "finished", "done", "editable", "finalized"}
         last = ""
         for _ in range(100):  # ~300s
@@ -208,26 +249,137 @@ async def run(base: str, make_video: bool) -> None:
             if status == "failed":
                 _mark("FAIL", f"Geracao FALHOU no worker: {body.get('error') or 'sem detalhe'}")
                 return
-            if status in terminal or mp4.exists():
+            if status in terminal:
                 break
-        if mp4.exists() and mp4.stat().st_size > 10_000:
-            _mark("PASS", f"MP4 final gerado: {mp4} ({mp4.stat().st_size // 1024} KB). Estranho consegue usar.")
+        if last not in terminal:
+            _mark("FAIL", f"Timeout sem entrega: ultimo status='{last}'.")
+            return
+        _mark("PASS", f"Geracao chegou ao estado entregue ('{last}').")
+
+        # 3f. abre a composicao e prova um range da midia usada pelo preview.
+        st, composition = _http("GET", f"{api}/jobs/{job_id}/composition", token=token)
+        if st != 200:
+            _mark("FAIL", f"Editor nao abriu a composicao publica (status={st}): {composition.get('detail')}")
+            return
+        media_urls = composition.get("media_urls") or []
+        if not media_urls:
+            _mark("FAIL", "Composicao entregue sem midia para o preview.")
+            return
+        preview_url = urljoin(f"{base}/", str(media_urls[0]).lstrip("/"))
+        range_status, range_body, range_headers = _http_bytes(
+            "GET",
+            preview_url,
+            token=token,
+            extra_headers={"Range": "bytes=0-1023"},
+        )
+        if range_status != 206 or not range_body or "content-range" not in range_headers:
+            _mark("FAIL", f"Preview nao aceitou range request (status={range_status}).")
+            return
+        _mark("PASS", "Preview autenticado respondeu range request (206).")
+
+        # 3g. aplica exatamente duas mudancas: preset de legenda e trilha.
+        saved = composition.get("editor_state") or {}
+        saved_composition = saved.get("composition") if isinstance(saved, dict) else None
+        editor_composition = dict(saved_composition or {})
+        editor_composition.update(
+            {
+                "title": composition.get("script", {}).get("title") or "Video de validacao",
+                "scenes": composition.get("script", {}).get("scenes") or [],
+                "words": composition.get("words") or [],
+                "audioUrl": composition.get("audio_url") or "",
+                "mediaUrls": media_urls,
+                "subtitleStyle": {
+                    **(composition.get("subtitle_style") or {}),
+                    **(editor_composition.get("subtitleStyle") or {}),
+                    "preset": "neon",
+                },
+                "voiceConfig": editor_composition.get("voiceConfig") or {"provider": "edge"},
+                "fps": composition.get("fps") or 30,
+                "width": composition.get("width") or 1080,
+                "height": composition.get("height") or 1920,
+                "overlays": editor_composition.get("overlays") or [],
+                "musicAssetId": "lofi-chill",
+                "musicVolume": 0.3,
+                "isRendering": False,
+                "templateId": composition.get("template_id") or "stock_narration",
+                "layoutType": composition.get("layout_type") or "fullscreen",
+                "pendingCredits": composition.get("pending_credits") or 0,
+            }
+        )
+        st, body = _http(
+            "POST",
+            f"{api}/jobs/{job_id}/edit",
+            {"editor_state": {"composition": editor_composition}},
+            token=token,
+        )
+        if st != 200:
+            _mark("FAIL", f"Edicao nao foi salva (status={st}): {body.get('detail')}")
+            return
+        _mark("PASS", "Preset Neon e trilha Lo-Fi Chill foram salvos.")
+
+        # 3h. rerenderiza a composicao editada e espera o terminal real.
+        st, body = _http("POST", f"{api}/jobs/{job_id}/render", token=token)
+        if st not in {200, 202}:
+            _mark("FAIL", f"Rerender nao iniciou (status={st}): {body.get('detail')}")
+            return
+        render_last = ""
+        for _ in range(140):  # ate ~7min para o worker solo/remotion
+            await asyncio.sleep(3)
+            st, body = _http("GET", f"{api}/jobs/{job_id}/status", token=token)
+            render_last = body.get("status", "?")
+            if render_last == "completed":
+                break
+            if render_last in {"error", "failed", "cancelled"}:
+                _mark("FAIL", f"Rerender terminou em '{render_last}': {body.get('error') or body.get('detail')}")
+                return
+        if render_last != "completed":
+            _mark("FAIL", f"Timeout do rerender: ultimo status='{render_last}'.")
+            return
+        _mark("PASS", "Rerender editado concluiu.")
+
+        # 3i. o rerender sem operacao paga nao pode consumir outro credito.
+        st, me = _http("GET", f"{api}/auth/me", token=token)
+        expected_credits = verified_credits - generation_cost
+        if st == 200 and me.get("credits") == expected_credits:
+            _mark("PASS", f"Saldo final correto: {me.get('credits')} credito; rerender sem debito extra.")
         else:
-            _mark("FAIL", f"Timeout/sem MP4: ultimo status='{last}', arquivo existe={mp4.exists()}.")
+            _mark("FAIL", f"Saldo divergente apos rerender: esperado={expected_credits}, recebido={me.get('credits')}.")
+            return
+
+        # 3j. baixa pela API publica; o tamanho/cabecalho provam que nao veio JSON/HTML de erro.
+        download_status, mp4_body, download_headers = _http_bytes("GET", f"{api}/jobs/{job_id}/download", token=token)
+        content_type = download_headers.get("content-type", "")
+        if download_status == 200 and len(mp4_body) > 10_000 and "video/mp4" in content_type:
+            _mark("PASS", f"MP4 publico baixado e reproduzivel ({len(mp4_body) // 1024} KB).")
+        else:
+            _mark(
+                "FAIL",
+                f"Download final invalido (status={download_status}, bytes={len(mp4_body)}, tipo={content_type}).",
+            )
     finally:
-        # cleanup: remove a conta de teste e seus jobs
-        if conn is None:
-            try:
-                conn = await _db()
-            except Exception:
-                conn = None
+        # Cleanup pela mesma regra de negocio do produto. A conta fica anonimizada
+        # e o ledger permanece auditavel, sem DELETEs diretos que violem FKs.
+        if token:
+            cleanup_status, cleanup_body = _http(
+                "POST",
+                f"{api}/auth/delete-account",
+                {"password": password},
+                token=token,
+            )
+            if cleanup_status == 200:
+                _mark("INFO", f"Anonimizei a conta descartavel {email} pela API.")
+            else:
+                _mark(
+                    "WARN",
+                    f"Nao consegui anonimizar a conta descartavel (status={cleanup_status}): "
+                    f"{cleanup_body.get('detail') or cleanup_body}",
+                )
         if conn is not None:
-            uid = await conn.fetchval("SELECT id FROM users WHERE email=$1", email)
-            if uid:
-                await conn.execute("DELETE FROM jobs WHERE user_id=$1", uid)
-                await conn.execute("DELETE FROM users WHERE id=$1", uid)
-                _mark("INFO", f"Limpei a conta de teste {email}.")
             await conn.close()
+        if job_id:
+            shutil.rmtree(Path(settings.STORAGE_DIR) / "jobs" / str(job_id), ignore_errors=True)
+            (Path(settings.STORAGE_DIR) / "output" / f"{job_id}.mp4").unlink(missing_ok=True)
+            (Path(settings.STORAGE_DIR) / "output" / f"{job_id}.jpg").unlink(missing_ok=True)
 
 
 def main() -> None:
