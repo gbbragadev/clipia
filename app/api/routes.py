@@ -1572,8 +1572,24 @@ async def get_composition(
 
     # Load editor state from DB if exists and migrate public paths to opaque IDs.
     from app.services.music import sanitize_editor_state_assets
+    from app.services.scene_order import (
+        apply_scene_order,
+        identity_scene_order,
+        validate_scene_order,
+    )
 
     editor_state = sanitize_editor_state_assets(job.editor_state)
+    editor_composition = (editor_state or {}).get("composition", {})
+    raw_scene_order = editor_composition.get("sceneOrder")
+    scene_count = len(script.get("scenes", []))
+    scene_order = validate_scene_order(raw_scene_order, scene_count, strict=False)
+    if (
+        raw_scene_order is not None
+        and raw_scene_order != identity_scene_order(scene_count)
+        and scene_order == identity_scene_order(scene_count)
+    ):
+        logger.warning("Ignoring invalid legacy scene order for job %s", job_id)
+    media_urls = apply_scene_order(media_urls, scene_order)
 
     # Get template info
     from app.templates import get_template
@@ -1631,6 +1647,25 @@ async def save_editor_state(
 
     job = await get_owned_job(db, user, job_id)
     job_id = str(job.id)
+
+    from app.services.scene_order import validate_scene_order
+
+    comp = req.editor_state.get("composition", {})
+    if isinstance(comp, dict) and "sceneOrder" in comp:
+        scenes = comp.get("scenes")
+        if isinstance(scenes, list):
+            scene_count = len(scenes)
+        else:
+            job_dir = Path(settings.STORAGE_DIR) / "jobs" / job_id
+            script_path = job_dir / "script.json"
+            existing_script = (
+                json.loads(script_path.read_text(encoding="utf-8")) if script_path.exists() else (job.script or {})
+            )
+            scene_count = len(existing_script.get("scenes", []))
+        try:
+            comp["sceneOrder"] = validate_scene_order(comp["sceneOrder"], scene_count, strict=True)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=ErrorMessages.INVALID_INPUT) from exc
 
     await db.execute(update(Job).where(Job.id == job.id).values(editor_state=req.editor_state))
     await db.commit()

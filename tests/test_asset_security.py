@@ -48,6 +48,21 @@ def test_editor_state_rejects_urls_paths_and_unknown_asset_ids(composition):
         EditRequest.model_validate({"editor_state": {"composition": composition}})
 
 
+@pytest.mark.parametrize(
+    "scene_order",
+    [
+        [0, 0],
+        [-1, 0],
+        [True, 0],
+        [0, "1"],
+        list(range(101)),
+    ],
+)
+def test_editor_state_rejects_structurally_unsafe_scene_order(scene_order):
+    with pytest.raises(ValidationError):
+        EditRequest.model_validate({"editor_state": {"composition": {"sceneOrder": scene_order}}})
+
+
 def test_generate_contract_rejects_legacy_custom_source_path():
     with pytest.raises(ValidationError):
         GenerateRequest.model_validate(

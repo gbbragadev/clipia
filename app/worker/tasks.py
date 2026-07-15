@@ -2422,6 +2422,11 @@ def task_rerender_video(
             editor_state = json.loads(editor_state_path.read_text(encoding="utf-8"))
             comp_data = editor_state.get("composition", {})
 
+        from app.services.scene_order import apply_scene_order, validate_scene_order
+
+        scene_order = validate_scene_order(comp_data.get("sceneOrder"), len(script.get("scenes", [])), strict=False)
+        media_paths = apply_scene_order(media_paths, scene_order)
+
         if settings.RENDER_ENGINE == "remotion":
             from app.services.remotion import invoke_remotion_render
 
