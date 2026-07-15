@@ -2,13 +2,12 @@
   "name": "clipia-frontend",
   "version": "0.1.0",
   "private": true,
-  "type": "module",
   "scripts": {
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
     "test:e2e": "playwright test",
-    "test:editor-unit": "node --test src/lib/editor-timeline.test.ts",
+    "test:editor-unit": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test src/lib/editor-timeline.test.ts",
     "test:release-b": "playwright test tests/release-b-public.spec.js --config=playwright.config.mjs --project=chromium"
   },
   "dependencies": {
