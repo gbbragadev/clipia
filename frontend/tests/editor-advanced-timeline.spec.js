@@ -113,6 +113,12 @@ async function installEditorHarness(page) {
 }
 
 test('desktop exposes filmstrips and a narration waveform', async ({ page }) => {
+  const cspErrors = []
+  page.on('console', (message) => {
+    if (message.type() === 'error' && message.text().includes('Content Security Policy')) {
+      cspErrors.push(message.text())
+    }
+  })
   await installEditorHarness(page)
 
   await page.goto('/editor/job-editor')
@@ -123,6 +129,8 @@ test('desktop exposes filmstrips and a narration waveform', async ({ page }) => 
     'data-waveform-state',
     /ready|unavailable/,
   )
+  await page.waitForTimeout(250)
+  expect(cspErrors).toEqual([])
 })
 
 test('desktop zooms, reorders, autosaves and undoes one scene move', async ({ page }) => {
@@ -169,6 +177,11 @@ for (const width of [320, 390, 393]) {
     await expect(dialog).toBeVisible()
     const moveButton = dialog.getByRole('button', { name: 'Mover cena 2 para trás' })
     await expect(moveButton).toHaveCSS('min-height', '44px')
+    for (const name of ['Fechar', 'Desfazer', 'Refazer', 'Diminuir zoom', 'Ajustar timeline', 'Aumentar zoom', 'Reproduzir', 'Recolher painel']) {
+      const target = dialog.getByRole('button', { name })
+      const box = await target.boundingBox()
+      expect(box?.height, `${name} precisa de alvo de toque de 44px`).toBeGreaterThanOrEqual(44)
+    }
     await moveButton.click()
     await expect.poll(() => harness.getSavedComposition().sceneOrder).toEqual([1, 0, 2])
     await expect(dialog.getByRole('img', { name: /waveform da narração/i })).toBeVisible()

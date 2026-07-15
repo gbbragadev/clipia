@@ -284,6 +284,17 @@
 }
 @media (max-width: 767px) {
   .editor-timeline__shortcut-hint { display: none; }
+  .editor-timeline__toolbar {
+    min-height: 44px; padding: 0 8px; gap: 0;
+    overflow-x: auto; scrollbar-width: none;
+  }
+  .editor-timeline__toolbar::-webkit-scrollbar { display: none; }
+  .editor-timeline__transport { min-height: 44px; padding: 0 8px; }
+  .editor-timeline__tool-btn,
+  .editor-timeline__transport-btn {
+    width: 44px; height: 44px; flex: 0 0 44px;
+  }
+  .editor-timeline-drawer__close { min-height: 44px; }
   .editor-timeline__scene-actions button { width: 44px; min-height: 44px; }
   .editor-timeline__scene-actions svg { width: 17px; height: 17px; }
   .editor-timeline__heading { font-size: 10px; }
