@@ -41,10 +41,11 @@ async def test_readiness_accepts_queued_generation_with_job_id(monkeypatch, gene
             return None
 
     def fake_http(method, url, body=None, token=None, extra_headers=None):
-        del body, token, extra_headers
+        del token, extra_headers
         if method == "GET" and url.endswith("/health"):
             return 200, {"status": "ok"}
         if url.endswith("/auth/register"):
+            assert body["consent"] is True
             return 201, {"access_token": "readiness-token"}
         if url.endswith("/auth/verify-email"):
             return 200, {"credits": 2}
@@ -98,6 +99,7 @@ async def test_readiness_full_activation_checks_preview_edit_render_download_and
         if method == "GET" and url.endswith("/health/deep"):
             return 200, {"status": "healthy", "checks": {"storage": {"worker_match": True}}}
         if url.endswith("/auth/register"):
+            assert body["consent"] is True
             return 201, {"access_token": "readiness-token"}
         if url.endswith("/auth/verify-email"):
             return 200, {"credits": 2}

@@ -185,7 +185,7 @@ async def run(base: str, make_video: bool) -> None:
         st, body = _http(
             "POST",
             f"{api}/auth/register",
-            {"email": email, "name": "Validacao QA", "password": password},
+            {"email": email, "name": "Validacao QA", "password": password, "consent": True},
             extra_headers=bypass_headers,
         )
         token = body.get("access_token")
