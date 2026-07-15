@@ -40,10 +40,12 @@ Criar um módulo pequeno e sem React para:
 - limitar o zoom a uma faixa estável;
 - mover uma cena de uma posição para outra;
 - mover o item correspondente de `mediaUrls` na mesma operação;
+- mover junto um `sceneOrder` que identifica o índice físico original da mídia;
 - rejeitar índices inválidos e tratar movimentos sem efeito como no-op.
 
 O helper retorna uma nova `CompositionData`; não altera o objeto recebido. `words` e `audioUrl`
-permanecem intactos até a regeneração de narração.
+permanecem intactos até a regeneração de narração. Composições antigas recebem em memória a ordem
+identidade `[0, 1, ..., n-1]`.
 
 ### 2. Estado e sincronização
 
@@ -59,6 +61,11 @@ O aviso e o gate já existentes no `ExportPanel` continuam sendo a proteção co
 legendas antigos sem confirmação. A regeneração de narração redefine a nova ordem como baseline.
 Undo/redo também devem recalcular `narrationStale` considerando texto **e ordem**, não apenas o texto
 do mesmo índice.
+
+O frontend nunca torna `mediaUrls` uma fonte confiável para o render. O autosave persiste somente a
+permutação `sceneOrder`. O backend valida que ela contém inteiros únicos e forma uma permutação exata
+das cenas do job; então reaplica essa ordem sobre os arquivos `scene_N.mp4`/`scene_N.png` enumerados
+no storage. URLs, paths e nomes de arquivo enviados pelo cliente continuam ignorados pelo renderer.
 
 ### 3. Timeline visual enriquecida
 
@@ -110,9 +117,11 @@ O waveform é informativo; não oferece corte de áudio nesta entrega.
 - Nenhuma migration, variável de ambiente ou novo serviço.
 - Nenhum pacote do Clypra em runtime nesta etapa.
 - Nenhuma alteração em créditos, autenticação, geração inicial ou APIs públicas.
-- `editor_state.json` continua armazenando `composition`; cenas e `mediaUrls` reordenados usam o
-  contrato existente.
-- Backend e renderer devem continuar aceitando estados antigos sem campos novos.
+- `editor_state.json` continua armazenando `composition` e ganha o campo interno aditivo
+  `sceneOrder: number[]`; não há mudança em API pública ou banco.
+- Backend, composition endpoint e os renderers Remotion/FFmpeg usam `sceneOrder` apenas depois de
+  validá-lo contra os arquivos autoritativos do job.
+- Estados antigos sem `sceneOrder` usam ordem identidade e continuam compatíveis.
 - A fidelidade `preview == export` é obrigatória.
 
 ## Fora de escopo
@@ -132,6 +141,8 @@ O waveform é informativo; não oferece corte de áudio nesta entrega.
 - Falha de autosave: comportamento atual `Falha ao salvar` e retry permanece autoritativo.
 - Reordenação durante playback pausa o player antes da mudança e busca o início da cena movida.
 - Índices inválidos e drops fora da faixa não mudam o estado.
+- `sceneOrder` duplicado, negativo, incompleto ou fora da faixa é rejeitado no autosave; estado
+  legado inválido encontrado em disco cai para ordem identidade no render e gera warning.
 
 ## Testes e aceite
 
@@ -143,6 +154,7 @@ executável sem browser. Os testes precisam falhar porque a timeline enriquecida
 ### Cobertura automatizada
 
 - Reordenação move `scenes` e `mediaUrls` juntas e preserva os demais campos.
+- Reordenação move `sceneOrder` junto e o backend a reaplica somente sobre mídias autoritativas.
 - No-op e índices inválidos não criam novo estado.
 - Reordenação gera uma única entrada de undo e marca narração desatualizada.
 - Undo restaura ordem e correspondência de mídia.
@@ -150,6 +162,7 @@ executável sem browser. Os testes precisam falhar porque a timeline enriquecida
 - Desktop mostra filmstrips, waveform, régua, playhead e ações acessíveis.
 - Mobile abre a gaveta, permite reordenar sem drag e não cria overflow em 320, 390 e 393 px.
 - Autosave envia a nova ordem; exportação usa a composição salva.
+- Payloads com `sceneOrder` inválido são rejeitados e não alcançam o renderer.
 - Estado antigo continua carregando sem transformação destrutiva.
 
 ### Verificações
