@@ -24,6 +24,8 @@ const defaultProps: CompositionData = {
     { text: 'O oceano produz 70% do oxigenio que respiramos.', keywords_en: ['ocean waves'], duration_hint: 5 },
     { text: 'Incrivel como sabemos tao pouco sobre nosso planeta.', keywords_en: ['earth space'], duration_hint: 8 },
   ],
+  sceneOrder: [0, 1, 2, 3, 4],
+  narrationStale: false,
   words: [
     { word: 'Voce', start: 0.0, end: 0.3 },
     { word: 'sabia', start: 0.3, end: 0.78 },

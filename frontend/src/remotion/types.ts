@@ -57,6 +57,9 @@ export type LayoutType = 'fullscreen' | 'split_horizontal' | 'character_overlay'
 
 export interface CompositionData {
   scenes: Scene[]
+  /** Current position -> original server-owned media index. */
+  sceneOrder: number[]
+  narrationStale: boolean
   words: Word[]
   audioUrl: string
   mediaUrls: string[]

@@ -3,6 +3,7 @@ import { DEFAULT_SUBTITLE_STYLE, DEFAULT_VOICE_CONFIG } from '@/remotion/types'
 import { getToken } from '@/lib/auth'
 import { fetchAuthenticatedBlobUrl } from '@/lib/download'
 import { fetchJson, readApiError } from '@/lib/http'
+import { normalizeSceneOrder } from '@/lib/editor-timeline'
 
 const API_BASE = '/api/v1'
 
@@ -38,17 +39,20 @@ export async function fetchComposition(jobId: string): Promise<CompositionData> 
 
   // Restore from saved editor_state if available
   const saved = data.editor_state?.composition as Partial<CompositionData> | undefined
+  const scenes = (data.script.scenes ?? []).map((scene) => ({
+    ...scene,
+    keywords_en: scene.keywords_en ?? [],
+    transition: scene.transition as TransitionType | undefined,
+  }))
 
   return {
     title: data.script.title || '',
     // Normaliza cenas: templates de IA (ai_video/novelinha) vem com visual_hint e
     // SEM keywords_en — o editor (SceneGrid) faz .map/.join em keywords_en
     // e crashava ("Cannot read properties of undefined (reading 'map')"). Garante array.
-    scenes: (data.script.scenes ?? []).map((s) => ({
-      ...s,
-      keywords_en: s.keywords_en ?? [],
-      transition: s.transition as TransitionType | undefined,
-    })),
+    scenes,
+    sceneOrder: normalizeSceneOrder(saved?.sceneOrder, scenes.length),
+    narrationStale: Boolean(saved?.narrationStale),
     words: data.words ?? [],
     audioUrl: data.audio_url,
     mediaUrls: data.media_urls,

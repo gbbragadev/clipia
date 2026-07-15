@@ -5,6 +5,7 @@ import type { PlayerRef } from '@remotion/player'
 import type { CompositionData, Scene, SubtitleStyle, VideoOverlay, VoiceConfig } from '@/remotion/types'
 import type { MusicAssetId } from '@/remotion/music-assets'
 import { fetchComposition, saveEditorState } from '@/lib/editor-api'
+import { reorderComposition } from '@/lib/editor-timeline'
 
 type PanelKey = 'scenes' | 'voice' | 'subtitles' | 'elements' | 'ai'
 
@@ -33,6 +34,7 @@ interface EditorContextValue {
   selectScene: (index: number) => void
   setActivePanel: (panel: PanelKey) => void
   updateScene: (index: number, updates: Partial<Scene>) => void
+  reorderScenes: (fromIndex: number, toIndex: number) => void
   updateSubtitleStyle: (updates: Partial<SubtitleStyle>) => void
   updateVoiceConfig: (updates: Partial<VoiceConfig>) => void
   setPlayerFrame: (frame: number) => void
@@ -70,7 +72,6 @@ export function EditorProvider({ jobId, children }: { jobId: string; children: R
 
   const playerRef = useRef<PlayerRef | null>(null)
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const [narrationStale, setNarrationStale] = useState(false)
   const baselineTextsRef = useRef<string[]>([])
 
   // Undo/redo
@@ -82,6 +83,7 @@ export function EditorProvider({ jobId, children }: { jobId: string; children: R
   const totalFrames = composition && composition.words.length > 0
     ? Math.round((composition.words[composition.words.length - 1].end + 0.5) * composition.fps)
     : 900 // 30s * 30fps fallback
+  const narrationStale = composition?.narrationStale ?? false
 
   // Load composition
   useEffect(() => {
@@ -189,15 +191,49 @@ export function EditorProvider({ jobId, children }: { jobId: string; children: R
   const selectScene = useCallback((index: number) => setSelectedSceneIndex(index), [])
 
   const updateScene = useCallback((index: number, updates: Partial<Scene>) => {
-    if (updates.text !== undefined && updates.text !== baselineTextsRef.current[index]) {
-      setNarrationStale(true)
-    }
     updateComposition((prev) => {
       const newScenes = [...prev.scenes]
       newScenes[index] = { ...newScenes[index], ...updates }
-      return { ...prev, scenes: newScenes }
+      return {
+        ...prev,
+        scenes: newScenes,
+        narrationStale: prev.narrationStale || (
+          updates.text !== undefined
+          && updates.text !== baselineTextsRef.current[index]
+        ),
+      }
     })
   }, [updateComposition])
+
+  const reorderScenes = useCallback((fromIndex: number, toIndex: number) => {
+    if (
+      !composition
+      || fromIndex === toIndex
+      || fromIndex < 0
+      || toIndex < 0
+      || fromIndex >= composition.scenes.length
+      || toIndex >= composition.scenes.length
+    ) {
+      return
+    }
+
+    playerRef.current?.pause()
+    setIsPlaying(false)
+    const next = reorderComposition(composition, fromIndex, toIndex)
+    updateComposition(() => next)
+    setSelectedSceneIndex(toIndex)
+
+    const totalHints = next.scenes.reduce(
+      (sum, scene) => sum + Math.max(0, scene.duration_hint),
+      0,
+    ) || 1
+    const precedingHints = next.scenes
+      .slice(0, toIndex)
+      .reduce((sum, scene) => sum + Math.max(0, scene.duration_hint), 0)
+    const frame = Math.round((precedingHints / totalHints) * totalFrames)
+    playerRef.current?.seekTo(frame)
+    setPlayerFrame(frame)
+  }, [composition, totalFrames, updateComposition])
 
   const updateSubtitleStyle = useCallback((updates: Partial<SubtitleStyle>) => {
     updateComposition((prev) => ({
@@ -219,9 +255,9 @@ export function EditorProvider({ jobId, children }: { jobId: string; children: R
         ...prev,
         words: words as unknown as CompositionData['words'],
         audioUrl,
+        narrationStale: false,
       }
     })
-    setNarrationStale(false)
   }, [updateComposition])
 
   // Music update
@@ -296,7 +332,6 @@ export function EditorProvider({ jobId, children }: { jobId: string; children: R
     historyIndexRef.current = newIndex
     setHistoryIndex(newIndex)
     setComposition(history[newIndex])
-    setNarrationStale(history[newIndex].scenes.some((s, i) => s.text !== baselineTextsRef.current[i]))
     setDirty(true)
   }, [canUndo, historyIndex, history])
 
@@ -306,14 +341,13 @@ export function EditorProvider({ jobId, children }: { jobId: string; children: R
     historyIndexRef.current = newIndex
     setHistoryIndex(newIndex)
     setComposition(history[newIndex])
-    setNarrationStale(history[newIndex].scenes.some((s, i) => s.text !== baselineTextsRef.current[i]))
     setDirty(true)
   }, [canRedo, historyIndex, history])
 
   const value: EditorContextValue = {
     jobId, composition, loading, error, selectedSceneIndex, activePanel, panelCollapsed,
     dirty, saving, saveError, retrySave: doSave, flushSave, playerFrame, isPlaying, playerRef, totalFrames, narrationStale,
-    selectScene, setActivePanel, updateScene, updateSubtitleStyle, updateVoiceConfig,
+    selectScene, setActivePanel, updateScene, reorderScenes, updateSubtitleStyle, updateVoiceConfig,
     updateAudio, updateMusic, addOverlay, removeOverlay, updateOverlay, getSceneStartFrame,
     setPlayerFrame, seekToFrame, togglePlayback, togglePanel,
     undo, redo, canUndo, canRedo,
