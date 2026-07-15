@@ -3,6 +3,7 @@
 import { useCallback, useRef } from 'react'
 import { useEditor } from '@/contexts/EditorContext'
 import { SubtitleTimeline } from './SubtitleTimeline'
+import { NarrationWaveform } from './NarrationWaveform'
 
 // Cor NÃO carrega significado por cena (auditoria F0): ativa = coral, demais neutras.
 
@@ -84,6 +85,8 @@ export function EditorTimeline() {
           <div className="editor-timeline__playhead" />
         </div>
       </div>
+
+      <NarrationWaveform audioUrl={composition.audioUrl} />
 
       {/* Word-by-word subtitle visualization (Pretext canvas) */}
       <SubtitleTimeline />
