@@ -50,32 +50,40 @@ async function installEditorHarness(page) {
     narrationStale: false,
   }
 
-  await page.route('**/api/v1/jobs/job-editor/composition', (route) => route.fulfill({
-    status: 200,
-    contentType: 'application/json',
-    body: JSON.stringify({
-      job_id: 'job-editor',
-      script: { title: 'Editor avançado', scenes, narration: 'Cena A Cena B Cena C' },
-      words: [
-        { word: 'Cena', start: 0, end: 0.4 },
-        { word: 'A', start: 0.4, end: 0.8 },
-        { word: 'Cena', start: 0.8, end: 1.2 },
-        { word: 'B', start: 1.2, end: 1.6 },
-      ],
-      audio_url: '/test-narration.wav',
-      media_urls: ['/test-media-0.png', '/test-media-1.png', '/test-media-2.png'],
-      subtitle_style: {},
-      editor_state: { composition: savedComposition },
-      template_id: 'stock_narration',
-      layout_type: 'fullscreen',
-      fps: 30,
-      width: 1080,
-      height: 1920,
-      pending_credits: 0,
-      music_asset_id: null,
-      music_volume: 0.12,
-    }),
-  }))
+  await page.route('**/api/v1/jobs/job-editor/composition', (route) => {
+    const physicalMedia = ['/test-media-0.png', '/test-media-1.png', '/test-media-2.png']
+    const currentOrder = savedComposition.sceneOrder ?? [0, 1, 2]
+    return route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        job_id: 'job-editor',
+        script: {
+          title: 'Editor avançado',
+          scenes: savedComposition.scenes ?? scenes,
+          narration: 'Cena A Cena B Cena C',
+        },
+        words: [
+          { word: 'Cena', start: 0, end: 0.4 },
+          { word: 'A', start: 0.4, end: 0.8 },
+          { word: 'Cena', start: 0.8, end: 1.2 },
+          { word: 'B', start: 1.2, end: 1.6 },
+        ],
+        audio_url: '/test-narration.wav',
+        media_urls: currentOrder.map((index) => physicalMedia[index]),
+        subtitle_style: {},
+        editor_state: { composition: savedComposition },
+        template_id: 'stock_narration',
+        layout_type: 'fullscreen',
+        fps: 30,
+        width: 1080,
+        height: 1920,
+        pending_credits: 0,
+        music_asset_id: null,
+        music_volume: 0.12,
+      }),
+    })
+  })
 
   await page.route('**/api/v1/jobs/job-editor/edit', async (route) => {
     const body = route.request().postDataJSON()
@@ -116,3 +124,59 @@ test('desktop exposes filmstrips and a narration waveform', async ({ page }) => 
     /ready|unavailable/,
   )
 })
+
+test('desktop zooms, reorders, autosaves and undoes one scene move', async ({ page }) => {
+  const harness = await installEditorHarness(page)
+
+  await page.goto('/editor/job-editor')
+
+  const timeline = page.locator('[data-timeline-zoom]')
+  await expect(page.getByRole('button', { name: 'Aumentar zoom' })).toBeVisible()
+  await expect(timeline).toHaveAttribute('data-timeline-zoom', '1')
+  await page.getByRole('button', { name: 'Aumentar zoom' }).click()
+  await expect(timeline).toHaveAttribute('data-timeline-zoom', '1.5')
+  await page.getByRole('button', { name: 'Ajustar timeline' }).click()
+  await expect(timeline).toHaveAttribute('data-timeline-zoom', '1')
+
+  await page.getByRole('button', { name: 'Mover cena 3 para trás' }).click()
+  await expect.poll(() => harness.getSavedComposition().sceneOrder).toEqual([0, 2, 1])
+  await expect(page.getByText(/narração desatualizada/i)).toBeVisible()
+
+  await page.getByRole('button', { name: 'Desfazer' }).click()
+  await expect.poll(() => harness.getSavedComposition().sceneOrder).toEqual([0, 1, 2])
+
+  await page.locator('[data-scene-index="0"]').dragTo(
+    page.locator('[data-scene-index="2"]'),
+  )
+  await expect.poll(() => harness.getSavedComposition().sceneOrder).toEqual([1, 2, 0])
+  await page.getByRole('button', { name: 'Desfazer' }).click()
+  await expect.poll(() => harness.getSavedComposition().sceneOrder).toEqual([0, 1, 2])
+
+  await page.reload()
+  await expect(page.getByRole('button', { name: 'Mover cena 3 para trás' })).toBeVisible()
+  await expect(page.getByText('Cena A').first()).toBeVisible()
+})
+
+for (const width of [320, 390, 393]) {
+  test(`mobile ${width}px keeps timeline actions accessible without document overflow`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 844 })
+    const harness = await installEditorHarness(page)
+
+    await page.goto('/editor/job-editor')
+    await page.getByRole('button', { name: 'Abrir linha do tempo' }).click()
+
+    const dialog = page.getByRole('dialog', { name: 'Linha do tempo' })
+    await expect(dialog).toBeVisible()
+    const moveButton = dialog.getByRole('button', { name: 'Mover cena 2 para trás' })
+    await expect(moveButton).toHaveCSS('min-height', '44px')
+    await moveButton.click()
+    await expect.poll(() => harness.getSavedComposition().sceneOrder).toEqual([1, 0, 2])
+    await expect(dialog.getByRole('img', { name: /waveform da narração/i })).toBeVisible()
+
+    const viewportMetrics = await page.evaluate(() => ({
+      clientWidth: document.documentElement.clientWidth,
+      scrollWidth: document.documentElement.scrollWidth,
+    }))
+    expect(viewportMetrics.scrollWidth).toBe(viewportMetrics.clientWidth)
+  })
+}
