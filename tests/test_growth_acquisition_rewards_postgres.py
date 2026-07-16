@@ -54,7 +54,7 @@ async def _drop_database(database_name: str) -> None:
     connection = await asyncpg.connect(_ADMIN_DSN)
     try:
         await connection.execute(
-            "SELECT pg_terminate_backend(pid) FROM pg_stat_activity " "WHERE datname = $1 AND pid <> pg_backend_pid()",
+            "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = $1 AND pid <> pg_backend_pid()",
             database_name,
         )
         await connection.execute(f'DROP DATABASE "{database_name}"')
@@ -111,7 +111,7 @@ def test_postgres_growth_migration_seeds_only_canonical_offer(postgres_growth_da
             await connection.close()
 
     revision, offer, user_columns, index_definition = asyncio.run(inspect_migration())
-    assert revision == "e8f9a0b1c2d3"
+    assert revision == "f9a0b1c2d3e4"
     assert dict(offer) == {
         "code": "creator20_v1",
         "bonus_credits": 18,

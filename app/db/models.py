@@ -16,6 +16,7 @@ from sqlalchemy import (
     func,
     text,
 )
+from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
@@ -409,6 +410,37 @@ class CreditLedgerReconciliationRun(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
 
+@event.listens_for(Engine, "connect")
+def _install_sqlite_ledger_context_functions(dbapi_connection, _connection_record) -> None:
+    if "sqlite" not in type(dbapi_connection).__module__.lower():
+        return
+    context: dict[str, str | None] = {}
+
+    def set_context(origin, reason, idempotency_key, purchase_id, job_id, operation_id):
+        context.update(
+            {
+                "origin": origin,
+                "reason": reason,
+                "idempotency_key": idempotency_key,
+                "purchase_id": purchase_id,
+                "job_id": job_id,
+                "operation_id": operation_id,
+            }
+        )
+        return 1
+
+    def get_context(key):
+        return context.get(key)
+
+    def clear_context():
+        context.clear()
+        return 1
+
+    dbapi_connection.create_function("clipia_set_credit_context", 6, set_context)
+    dbapi_connection.create_function("clipia_get_credit_context", 1, get_context)
+    dbapi_connection.create_function("clipia_clear_credit_context", 0, clear_context)
+
+
 _SQLITE_LEDGER_TRIGGER_DDLS = (
     DDL(
         """
@@ -436,15 +468,25 @@ _SQLITE_LEDGER_TRIGGER_DDLS = (
         WHEN NEW.credits <> OLD.credits
         BEGIN
             INSERT INTO credit_ledger_entries (
-                id, user_id, delta, origin, reason, idempotency_key,
+                id, user_id, delta, origin, purchase_id, job_id, operation_id,
+                reason, idempotency_key,
                 balance_after, created_at
             ) VALUES (
                 lower(hex(randomblob(4))) || '-' || lower(hex(randomblob(2))) || '-' ||
                 lower(hex(randomblob(2))) || '-' || lower(hex(randomblob(2))) || '-' ||
                 lower(hex(randomblob(6))), NEW.id, NEW.credits - OLD.credits,
-                'unclassified', 'unclassified projection mutation',
-                'shadow:' || lower(hex(randomblob(16))), NEW.credits, CURRENT_TIMESTAMP
+                COALESCE(clipia_get_credit_context('origin'), 'unclassified'),
+                clipia_get_credit_context('purchase_id'),
+                clipia_get_credit_context('job_id'),
+                clipia_get_credit_context('operation_id'),
+                COALESCE(clipia_get_credit_context('reason'), 'unclassified projection mutation'),
+                COALESCE(
+                    clipia_get_credit_context('idempotency_key'),
+                    'shadow:' || lower(hex(randomblob(16)))
+                ),
+                NEW.credits, CURRENT_TIMESTAMP
             );
+            SELECT clipia_clear_credit_context();
         END
         """
     ).execute_if(dialect="sqlite"),
@@ -493,7 +535,7 @@ class AnalyticsEvent(Base):
             "'email_verified', 'generation_requested', 'generation_completed', "
             "'generation_failed', 'video_exported', 'checkout_started', "
             "'payment_completed', 'credit_balance_changed', 'second_generation_requested', "
-            "'public_share_published', 'public_share_visited', 'public_share_rewarded')",
+            "'share_page_published', 'share_page_visited', 'social_share_rewarded')",
             name="ck_analytics_event_name",
         ),
         CheckConstraint("schema_version = 1", name="ck_analytics_schema_version"),

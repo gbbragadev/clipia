@@ -38,7 +38,11 @@ _SERVER_EVENT_PAGES: dict[str, str] = {
     "payment_completed": "credits",
     "credit_balance_changed": "dashboard",
     "second_generation_requested": "dashboard",
+    "share_page_published": "dashboard",
+    "share_page_visited": "viewer",
+    "social_share_rewarded": "viewer",
 }
+_SOCIAL_SERVER_EVENTS = {"share_page_published", "share_page_visited", "social_share_rewarded"}
 _CAMPAIGN_TOKEN = re.compile(r"^[a-z0-9._-]{1,100}$")
 _SERVER_EVENT_NAMESPACE = uuid.UUID("e02a5d1f-3ba0-4dca-8fa2-91cc0d8bd7b6")
 logger = logging.getLogger(__name__)
@@ -163,10 +167,11 @@ async def append_server_event(
     db: AsyncSession,
     *,
     event_name: ServerEventName,
-    user: User,
+    user: User | None,
     properties: dict,
     idempotency_key: str,
     occurred_at: datetime,
+    anonymous_session_id: uuid.UUID | None = None,
 ) -> bool:
     """Append one authoritative, transaction-participating product event.
 
@@ -181,13 +186,21 @@ async def append_server_event(
         raise ValueError("Invalid server analytics idempotency key")
     if occurred_at.tzinfo is None or occurred_at.utcoffset() is None:
         raise ValueError("Server analytics occurred_at must include a timezone")
+    if event_name == "share_page_visited" and anonymous_session_id is None:
+        raise ValueError("share_page_visited requires an anonymous session")
     occurred_at = occurred_at.astimezone(timezone.utc)
     if not settings.ANALYTICS_ENABLED:
         return False
 
-    utm_source = _safe_campaign_token(user.utm_source)
-    utm_medium = _safe_campaign_token(user.utm_medium)
-    utm_campaign = _safe_campaign_token(user.utm_campaign)
+    utm_source = _safe_campaign_token(user.utm_source) if user else None
+    utm_medium = _safe_campaign_token(user.utm_medium) if user else None
+    utm_campaign = _safe_campaign_token(user.utm_campaign) if user else None
+    user_id = user.id if user else None
+    acquisition_source = (
+        "social"
+        if event_name in _SOCIAL_SERVER_EVENTS
+        else _server_acquisition_source(utm_source, utm_medium, utm_campaign)
+    )
     event_id = uuid.uuid5(_SERVER_EVENT_NAMESPACE, f"v1:{event_name}:{idempotency_key}")
     canonical = {
         "event_id": str(event_id),
@@ -195,9 +208,10 @@ async def append_server_event(
         "schema_version": 1,
         "authority": "server",
         "occurred_at": occurred_at.isoformat(),
-        "user_id": str(user.id),
+        "anonymous_session_id": str(anonymous_session_id) if anonymous_session_id else None,
+        "user_id": str(user_id) if user_id else None,
         "page": _SERVER_EVENT_PAGES[event_name],
-        "acquisition_source": _server_acquisition_source(utm_source, utm_medium, utm_campaign),
+        "acquisition_source": acquisition_source,
         "utm_source": utm_source,
         "utm_medium": utm_medium,
         "utm_campaign": utm_campaign,
@@ -214,8 +228,8 @@ async def append_server_event(
             "event_id": event_id,
             "occurred_at": occurred_at,
             "received_at": datetime.now(timezone.utc),
-            "anonymous_session_id": None,
-            "user_id": user.id,
+            "anonymous_session_id": anonymous_session_id,
+            "user_id": user_id,
             "utm_content": None,
             "utm_term": None,
             "payload_hash": payload_hash,

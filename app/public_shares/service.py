@@ -3,7 +3,6 @@ from __future__ import annotations
 import base64
 import hashlib
 import hmac
-import json
 import re
 import secrets
 import uuid
@@ -16,13 +15,13 @@ from sqlalchemy.dialects.postgresql import insert as postgresql_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.analytics.service import append_server_event
 from app.config import settings
-from app.db.models import AnalyticsEvent, Job, PublicShareVisit, PublicVideoShare, User
+from app.db.models import Job, PublicShareVisit, PublicVideoShare, User
 from app.services.acquisition_rewards import claim_social_share_reward
 
 _TOKEN_CONTEXT = b"clipia-public-share:v1:"
 _TOKEN_BYTES = 32
-_ANALYTICS_NAMESPACE = uuid.UUID("f74a196d-7c4f-4ad3-a080-aa74a48b5c38")
 _BOT_USER_AGENT = re.compile(
     r"bot|crawler|spider|slurp|headless|curl|wget|python-requests|python-httpx|facebookexternalhit|preview",
     re.IGNORECASE,
@@ -103,56 +102,6 @@ def resolve_public_video_path(job_id: uuid.UUID) -> Path:
     return resolved
 
 
-def _canonical_event_hash(values: dict) -> str:
-    canonical = {
-        **values,
-        "event_id": str(values["event_id"]),
-        "occurred_at": values["occurred_at"].isoformat(),
-        "received_at": values["received_at"].isoformat(),
-        "user_id": str(values["user_id"]) if values["user_id"] else None,
-        "anonymous_session_id": (str(values["anonymous_session_id"]) if values["anonymous_session_id"] else None),
-    }
-    return hashlib.sha256(
-        json.dumps(canonical, ensure_ascii=False, separators=(",", ":"), sort_keys=True).encode("utf-8")
-    ).hexdigest()
-
-
-async def _append_share_event(
-    db: AsyncSession,
-    *,
-    event_name: str,
-    idempotency_key: str,
-    occurred_at: datetime,
-    properties: dict,
-    user_id: uuid.UUID | None = None,
-    anonymous_session_id: uuid.UUID | None = None,
-) -> None:
-    if not settings.ANALYTICS_ENABLED:
-        return
-    event_id = uuid.uuid5(_ANALYTICS_NAMESPACE, f"v1:{event_name}:{idempotency_key}")
-    values = {
-        "event_id": event_id,
-        "event_name": event_name,
-        "schema_version": 1,
-        "authority": "server",
-        "occurred_at": occurred_at,
-        "received_at": datetime.now(timezone.utc),
-        "anonymous_session_id": anonymous_session_id,
-        "user_id": user_id,
-        "page": "viewer" if event_name != "public_share_published" else "dashboard",
-        "acquisition_source": "social",
-        "utm_source": None,
-        "utm_medium": None,
-        "utm_campaign": None,
-        "utm_content": None,
-        "utm_term": None,
-        "device_class": "unknown",
-        "properties": properties,
-    }
-    db.add(AnalyticsEvent(**values, payload_hash=_canonical_event_hash(values)))
-    await db.flush()
-
-
 async def create_public_share(db: AsyncSession, owner: User, job_id: str | uuid.UUID) -> PublicShareRecord:
     owned_job = await db.scalar(
         select(Job)
@@ -193,13 +142,13 @@ async def create_public_share(db: AsyncSession, owner: User, job_id: str | uuid.
     db.add(share)
     try:
         await db.flush()
-        await _append_share_event(
+        await append_server_event(
             db,
-            event_name="public_share_published",
+            event_name="share_page_published",
             idempotency_key=str(share.id),
             occurred_at=now,
             properties={"share_id": str(share.id), "job_id": str(owned_job.id)},
-            user_id=owner.id,
+            user=owner,
         )
         await db.commit()
     except Exception:
@@ -291,15 +240,15 @@ async def record_qualified_view(
     dwell_ms: int,
     page_visible: bool,
     user_agent: str | None,
-    viewer_user_id: uuid.UUID | None,
+    viewer_user_ids: frozenset[uuid.UUID] | set[uuid.UUID],
 ) -> tuple[bool, bool]:
     record = await get_active_public_share(db, token, lock=True)
     user_agent_classification = classify_user_agent(user_agent)
     if (
         dwell_ms < 5000
         or not page_visible
-        or viewer_user_id == record.share.owner_id
-        or user_agent_classification == "bot"
+        or record.share.owner_id in viewer_user_ids
+        or user_agent_classification != "browser"
     ):
         return False, False
 
@@ -315,12 +264,13 @@ async def record_qualified_view(
         if not await _insert_qualified_visit(db, visit):
             await db.commit()
             return False, False
-        await _append_share_event(
+        await append_server_event(
             db,
-            event_name="public_share_visited",
+            event_name="share_page_visited",
             idempotency_key=str(visit.id),
             occurred_at=now,
             properties={"share_id": str(record.share.id), "job_id": str(record.job.id)},
+            user=None,
             anonymous_session_id=anonymous_session_id,
         )
         owner = await db.get(User, record.share.owner_id)
@@ -329,9 +279,9 @@ async def record_qualified_view(
         credits = await claim_social_share_reward(db, owner, record.job, now)
         rewarded = credits > 0
         if rewarded:
-            await _append_share_event(
+            await append_server_event(
                 db,
-                event_name="public_share_rewarded",
+                event_name="social_share_rewarded",
                 idempotency_key=str(owner.id),
                 occurred_at=now,
                 properties={
@@ -339,7 +289,7 @@ async def record_qualified_view(
                     "job_id": str(record.job.id),
                     "credits": credits,
                 },
-                user_id=owner.id,
+                user=owner,
             )
         await db.commit()
     except Exception:

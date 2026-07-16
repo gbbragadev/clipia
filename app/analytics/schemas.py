@@ -321,6 +321,15 @@ class SecondGenerationRequestedProperties(StrictModel):
     credit_cost: int = Field(ge=0, le=100)
 
 
+class SharePageProperties(StrictModel):
+    share_id: UUID4
+    job_id: UUID4
+
+
+class SocialShareRewardedProperties(SharePageProperties):
+    credits: Literal[2]
+
+
 ServerEventName = Literal[
     "user_registered",
     "email_verified",
@@ -332,6 +341,9 @@ ServerEventName = Literal[
     "payment_completed",
     "credit_balance_changed",
     "second_generation_requested",
+    "share_page_published",
+    "share_page_visited",
+    "social_share_rewarded",
 ]
 
 SERVER_EVENT_PROPERTY_MODELS: dict[str, type[StrictModel]] = {
@@ -345,6 +357,9 @@ SERVER_EVENT_PROPERTY_MODELS: dict[str, type[StrictModel]] = {
     "payment_completed": CheckoutProperties,
     "credit_balance_changed": CreditBalanceChangedProperties,
     "second_generation_requested": SecondGenerationRequestedProperties,
+    "share_page_published": SharePageProperties,
+    "share_page_visited": SharePageProperties,
+    "social_share_rewarded": SocialShareRewardedProperties,
 }
 
 

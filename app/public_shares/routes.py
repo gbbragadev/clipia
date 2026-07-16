@@ -34,20 +34,20 @@ router = APIRouter(tags=["public-shares"])
 limiter = Limiter(key_func=client_ip)
 
 
-def _viewer_user_id(request: Request) -> uuid.UUID | None:
+def _viewer_user_ids(request: Request) -> frozenset[uuid.UUID]:
+    viewer_ids: set[uuid.UUID] = set()
     authorization = request.headers.get("Authorization")
-    token: str | None = None
     if authorization:
         scheme, _, candidate = authorization.partition(" ")
         if scheme.lower() == "bearer" and candidate:
-            token = candidate
-    else:
-        token = request.cookies.get(AUTH_COOKIE_NAME)
-    claims = decode_access_token_claims(token) if token else None
-    try:
-        return uuid.UUID(str(claims["sub"])) if claims else None
-    except (KeyError, TypeError, ValueError, AttributeError):
-        return None
+            claims = decode_access_token_claims(candidate)
+            if claims:
+                viewer_ids.add(uuid.UUID(str(claims["sub"])))
+    cookie_token = request.cookies.get(AUTH_COOKIE_NAME)
+    cookie_claims = decode_access_token_claims(cookie_token) if cookie_token else None
+    if cookie_claims:
+        viewer_ids.add(uuid.UUID(str(cookie_claims["sub"])))
+    return frozenset(viewer_ids)
 
 
 @router.post(
@@ -154,7 +154,7 @@ async def qualify_public_share_view(
             dwell_ms=body.dwell_ms,
             page_visible=body.page_visible,
             user_agent=request.headers.get("User-Agent"),
-            viewer_user_id=_viewer_user_id(request),
+            viewer_user_ids=_viewer_user_ids(request),
         )
     except PublicShareNotFound:
         raise not_found_error() from None

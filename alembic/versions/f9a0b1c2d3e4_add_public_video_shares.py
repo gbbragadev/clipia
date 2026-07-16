@@ -26,7 +26,12 @@ _ANALYTICS_EVENTS_BEFORE = (
     "'payment_completed', 'credit_balance_changed', 'second_generation_requested')"
 )
 _ANALYTICS_EVENTS_AFTER = _ANALYTICS_EVENTS_BEFORE[:-1] + (
-    ", 'public_share_published', 'public_share_visited', 'public_share_rewarded')"
+    ", 'share_page_published', 'share_page_visited', 'social_share_rewarded')"
+)
+_SQLITE_UUID = (
+    "lower(hex(randomblob(4))) || '-' || lower(hex(randomblob(2))) || '-' || "
+    "lower(hex(randomblob(2))) || '-' || lower(hex(randomblob(2))) || '-' || "
+    "lower(hex(randomblob(6)))"
 )
 
 
@@ -34,6 +39,58 @@ def _replace_analytics_event_constraint(expression: str) -> None:
     with op.batch_alter_table("analytics_events") as batch_op:
         batch_op.drop_constraint("ck_analytics_event_name", type_="check")
         batch_op.create_check_constraint("ck_analytics_event_name", expression)
+
+
+def _replace_sqlite_ledger_update_trigger(*, contextual: bool) -> None:
+    bind = op.get_bind()
+    if bind.dialect.name != "sqlite" or "credit_ledger_entries" not in sa.inspect(bind).get_table_names():
+        return
+    op.execute("DROP TRIGGER IF EXISTS credit_ledger_users_update")
+    if contextual:
+        op.execute(
+            f"""
+            CREATE TRIGGER credit_ledger_users_update
+            AFTER UPDATE OF credits ON users
+            WHEN NEW.credits <> OLD.credits
+            BEGIN
+                INSERT INTO credit_ledger_entries (
+                    id, user_id, delta, origin, purchase_id, job_id, operation_id,
+                    reason, idempotency_key, balance_after, created_at
+                ) VALUES (
+                    {_SQLITE_UUID}, NEW.id, NEW.credits - OLD.credits,
+                    COALESCE(clipia_get_credit_context('origin'), 'unclassified'),
+                    clipia_get_credit_context('purchase_id'),
+                    clipia_get_credit_context('job_id'),
+                    clipia_get_credit_context('operation_id'),
+                    COALESCE(clipia_get_credit_context('reason'), 'unclassified projection mutation'),
+                    COALESCE(
+                        clipia_get_credit_context('idempotency_key'),
+                        'shadow:' || lower(hex(randomblob(16)))
+                    ),
+                    NEW.credits, CURRENT_TIMESTAMP
+                );
+                SELECT clipia_clear_credit_context();
+            END
+            """
+        )
+    else:
+        op.execute(
+            f"""
+            CREATE TRIGGER credit_ledger_users_update
+            AFTER UPDATE OF credits ON users
+            WHEN NEW.credits <> OLD.credits
+            BEGIN
+                INSERT INTO credit_ledger_entries (
+                    id, user_id, delta, origin, reason, idempotency_key,
+                    balance_after, created_at
+                ) VALUES (
+                    {_SQLITE_UUID}, NEW.id, NEW.credits - OLD.credits,
+                    'unclassified', 'unclassified projection mutation',
+                    'shadow:' || lower(hex(randomblob(16))), NEW.credits, CURRENT_TIMESTAMP
+                );
+            END
+            """
+        )
 
 
 def upgrade() -> None:
@@ -96,9 +153,11 @@ def upgrade() -> None:
         unique=False,
     )
     _replace_analytics_event_constraint(_ANALYTICS_EVENTS_AFTER)
+    _replace_sqlite_ledger_update_trigger(contextual=True)
 
 
 def downgrade() -> None:
+    _replace_sqlite_ledger_update_trigger(contextual=False)
     _replace_analytics_event_constraint(_ANALYTICS_EVENTS_BEFORE)
     op.drop_index("ix_public_share_visits_share_visited", table_name="public_share_visits")
     op.drop_table("public_share_visits")

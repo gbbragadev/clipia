@@ -1,18 +1,27 @@
 import asyncio
 import hashlib
+import importlib.util
+import json
+import logging
 import os
 import re
 import uuid
 from datetime import datetime, timezone
+from pathlib import Path
 
 import asyncpg
 import pytest
 import sqlalchemy as sa
 from alembic import command
 from alembic.config import Config
+from alembic.migration import MigrationContext
+from alembic.operations import Operations
+from pydantic import ValidationError
 from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
+from app.analytics.schemas import SERVER_EVENT_PROPERTY_MODELS
+from app.analytics.service import append_server_event
 from app.auth.service import create_access_token
 from app.auth.session import AUTH_COOKIE_NAME
 from app.config import settings
@@ -189,6 +198,27 @@ async def test_qualified_view_rejects_short_hidden_owner_and_bot_without_consumi
         json=_view_payload(page_visible=False),
         headers=_BROWSER_HEADERS,
     )
+    default_user_agent = client.headers.get("User-Agent")
+    if default_user_agent is not None:
+        del client.headers["User-Agent"]
+    try:
+        absent_user_agent = await client.post(
+            f"/api/v1/public-shares/{token}/qualified-view",
+            json=_view_payload(),
+        )
+    finally:
+        if default_user_agent is not None:
+            client.headers["User-Agent"] = default_user_agent
+    empty_user_agent = await client.post(
+        f"/api/v1/public-shares/{token}/qualified-view",
+        json=_view_payload(),
+        headers={"User-Agent": ""},
+    )
+    unknown_user_agent = await client.post(
+        f"/api/v1/public-shares/{token}/qualified-view",
+        json=_view_payload(),
+        headers={"User-Agent": "custom-agent/1.0"},
+    )
     bot = await client.post(
         f"/api/v1/public-shares/{token}/qualified-view",
         json=_view_payload(),
@@ -202,10 +232,11 @@ async def test_qualified_view_rejects_short_hidden_owner_and_bot_without_consumi
     )
     client.cookies.clear()
 
-    assert [response.status_code for response in (short, hidden, bot, owner)] == [200, 200, 200, 200]
-    assert [response.json() for response in (short, hidden, bot, owner)] == [
+    rejected = (short, hidden, absent_user_agent, empty_user_agent, unknown_user_agent, bot, owner)
+    assert [response.status_code for response in rejected] == [200] * len(rejected)
+    assert [response.json() for response in rejected] == [
         {"qualified": False, "rewarded": False},
-    ] * 4
+    ] * len(rejected)
     async with test_db["session_factory"]() as session:
         assert await session.scalar(select(func.count()).select_from(models.PublicShareVisit)) == 0
         assert (
@@ -216,6 +247,35 @@ async def test_qualified_view_rejects_short_hidden_owner_and_bot_without_consumi
             )
             == 0
         )
+
+
+@pytest.mark.asyncio
+async def test_valid_owner_cookie_beats_invalid_bearer_but_invalid_bearer_alone_is_anonymous(
+    client,
+    test_db,
+    job_factory,
+    verified_user,
+    auth_headers,
+):
+    job = await _completed_job(test_db, job_factory)
+    token = (await _create_share(client, job.id, verified_user, auth_headers)).json()["token"]
+    client.cookies.set(AUTH_COOKIE_NAME, create_access_token(str(verified_user.id)))
+
+    owner = await client.post(
+        f"/api/v1/public-shares/{token}/qualified-view",
+        json=_view_payload(),
+        headers={**_BROWSER_HEADERS, "Authorization": "Bearer invalid-token"},
+    )
+    client.cookies.clear()
+    anonymous = await client.post(
+        f"/api/v1/public-shares/{token}/qualified-view",
+        json=_view_payload(),
+        headers={**_BROWSER_HEADERS, "Authorization": "Bearer invalid-token"},
+    )
+
+    assert owner.status_code == anonymous.status_code == 200
+    assert owner.json() == {"qualified": False, "rewarded": False}
+    assert anonymous.json() == {"qualified": True, "rewarded": True}
 
 
 @pytest.mark.asyncio
@@ -268,13 +328,27 @@ async def test_unique_qualified_session_rewards_owner_once_across_all_shares(
         )
         visits = list(await session.scalars(select(models.PublicShareVisit)))
         events = list(await session.scalars(select(models.AnalyticsEvent.event_name)))
+        reward_ledger = list(
+            await session.scalars(
+                select(models.CreditLedgerEntry).where(
+                    models.CreditLedgerEntry.user_id == verified_user.id,
+                    models.CreditLedgerEntry.delta == 2,
+                )
+            )
+        )
     assert owner is not None and owner.credits == initial_credits + 2
     assert [(reward.credits, reward.completed_job_id) for reward in rewards] == [(2, first_job.id)]
     assert len(visits) == 2
     assert all(visit.user_agent_classification == "browser" for visit in visits)
-    assert "public_share_published" in events
-    assert events.count("public_share_visited") == 2
-    assert events.count("public_share_rewarded") == 1
+    assert len(reward_ledger) == 1
+    assert reward_ledger[0].origin == "social_share_reward"
+    assert reward_ledger[0].idempotency_key == f"acquisition:{verified_user.id}:social_share"
+    assert reward_ledger[0].operation_id == rewards[0].id
+    assert reward_ledger[0].job_id == first_job.id
+    assert reward_ledger[0].balance_after == initial_credits + 2
+    assert "share_page_published" in events
+    assert events.count("share_page_visited") == 2
+    assert events.count("social_share_rewarded") == 1
 
 
 @pytest.mark.asyncio
@@ -340,7 +414,7 @@ async def test_reward_analytics_failure_rolls_back_visit_reward_credit_and_ledge
                 """
                 CREATE TRIGGER fail_public_share_rewarded
                 BEFORE INSERT ON analytics_events
-                WHEN NEW.event_name = 'public_share_rewarded'
+                WHEN NEW.event_name = 'social_share_rewarded'
                 BEGIN SELECT RAISE(ABORT, 'share reward analytics unavailable'); END
                 """
             )
@@ -389,6 +463,205 @@ async def test_public_share_request_schema_is_strict(client):
         headers=_BROWSER_HEADERS,
     )
     assert response.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_public_share_access_logs_redact_capability_and_omit_raw_ip(
+    client,
+    client_factory,
+    test_db,
+    job_factory,
+    verified_user,
+    auth_headers,
+    caplog,
+):
+    job = await _completed_job(test_db, job_factory)
+    token = (await _create_share(client, job.id, verified_user, auth_headers)).json()["token"]
+    caplog.clear()
+
+    with caplog.at_level(logging.INFO, logger="clipia.access"):
+        async with client_factory("203.0.113.77") as public_client:
+            assert (await public_client.get(f"/api/v1/public-shares/{token}")).status_code == 200
+            assert (
+                await public_client.post(
+                    f"/api/v1/public-shares/{token}/qualified-view",
+                    json=_view_payload(),
+                    headers={"User-Agent": ""},
+                )
+            ).status_code == 200
+            assert (await public_client.get("/api/v1/config")).status_code == 200
+
+    payloads = [json.loads(record.message) for record in caplog.records if record.name == "clipia.access"]
+    public_payloads = [payload for payload in payloads if payload["path"].startswith("/api/v1/public-shares/")]
+    assert {payload["path"] for payload in public_payloads} == {
+        "/api/v1/public-shares/[redacted]",
+        "/api/v1/public-shares/[redacted]/qualified-view",
+    }
+    assert all("client_ip" not in payload and "remote_addr" not in payload for payload in public_payloads)
+    public_logs = "\n".join(json.dumps(payload, sort_keys=True) for payload in public_payloads)
+    assert token not in public_logs
+    assert "203.0.113.77" not in public_logs
+
+    normal_payload = next(payload for payload in payloads if payload["path"] == "/api/v1/config")
+    assert normal_payload["client_ip"] == "203.0.113.77"
+
+
+@pytest.mark.asyncio
+async def test_share_server_analytics_reject_arbitrary_properties(db_session, verified_user, monkeypatch):
+    monkeypatch.setattr(settings, "ANALYTICS_ENABLED", True)
+    with pytest.raises(ValidationError):
+        await append_server_event(
+            db_session,
+            event_name="share_page_published",
+            user=verified_user,
+            properties={
+                "share_id": str(uuid.uuid4()),
+                "job_id": str(uuid.uuid4()),
+                "raw_payload": "not allowed",
+            },
+            idempotency_key=f"strict-share:{uuid.uuid4()}",
+            occurred_at=datetime.now(timezone.utc),
+        )
+
+
+def test_share_server_analytics_catalog_is_strict_and_complete():
+    assert {
+        "share_page_published",
+        "share_page_visited",
+        "social_share_rewarded",
+    }.issubset(SERVER_EVENT_PROPERTY_MODELS)
+    published = SERVER_EVENT_PROPERTY_MODELS["share_page_published"].model_validate(
+        {"share_id": str(uuid.uuid4()), "job_id": str(uuid.uuid4())}
+    )
+    assert published.model_dump(mode="json").keys() == {"share_id", "job_id"}
+    with pytest.raises(ValidationError):
+        SERVER_EVENT_PROPERTY_MODELS["social_share_rewarded"].model_validate(
+            {
+                "share_id": str(uuid.uuid4()),
+                "job_id": str(uuid.uuid4()),
+                "credits": 2,
+                "email": "leak@example.com",
+            }
+        )
+
+
+def _load_public_share_migration():
+    path = Path(__file__).resolve().parents[1] / "alembic" / "versions" / ("f9a0b1c2d3e4_add_public_video_shares.py")
+    spec = importlib.util.spec_from_file_location("task2_public_share_migration", path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_sqlite_f9_upgrade_and_downgrade_enforce_share_uniqueness():
+    migration = _load_public_share_migration()
+    engine = sa.create_engine("sqlite://")
+    metadata = sa.MetaData()
+    users = sa.Table("users", metadata, sa.Column("id", sa.Uuid(), primary_key=True))
+    jobs = sa.Table(
+        "jobs",
+        metadata,
+        sa.Column("id", sa.Uuid(), primary_key=True),
+        sa.Column("user_id", sa.Uuid(), sa.ForeignKey(users.c.id), nullable=False),
+    )
+    sa.Table(
+        "analytics_events",
+        metadata,
+        sa.Column("event_name", sa.String(50), nullable=False),
+        sa.CheckConstraint(migration._ANALYTICS_EVENTS_BEFORE, name="ck_analytics_event_name"),
+    )
+    metadata.create_all(engine)
+
+    owner_id, job_id = uuid.uuid4(), uuid.uuid4()
+    share_id, other_share_id = uuid.uuid4(), uuid.uuid4()
+    with engine.begin() as connection:
+        operations = Operations(MigrationContext.configure(connection))
+        migration.op = operations
+        migration.upgrade()
+
+        inspector = sa.inspect(connection)
+        assert {"public_video_shares", "public_share_visits"}.issubset(inspector.get_table_names())
+        analytics_check = next(
+            check["sqltext"]
+            for check in inspector.get_check_constraints("analytics_events")
+            if check["name"] == "ck_analytics_event_name"
+        )
+        assert "share_page_published" in analytics_check
+        assert "share_page_visited" in analytics_check
+        assert "social_share_rewarded" in analytics_check
+        assert "public_share_published" not in analytics_check
+
+        connection.execute(users.insert().values(id=owner_id))
+        connection.execute(jobs.insert().values(id=job_id, user_id=owner_id))
+        shares = sa.table(
+            "public_video_shares",
+            sa.column("id", sa.Uuid()),
+            sa.column("job_id", sa.Uuid()),
+            sa.column("owner_id", sa.Uuid()),
+            sa.column("token_hash", sa.String()),
+            sa.column("active", sa.Boolean()),
+            sa.column("revoked_at", sa.DateTime(timezone=True)),
+        )
+        connection.execute(
+            shares.insert().values(
+                id=share_id,
+                job_id=job_id,
+                owner_id=owner_id,
+                token_hash="a" * 64,
+                active=True,
+            )
+        )
+        with pytest.raises(sa.exc.IntegrityError), connection.begin_nested():
+            connection.execute(
+                shares.insert().values(
+                    id=other_share_id,
+                    job_id=job_id,
+                    owner_id=owner_id,
+                    token_hash="b" * 64,
+                    active=True,
+                )
+            )
+        connection.execute(
+            shares.insert().values(
+                id=other_share_id,
+                job_id=job_id,
+                owner_id=owner_id,
+                token_hash="b" * 64,
+                active=False,
+                revoked_at=datetime.now(timezone.utc),
+            )
+        )
+
+        visits = sa.table(
+            "public_share_visits",
+            sa.column("id", sa.Uuid()),
+            sa.column("share_id", sa.Uuid()),
+            sa.column("anonymous_session_id", sa.Uuid()),
+            sa.column("user_agent_classification", sa.String()),
+        )
+        anonymous_session_id = uuid.uuid4()
+        connection.execute(
+            visits.insert().values(
+                id=uuid.uuid4(),
+                share_id=share_id,
+                anonymous_session_id=anonymous_session_id,
+                user_agent_classification="browser",
+            )
+        )
+        with pytest.raises(sa.exc.IntegrityError), connection.begin_nested():
+            connection.execute(
+                visits.insert().values(
+                    id=uuid.uuid4(),
+                    share_id=share_id,
+                    anonymous_session_id=anonymous_session_id,
+                    user_agent_classification="browser",
+                )
+            )
+
+        migration.downgrade()
+        assert "public_video_shares" not in sa.inspect(connection).get_table_names()
+        assert "public_share_visits" not in sa.inspect(connection).get_table_names()
 
 
 _POSTGRES_ADMIN_DSN = os.getenv(
@@ -535,7 +808,7 @@ def test_postgres_concurrent_first_views_reward_and_ledger_once(postgres_public_
                         dwell_ms=5000,
                         page_visible=True,
                         user_agent=_BROWSER_HEADERS["User-Agent"],
-                        viewer_user_id=None,
+                        viewer_user_ids=frozenset(),
                     )
 
             results = await asyncio.gather(qualify(uuid.uuid4()), qualify(uuid.uuid4()))
@@ -561,7 +834,7 @@ def test_postgres_concurrent_first_views_reward_and_ledger_once(postgres_public_
                 event_names = list(
                     await verification.scalars(
                         select(models.AnalyticsEvent.event_name).where(
-                            models.AnalyticsEvent.event_name.in_(("public_share_visited", "public_share_rewarded"))
+                            models.AnalyticsEvent.event_name.in_(("share_page_visited", "social_share_rewarded"))
                         )
                     )
                 )
@@ -577,5 +850,5 @@ def test_postgres_concurrent_first_views_reward_and_ledger_once(postgres_public_
         (2, "social_share_reward", 7)
     ]
     assert visit_count == 2
-    assert event_names.count("public_share_visited") == 2
-    assert event_names.count("public_share_rewarded") == 1
+    assert event_names.count("share_page_visited") == 2
+    assert event_names.count("social_share_rewarded") == 1

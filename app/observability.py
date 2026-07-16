@@ -2,6 +2,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 import shutil
 import time
 import uuid
@@ -31,6 +32,7 @@ _CREDIT_TOTALS: Counter[str] = Counter()
 _AUTH_TRANSPORT_COUNTS: Counter[str] = Counter()
 _METRIC_LOCK = Lock()
 _HEALTH_CACHE: dict[str, Any] = {"expires_at": 0.0, "payload": None}
+_PUBLIC_SHARE_LOG_PATH = re.compile(r"^/api/v1/public-shares/[^/]+(?P<suffix>/.*)?$")
 
 
 def record_request_metric(method: str, path: str, status_code: int) -> None:
@@ -67,6 +69,13 @@ def _metric_path(request: Request) -> str:
     return "__unmatched__"
 
 
+def _access_log_path(path: str) -> tuple[str, bool]:
+    match = _PUBLIC_SHARE_LOG_PATH.fullmatch(path)
+    if match is None:
+        return path, False
+    return f"/api/v1/public-shares/[redacted]{match.group('suffix') or ''}", True
+
+
 async def access_log_middleware(request: Request, call_next):
     request_id = request.headers.get("X-Request-ID") or str(uuid.uuid4())[:8]
     start = time.perf_counter()
@@ -74,13 +83,14 @@ async def access_log_middleware(request: Request, call_next):
 
     duration_ms = round((time.perf_counter() - start) * 1000, 2)
     path = request.url.path
+    logged_path, is_public_share = _access_log_path(path)
     record_request_metric(request.method, _metric_path(request), response.status_code)
 
     if path not in {"/health", "/health/deep"}:
         payload = {
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "method": request.method,
-            "path": path,
+            "path": logged_path,
             "status_code": response.status_code,
             "duration_ms": duration_ms,
             "request_id": request_id,
@@ -90,7 +100,8 @@ async def access_log_middleware(request: Request, call_next):
             auth_header = request.headers.get("authorization", "")
             if auth_header.lower().startswith("bearer "):
                 user_id = decode_access_token(auth_header.split(" ", 1)[1])
-            payload["client_ip"] = request.client.host if request.client else None
+            if not is_public_share:
+                payload["client_ip"] = request.client.host if request.client else None
             payload["user_id"] = user_id
         logger.info(json.dumps(payload, ensure_ascii=False, separators=(",", ":")))
 
