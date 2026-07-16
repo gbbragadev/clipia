@@ -9,7 +9,8 @@ from datetime import datetime, timezone
 import asyncpg
 import pytest
 import pytest_asyncio
-from sqlalchemy import select
+from pydantic import SecretStr
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.config import settings
@@ -55,9 +56,9 @@ async def postgres_meta_sessions():
 def _configure_meta(monkeypatch) -> None:
     monkeypatch.setattr(settings, "META_CAPI_ENABLED", True)
     monkeypatch.setattr(settings, "META_CAPI_PIXEL_ID", "pixel-postgres")
-    monkeypatch.setattr(settings, "META_CAPI_ACCESS_TOKEN", "postgres-access-token")
+    monkeypatch.setattr(settings, "META_CAPI_ACCESS_TOKEN", SecretStr("postgres-access-token"))
     monkeypatch.setattr(settings, "META_CAPI_API_VERSION", "v23.0")
-    monkeypatch.setattr(settings, "MARKETING_PSEUDONYM_SECRET", "postgres-pseudonym-secret")
+    monkeypatch.setattr(settings, "MARKETING_PSEUDONYM_SECRET", SecretStr("postgres-pseudonym-secret"))
 
 
 class _Response:
@@ -66,11 +67,14 @@ class _Response:
 
 
 class _Client:
-    def __init__(self):
+    def __init__(self, *, failure: Exception | None = None):
         self.calls = 0
+        self.failure = failure
 
     async def post(self, *_args, **_kwargs):
         self.calls += 1
+        if self.failure is not None:
+            raise self.failure
         return _Response()
 
 
@@ -113,14 +117,55 @@ async def test_postgres_dispatch_skips_locked_outbox_row(postgres_meta_sessions,
                 dispatch_pending_meta_conversions(skipped, client=client),
                 timeout=2,
             )
-            assert result == {"sent": 0, "retried": 0, "failed": 0}
+            assert result == {"sent": 0, "retried": 0, "failed": 0, "cancelled": 0, "unsupported": 0}
             assert client.calls == 0
         await holder.rollback()
 
     async with sessions() as delivered:
         result = await dispatch_pending_meta_conversions(delivered, client=client)
-        assert result == {"sent": 1, "retried": 0, "failed": 0}
+        assert result == {"sent": 1, "retried": 0, "failed": 0, "cancelled": 0, "unsupported": 0}
         assert client.calls == 1
+    async with sessions() as repeated:
+        repeated_result = await dispatch_pending_meta_conversions(repeated, client=client)
+        assert repeated_result == {"sent": 0, "retried": 0, "failed": 0, "cancelled": 0, "unsupported": 0}
+        assert client.calls == 1
+
+
+@pytest.mark.asyncio
+async def test_postgres_dispatch_revalidates_revoked_consent_before_network(postgres_meta_sessions, monkeypatch):
+    _configure_meta(monkeypatch)
+    sessions = postgres_meta_sessions
+    user_id, row_id = await _seed_event(sessions)
+    async with sessions() as revoke:
+        await revoke.execute(update(User).where(User.id == user_id).values(marketing_measurement_consented_at=None))
+        await revoke.commit()
+    client = _Client()
+
+    async with sessions() as dispatch:
+        result = await dispatch_pending_meta_conversions(dispatch, client=client)
+
+    assert result == {"sent": 0, "retried": 0, "failed": 0, "cancelled": 1, "unsupported": 0}
+    assert client.calls == 0
+    async with sessions() as verify:
+        row = await verify.get(MetaConversionOutbox, row_id)
+        assert row is not None and row.status == "cancelled" and row.last_error == "consent_revoked"
+
+
+@pytest.mark.asyncio
+async def test_postgres_dispatch_failure_persists_retry_without_losing_event(postgres_meta_sessions, monkeypatch):
+    _configure_meta(monkeypatch)
+    sessions = postgres_meta_sessions
+    _user_id, row_id = await _seed_event(sessions)
+    client = _Client(failure=TimeoutError("network unavailable"))
+
+    async with sessions() as dispatch:
+        result = await dispatch_pending_meta_conversions(dispatch, client=client)
+
+    assert result == {"sent": 0, "retried": 1, "failed": 0, "cancelled": 0, "unsupported": 0}
+    assert client.calls == 1
+    async with sessions() as verify:
+        row = await verify.get(MetaConversionOutbox, row_id)
+        assert row is not None and row.status == "retry" and row.attempts == 1
 
 
 @pytest.mark.asyncio

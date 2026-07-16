@@ -11,7 +11,7 @@ from decimal import Decimal
 from typing import AsyncIterator
 
 import httpx
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.dialects.postgresql import insert as postgresql_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -31,8 +31,8 @@ def _meta_configured() -> bool:
     return bool(
         settings.META_CAPI_ENABLED
         and settings.META_CAPI_PIXEL_ID.strip()
-        and settings.META_CAPI_ACCESS_TOKEN.strip()
-        and settings.MARKETING_PSEUDONYM_SECRET.strip()
+        and settings.META_CAPI_ACCESS_TOKEN.get_secret_value().strip()
+        and settings.MARKETING_PSEUDONYM_SECRET.get_secret_value().strip()
         and _API_VERSION.fullmatch(settings.META_CAPI_API_VERSION.strip())
     )
 
@@ -78,6 +78,7 @@ async def enqueue_meta_conversion(
         }
 
     values = {
+        "user_id": user.id,
         "event_id": event_id,
         "event_name": event_name,
         "payload": payload,
@@ -129,6 +130,19 @@ async def enqueue_meta_conversion_safely(
         return False
 
 
+async def cancel_pending_meta_conversions(db: AsyncSession, *, user_id, reason: str) -> int:
+    """Cancel unsent events when measurement consent or the account is withdrawn."""
+    result = await db.execute(
+        update(MetaConversionOutbox)
+        .where(
+            MetaConversionOutbox.user_id == user_id,
+            MetaConversionOutbox.status.in_(("pending", "retry")),
+        )
+        .values(status="cancelled", last_error=reason[:255])
+    )
+    return int(result.rowcount or 0)
+
+
 @asynccontextmanager
 async def _dispatch_client(client: httpx.AsyncClient | None) -> AsyncIterator[httpx.AsyncClient]:
     if client is not None:
@@ -145,7 +159,7 @@ async def dispatch_pending_meta_conversions(
     limit: int = 100,
 ) -> dict[str, int]:
     """Deliver one due batch; Postgres workers skip rows locked by another dispatcher."""
-    stats = {"sent": 0, "retried": 0, "failed": 0}
+    stats = {"sent": 0, "retried": 0, "failed": 0, "cancelled": 0, "unsupported": 0}
     if not _meta_configured():
         return stats
     if limit < 1 or limit > 100:
@@ -160,10 +174,36 @@ async def dispatch_pending_meta_conversions(
         )
         .order_by(MetaConversionOutbox.next_attempt_at, MetaConversionOutbox.created_at)
         .limit(limit)
-        .with_for_update(skip_locked=True)
     )
+    dialect = db.get_bind().dialect.name
+    if dialect == "postgresql":
+        statement = statement.with_for_update(skip_locked=True)
     rows = list(await db.scalars(statement))
     if not rows:
+        return stats
+
+    deliverable = []
+    for row in rows:
+        user_statement = select(User).where(User.id == row.user_id)
+        if dialect == "postgresql":
+            user_statement = user_statement.with_for_update()
+        user = await db.scalar(user_statement)
+        if user is None or user.marketing_measurement_consented_at is None or user.plan == "deleted":
+            row.status = "cancelled"
+            row.last_error = "consent_revoked"
+            stats["cancelled"] += 1
+        else:
+            deliverable.append(row)
+
+    if dialect != "postgresql":
+        stats["unsupported"] = 1
+        if stats["cancelled"]:
+            await db.commit()
+        else:
+            await db.rollback()
+        return stats
+    if not deliverable:
+        await db.commit()
         return stats
 
     url = (
@@ -174,8 +214,8 @@ async def dispatch_pending_meta_conversions(
         async with _dispatch_client(client) as http_client:
             response = await http_client.post(
                 url,
-                json={"data": [row.payload for row in rows]},
-                headers={"Authorization": f"Bearer {settings.META_CAPI_ACCESS_TOKEN.strip()}"},
+                json={"data": [row.payload for row in deliverable]},
+                headers={"Authorization": f"Bearer {settings.META_CAPI_ACCESS_TOKEN.get_secret_value().strip()}"},
                 timeout=_DISPATCH_TIMEOUT_SECONDS,
             )
             response.raise_for_status()
@@ -183,7 +223,7 @@ async def dispatch_pending_meta_conversions(
         # Exception messages may echo request data or credentials. Persist only
         # a bounded diagnostic code; detailed context stays in protected logs.
         error = exc.__class__.__name__[:255]
-        for row in rows:
+        for row in deliverable:
             row.attempts += 1
             row.last_attempt_at = attempted_at
             row.last_error = error
@@ -197,7 +237,7 @@ async def dispatch_pending_meta_conversions(
         await db.commit()
         return stats
 
-    for row in rows:
+    for row in deliverable:
         row.attempts += 1
         row.status = "sent"
         row.last_attempt_at = attempted_at

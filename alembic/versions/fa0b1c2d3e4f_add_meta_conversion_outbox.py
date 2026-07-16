@@ -22,6 +22,7 @@ def upgrade() -> None:
     op.create_table(
         "meta_conversion_outbox",
         sa.Column("id", sa.Uuid(), nullable=False),
+        sa.Column("user_id", sa.Uuid(), nullable=False),
         sa.Column("event_id", sa.String(length=100), nullable=False),
         sa.Column("event_name", sa.String(length=50), nullable=False),
         sa.Column("payload", payload_type, nullable=False),
@@ -34,9 +35,10 @@ def upgrade() -> None:
         sa.Column("sent_at", sa.DateTime(timezone=True), nullable=True),
         sa.CheckConstraint("attempts >= 0", name="ck_meta_outbox_attempts_nonnegative"),
         sa.CheckConstraint(
-            "status IN ('pending', 'retry', 'sent', 'failed')",
+            "status IN ('pending', 'retry', 'sent', 'failed', 'cancelled')",
             name="ck_meta_outbox_status",
         ),
+        sa.ForeignKeyConstraint(["user_id"], ["users.id"], ondelete="CASCADE"),
         sa.PrimaryKeyConstraint("id"),
         sa.UniqueConstraint("event_id", name="uq_meta_conversion_outbox_event_id"),
     )
@@ -46,8 +48,15 @@ def upgrade() -> None:
         ["status", "next_attempt_at"],
         unique=False,
     )
+    op.create_index(
+        "ix_meta_outbox_user_status",
+        "meta_conversion_outbox",
+        ["user_id", "status"],
+        unique=False,
+    )
 
 
 def downgrade() -> None:
+    op.drop_index("ix_meta_outbox_user_status", table_name="meta_conversion_outbox")
     op.drop_index("ix_meta_outbox_dispatch", table_name="meta_conversion_outbox")
     op.drop_table("meta_conversion_outbox")

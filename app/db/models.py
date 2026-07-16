@@ -228,12 +228,17 @@ class MetaConversionOutbox(Base):
 
     __tablename__ = "meta_conversion_outbox"
     __table_args__ = (
-        CheckConstraint("status IN ('pending', 'retry', 'sent', 'failed')", name="ck_meta_outbox_status"),
+        CheckConstraint(
+            "status IN ('pending', 'retry', 'sent', 'failed', 'cancelled')",
+            name="ck_meta_outbox_status",
+        ),
         CheckConstraint("attempts >= 0", name="ck_meta_outbox_attempts_nonnegative"),
         Index("ix_meta_outbox_dispatch", "status", "next_attempt_at"),
+        Index("ix_meta_outbox_user_status", "user_id", "status"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(GUID(), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(GUID(), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     event_id: Mapped[str] = mapped_column(String(100), unique=True, nullable=False)
     event_name: Mapped[str] = mapped_column(String(50), nullable=False)
     payload: Mapped[dict] = mapped_column(JsonType, nullable=False)

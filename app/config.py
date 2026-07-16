@@ -3,7 +3,7 @@ from pathlib import Path
 from typing import Literal
 from urllib.parse import urlsplit
 
-from pydantic import field_validator
+from pydantic import SecretStr, field_validator
 from pydantic_settings import BaseSettings
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -223,11 +223,11 @@ class Settings(BaseSettings):
     # NEXT_PUBLIC_ANALYTICS_ENABLED=true. The 14-day gate requires both flags.
     ANALYTICS_FRONTEND_ENABLED: bool = False
     ANALYTICS_RATE_LIMIT: str = "30/minute"
-    MARKETING_EXPORT_TOKEN: str = ""
-    MARKETING_PSEUDONYM_SECRET: str = ""
+    MARKETING_EXPORT_TOKEN: SecretStr = SecretStr("")
+    MARKETING_PSEUDONYM_SECRET: SecretStr = SecretStr("")
     META_CAPI_ENABLED: bool = False
     META_CAPI_PIXEL_ID: str = ""
-    META_CAPI_ACCESS_TOKEN: str = ""
+    META_CAPI_ACCESS_TOKEN: SecretStr = SecretStr("")
     META_CAPI_API_VERSION: str = ""
     # Ledger append-only permanece em shadow ate sete reconciliacoes diarias
     # consecutivas sem diferenca. `enforce` e bloqueado no startup sem esse gate.
@@ -283,6 +283,29 @@ def validate_production_settings(s: Settings) -> None:
         backend_host = urlsplit(s.BACKEND_URL).hostname
         if not backend_host or backend_host not in trusted_hosts:
             raise ValueError("TRUSTED_HOSTS deve incluir o host exato de BACKEND_URL")
+        marketing_secrets = {
+            "MARKETING_EXPORT_TOKEN": s.MARKETING_EXPORT_TOKEN.get_secret_value().strip(),
+            "MARKETING_PSEUDONYM_SECRET": s.MARKETING_PSEUDONYM_SECRET.get_secret_value().strip(),
+            "META_CAPI_ACCESS_TOKEN": s.META_CAPI_ACCESS_TOKEN.get_secret_value().strip(),
+        }
+        for key, value in marketing_secrets.items():
+            if value and len(value) < 32:
+                raise ValueError(f"{key} deve ter pelo menos 32 caracteres em producao")
+        if marketing_secrets["MARKETING_EXPORT_TOKEN"] and not marketing_secrets["MARKETING_PSEUDONYM_SECRET"]:
+            raise ValueError("MARKETING_PSEUDONYM_SECRET e obrigatorio quando MARKETING_EXPORT_TOKEN esta configurado")
+        meta_api_version = s.META_CAPI_API_VERSION.strip()
+        meta_api_version_valid = (
+            meta_api_version.startswith("v")
+            and meta_api_version.count(".") == 1
+            and all(part.isdigit() for part in meta_api_version[1:].split("."))
+        )
+        if s.META_CAPI_ENABLED and not (
+            s.META_CAPI_PIXEL_ID.strip()
+            and marketing_secrets["META_CAPI_ACCESS_TOKEN"]
+            and marketing_secrets["MARKETING_PSEUDONYM_SECRET"]
+            and meta_api_version_valid
+        ):
+            raise ValueError("META_CAPI_ENABLED exige pixel, access token, pseudonym secret e API version validos")
     warn_keys = ("OPEN_ROUTER_API_KEY", "PEXELS_API_KEY", "GROQ_API_KEY", "OPENAI_API_KEY", "ELEVENLABS_API_KEY")
     for key in warn_keys:
         if not getattr(s, key):

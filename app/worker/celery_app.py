@@ -39,6 +39,10 @@ celery_app.conf.update(
             "task": "reconcile_payment_checkout_dispatches",
             "schedule": timedelta(minutes=5),
         },
+        "dispatch-meta-conversions": {
+            "task": "dispatch_meta_conversions",
+            "schedule": timedelta(minutes=5),
+        },
         "reconcile-credit-ledger": {
             "task": "reconcile_credit_ledger",
             "schedule": crontab(hour=5, minute=0),

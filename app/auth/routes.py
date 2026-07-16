@@ -40,7 +40,7 @@ from app.auth.turnstile import verify_turnstile
 from app.config import settings
 from app.db.engine import get_db
 from app.db.models import CreditPurchase, Job, MarketingOffer, PasswordResetToken, User
-from app.marketing.meta_capi import enqueue_meta_conversion_safely
+from app.marketing.meta_capi import cancel_pending_meta_conversions, enqueue_meta_conversion_safely
 from app.observability import record_credit_metric
 from app.payments.states import canonical_payment_state
 from app.services.acquisition_rewards import (
@@ -559,11 +559,13 @@ async def delete_account(
     user.plan = "deleted"
     user.credits = 0
     user.email_verified = False
+    user.marketing_measurement_consented_at = None
     user.verification_code = None
     user.verification_expires = None
     user.password_hash = hash_password(secrets.token_urlsafe(32))
     now = datetime.now(timezone.utc)
     user.password_reset_at = now
+    await cancel_pending_meta_conversions(db, user_id=user.id, reason="account_deleted")
     await invalidate_password_reset_tokens(db, user_id=user.id, used_at=now)
     await db.commit()
 
