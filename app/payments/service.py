@@ -18,6 +18,7 @@ from app.analytics.service import append_server_event_safely
 from app.config import settings
 from app.credits import public_package_intent
 from app.db.models import CreditPurchase, ProcessedPaymentEvent, User
+from app.marketing.meta_capi import enqueue_meta_conversion_safely
 from app.observability import record_credit_metric
 from app.payments.schemas import CREDIT_PACKAGES  # noqa: F401 - compatibility export
 from app.payments.snapshot import validate_snapshot_metadata
@@ -261,6 +262,13 @@ async def _apply_payment_event(
                             },
                             idempotency_key=f"purchase:{purchase.id}:paid",
                             occurred_at=event_at,
+                        )
+                        await enqueue_meta_conversion_safely(
+                            db,
+                            user=analytics_user,
+                            event_name="Purchase",
+                            event_id=f"purchase:{purchase.id}:paid",
+                            value_brl=Decimal(purchase.price_brl) / 100,
                         )
                     if delta:
                         await append_server_event_safely(

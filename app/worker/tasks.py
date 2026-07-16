@@ -1112,6 +1112,14 @@ async def _reconcile_payment_checkout_dispatches_async() -> dict[str, int]:
     return await reconcile_checkout_dispatches(worker_session)
 
 
+async def _dispatch_meta_conversions_async() -> dict[str, int]:
+    from app.db.engine import worker_session
+    from app.marketing.meta_capi import dispatch_pending_meta_conversions
+
+    async with worker_session() as session:
+        return await dispatch_pending_meta_conversions(session)
+
+
 async def _reconcile_undispatched_job_operations_async() -> dict[str, int]:
     """Replay durable outbox rows, then close legacy pre-outbox operations."""
     from sqlalchemy import or_, select
@@ -1756,6 +1764,11 @@ def reconcile_undispatched_job_operations() -> dict[str, int]:
 @celery_app.task(name="reconcile_payment_checkout_dispatches")
 def reconcile_payment_checkout_dispatches() -> dict[str, int]:
     return asyncio.run(_reconcile_payment_checkout_dispatches_async())
+
+
+@celery_app.task(name="dispatch_meta_conversions")
+def dispatch_meta_conversions() -> dict[str, int]:
+    return asyncio.run(_dispatch_meta_conversions_async())
 
 
 @celery_app.task(name="drain_refine_balance_outbox")

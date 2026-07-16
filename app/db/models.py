@@ -16,6 +16,7 @@ from sqlalchemy import (
     func,
     text,
 )
+from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
@@ -222,6 +223,43 @@ class ProcessedPaymentEvent(Base):
     processed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
+class MetaConversionOutbox(Base):
+    """Consent-gated, identifier-hashed Meta conversion awaiting delivery."""
+
+    __tablename__ = "meta_conversion_outbox"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('pending', 'retry', 'dispatching', 'sent', 'failed', 'cancelled')",
+            name="ck_meta_outbox_status",
+        ),
+        CheckConstraint("attempts >= 0", name="ck_meta_outbox_attempts_nonnegative"),
+        CheckConstraint(
+            "(status = 'dispatching' AND lease_token IS NOT NULL AND lease_until IS NOT NULL) "
+            "OR (status <> 'dispatching' AND lease_token IS NULL AND lease_until IS NULL)",
+            name="ck_meta_outbox_lease_state",
+        ),
+        Index("ix_meta_outbox_dispatch", "status", "next_attempt_at"),
+        Index("ix_meta_outbox_user_status", "user_id", "status"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(GUID(), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(GUID(), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    event_id: Mapped[str] = mapped_column(String(100), unique=True, nullable=False)
+    event_name: Mapped[str] = mapped_column(String(50), nullable=False)
+    payload: Mapped[dict] = mapped_column(JsonType, nullable=False)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="pending", server_default="pending")
+    attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    next_attempt_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    last_attempt_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_error: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    lease_token: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    lease_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
 class CreditAdjustment(Base):
     """Auditoria de ajuste manual de creditos pelo admin (e dinheiro: quem, quanto, por que)."""
 
@@ -237,8 +275,116 @@ class CreditAdjustment(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
+class MarketingOffer(Base):
+    """A durable acquisition offer resolved at registration time."""
+
+    __tablename__ = "marketing_offers"
+    __table_args__ = (
+        CheckConstraint("bonus_credits > 0", name="ck_marketing_offer_bonus_positive"),
+        Index("ix_marketing_offers_active_code", "is_active", "code"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(GUID(), primary_key=True, default=uuid.uuid4)
+    code: Mapped[str] = mapped_column(String(100), unique=True, nullable=False)
+    bonus_credits: Mapped[int] = mapped_column(Integer, nullable=False)
+    is_active: Mapped[bool] = mapped_column(default=True, server_default="true", nullable=False)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+class AcquisitionReward(Base):
+    """One append-only acquisition or sharing reward for a user."""
+
+    __tablename__ = "acquisition_rewards"
+    __table_args__ = (
+        CheckConstraint(
+            "reward_type IN ('campaign_signup', 'referral_activation', 'social_share')",
+            name="ck_acquisition_reward_type",
+        ),
+        CheckConstraint("credits > 0", name="ck_acquisition_reward_credits_positive"),
+        UniqueConstraint("user_id", "reward_type", name="uq_acquisition_reward_user_type"),
+        Index(
+            "uq_acquisition_reward_user_acquisition",
+            "user_id",
+            unique=True,
+            postgresql_where=text("reward_type IN ('campaign_signup', 'referral_activation')"),
+            sqlite_where=text("reward_type IN ('campaign_signup', 'referral_activation')"),
+        ),
+        Index("ix_acquisition_rewards_type_occurred", "reward_type", "occurred_at"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(GUID(), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(GUID(), ForeignKey("users.id", ondelete="RESTRICT"), nullable=False)
+    reward_type: Mapped[str] = mapped_column(String(30), nullable=False)
+    credits: Mapped[int] = mapped_column(Integer, nullable=False)
+    marketing_offer_id: Mapped[uuid.UUID | None] = mapped_column(
+        GUID(), ForeignKey("marketing_offers.id", ondelete="RESTRICT"), nullable=True
+    )
+    source_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        GUID(), ForeignKey("users.id", ondelete="RESTRICT"), nullable=True
+    )
+    completed_job_id: Mapped[uuid.UUID | None] = mapped_column(
+        GUID(), ForeignKey("jobs.id", ondelete="RESTRICT"), nullable=True
+    )
+    occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class PublicVideoShare(Base):
+    """Revocable public capability for one completed, owner-controlled video."""
+
+    __tablename__ = "public_video_shares"
+    __table_args__ = (
+        CheckConstraint(
+            "(active = true AND revoked_at IS NULL) OR (active = false AND revoked_at IS NOT NULL)",
+            name="ck_public_video_share_revocation_state",
+        ),
+        Index(
+            "uq_public_video_shares_active_job",
+            "job_id",
+            unique=True,
+            postgresql_where=text("active = true"),
+            sqlite_where=text("active = 1"),
+        ),
+        Index("ix_public_video_shares_owner_created", "owner_id", "created_at"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(GUID(), primary_key=True, default=uuid.uuid4)
+    job_id: Mapped[uuid.UUID] = mapped_column(GUID(), ForeignKey("jobs.id", ondelete="RESTRICT"), nullable=False)
+    owner_id: Mapped[uuid.UUID] = mapped_column(GUID(), ForeignKey("users.id", ondelete="RESTRICT"), nullable=False)
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
+    active: Mapped[bool] = mapped_column(default=True, server_default="true", nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class PublicShareVisit(Base):
+    """One qualified, pseudonymous visit; raw network addresses are never stored."""
+
+    __tablename__ = "public_share_visits"
+    __table_args__ = (
+        UniqueConstraint(
+            "share_id",
+            "anonymous_session_id",
+            name="uq_public_share_visit_session",
+        ),
+        CheckConstraint(
+            "user_agent_classification IN ('browser', 'bot', 'unknown')",
+            name="ck_public_share_visit_user_agent_classification",
+        ),
+        Index("ix_public_share_visits_share_visited", "share_id", "visited_at"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(GUID(), primary_key=True, default=uuid.uuid4)
+    share_id: Mapped[uuid.UUID] = mapped_column(
+        GUID(), ForeignKey("public_video_shares.id", ondelete="RESTRICT"), nullable=False
+    )
+    anonymous_session_id: Mapped[uuid.UUID] = mapped_column(GUID(), nullable=False)
+    user_agent_classification: Mapped[str] = mapped_column(String(20), nullable=False)
+    visited_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
 class ReferralCreditAward(Base):
-    """One durable, idempotent credit award for a verified referred user."""
+    """Historical record of the retired verified-referral credit policy."""
 
     __tablename__ = "referral_credit_awards"
     __table_args__ = (
@@ -301,6 +447,37 @@ class CreditLedgerReconciliationRun(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
 
+@event.listens_for(Engine, "connect")
+def _install_sqlite_ledger_context_functions(dbapi_connection, _connection_record) -> None:
+    if "sqlite" not in type(dbapi_connection).__module__.lower():
+        return
+    context: dict[str, str | None] = {}
+
+    def set_context(origin, reason, idempotency_key, purchase_id, job_id, operation_id):
+        context.update(
+            {
+                "origin": origin,
+                "reason": reason,
+                "idempotency_key": idempotency_key,
+                "purchase_id": purchase_id,
+                "job_id": job_id,
+                "operation_id": operation_id,
+            }
+        )
+        return 1
+
+    def get_context(key):
+        return context.get(key)
+
+    def clear_context():
+        context.clear()
+        return 1
+
+    dbapi_connection.create_function("clipia_set_credit_context", 6, set_context)
+    dbapi_connection.create_function("clipia_get_credit_context", 1, get_context)
+    dbapi_connection.create_function("clipia_clear_credit_context", 0, clear_context)
+
+
 _SQLITE_LEDGER_TRIGGER_DDLS = (
     DDL(
         """
@@ -328,15 +505,25 @@ _SQLITE_LEDGER_TRIGGER_DDLS = (
         WHEN NEW.credits <> OLD.credits
         BEGIN
             INSERT INTO credit_ledger_entries (
-                id, user_id, delta, origin, reason, idempotency_key,
+                id, user_id, delta, origin, purchase_id, job_id, operation_id,
+                reason, idempotency_key,
                 balance_after, created_at
             ) VALUES (
                 lower(hex(randomblob(4))) || '-' || lower(hex(randomblob(2))) || '-' ||
                 lower(hex(randomblob(2))) || '-' || lower(hex(randomblob(2))) || '-' ||
                 lower(hex(randomblob(6))), NEW.id, NEW.credits - OLD.credits,
-                'unclassified', 'unclassified projection mutation',
-                'shadow:' || lower(hex(randomblob(16))), NEW.credits, CURRENT_TIMESTAMP
+                COALESCE(clipia_get_credit_context('origin'), 'unclassified'),
+                clipia_get_credit_context('purchase_id'),
+                clipia_get_credit_context('job_id'),
+                clipia_get_credit_context('operation_id'),
+                COALESCE(clipia_get_credit_context('reason'), 'unclassified projection mutation'),
+                COALESCE(
+                    clipia_get_credit_context('idempotency_key'),
+                    'shadow:' || lower(hex(randomblob(16)))
+                ),
+                NEW.credits, CURRENT_TIMESTAMP
             );
+            SELECT clipia_clear_credit_context();
         END
         """
     ).execute_if(dialect="sqlite"),
@@ -384,7 +571,8 @@ class AnalyticsEvent(Base):
             "'onboarding_step_viewed', 'editor_opened', 'user_registered', "
             "'email_verified', 'generation_requested', 'generation_completed', "
             "'generation_failed', 'video_exported', 'checkout_started', "
-            "'payment_completed', 'credit_balance_changed', 'second_generation_requested')",
+            "'payment_completed', 'credit_balance_changed', 'second_generation_requested', "
+            "'share_page_published', 'share_page_visited', 'social_share_rewarded')",
             name="ck_analytics_event_name",
         ),
         CheckConstraint("schema_version = 1", name="ck_analytics_schema_version"),
@@ -482,12 +670,17 @@ class User(Base):
     utm_source: Mapped[str | None] = mapped_column(String(100), nullable=True)
     utm_medium: Mapped[str | None] = mapped_column(String(100), nullable=True)
     utm_campaign: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    utm_content: Mapped[str | None] = mapped_column(String(100), nullable=True)
     selected_package: Mapped[str | None] = mapped_column(String(20), nullable=True)
     otp_attempts: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     referral_code: Mapped[str] = mapped_column(
         String(12), unique=True, nullable=False, default=lambda: uuid.uuid4().hex[:8]
     )
     referred_by: Mapped[uuid.UUID | None] = mapped_column(GUID(), ForeignKey("users.id"), nullable=True)
+    acquisition_offer_id: Mapped[uuid.UUID | None] = mapped_column(
+        GUID(), ForeignKey("marketing_offers.id", ondelete="RESTRICT"), nullable=True
+    )
+    marketing_measurement_consented_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     password_reset_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     # LGPD: comprovante de consentimento expresso no cadastro (Termos + Política de Privacidade).
     consented_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

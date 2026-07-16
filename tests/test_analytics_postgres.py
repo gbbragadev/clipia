@@ -15,6 +15,7 @@ from app.analytics.schemas import AnalyticsBatch
 from app.analytics.service import ingest_client_events
 from app.config import settings
 from app.db.models import AnalyticsEvent
+from tests.migration_contract import EXPECTED_ALEMBIC_HEAD
 
 _ADMIN_DSN = os.getenv(
     "POSTGRES_PAYMENT_TEST_ADMIN_DSN",
@@ -121,6 +122,6 @@ def test_postgres_analytics_concurrency_append_only_and_migration_round_trip(mon
         assert asyncio.run(inspect_state()) == ("e1f2a3b4c5d6", False, False)
 
         command.upgrade(config, "head")
-        assert asyncio.run(inspect_state()) == ("d7e8f9a0b1c2", True, True)
+        assert asyncio.run(inspect_state()) == (EXPECTED_ALEMBIC_HEAD, True, True)
     finally:
         asyncio.run(_drop_database(database_name))

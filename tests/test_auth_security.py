@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 import pytest
 from jose import jwt
@@ -47,6 +48,11 @@ async def test_register_records_lgpd_consent_audit_trail(client, db_session):
     assert user.consent_ip, "Deve registrar IP do consentimento."
     assert user.consent_terms_version == settings.TERMS_VERSION
     assert user.consent_privacy_version == settings.PRIVACY_VERSION
+    assert settings.TERMS_VERSION == settings.PRIVACY_VERSION == "2026-07-16"
+    effective_date = datetime.fromisoformat(settings.TERMS_VERSION).strftime("%d/%m/%Y")
+    root = Path(__file__).resolve().parents[1]
+    assert effective_date in (root / "frontend/src/app/termos/page.tsx").read_text(encoding="utf-8")
+    assert effective_date in (root / "frontend/src/app/privacidade/page.tsx").read_text(encoding="utf-8")
 
 
 @pytest.mark.asyncio

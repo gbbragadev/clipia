@@ -7,6 +7,8 @@ from alembic.migration import MigrationContext
 from alembic.operations import Operations
 from alembic.script import ScriptDirectory
 
+from tests.migration_contract import EXPECTED_ALEMBIC_HEAD
+
 
 def _load_migration():
     migrations = list(Path("alembic/versions").glob("*_add_selected_package_intent.py"))
@@ -21,7 +23,7 @@ def _load_migration():
 def test_selected_package_migration_is_expansive_successor_with_one_head(monkeypatch):
     migration = _load_migration()
     assert migration.down_revision == "d0e1f2a3b4c5"
-    assert ScriptDirectory.from_config(Config("alembic.ini")).get_heads() == ["d7e8f9a0b1c2"]
+    assert ScriptDirectory.from_config(Config("alembic.ini")).get_heads() == [EXPECTED_ALEMBIC_HEAD]
 
     engine = sa.create_engine("sqlite:///:memory:")
     metadata = sa.MetaData()

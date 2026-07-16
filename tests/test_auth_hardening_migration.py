@@ -7,6 +7,8 @@ from alembic.migration import MigrationContext
 from alembic.operations import Operations
 from alembic.script import ScriptDirectory
 
+from tests.migration_contract import EXPECTED_ALEMBIC_HEAD
+
 
 def _load_migration():
     migrations = list(Path("alembic/versions").glob("*_add_one_time_reset_and_consent_versions.py"))
@@ -21,7 +23,7 @@ def _load_migration():
 def test_auth_hardening_migration_is_expansive_and_round_trips_on_sqlite(monkeypatch):
     migration = _load_migration()
     assert migration.down_revision == "f3a4b5c6d7e8"
-    assert ScriptDirectory.from_config(Config("alembic.ini")).get_heads() == ["d7e8f9a0b1c2"]
+    assert ScriptDirectory.from_config(Config("alembic.ini")).get_heads() == [EXPECTED_ALEMBIC_HEAD]
 
     engine = sa.create_engine("sqlite:///:memory:")
     metadata = sa.MetaData()

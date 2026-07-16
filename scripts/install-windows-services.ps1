@@ -38,7 +38,7 @@ function Install-ClipiaService {
 Install-ClipiaService `
     -Name "clipia-backend" `
     -Exe "$pythonExe" `
-    -Arguments "-m uvicorn app.main:app --host 127.0.0.1 --port 8005" `
+    -Arguments "-m uvicorn app.main:app --host 127.0.0.1 --port 8005 --no-access-log" `
     -WorkDir $root
 
 Install-ClipiaService `

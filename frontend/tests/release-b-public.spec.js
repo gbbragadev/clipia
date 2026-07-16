@@ -700,7 +700,10 @@ test('cadastro e verificacao mantem pacote valido ate a selecao anterior ao chec
   await page.locator('#name').fill('QA Package')
   await page.locator('#email').fill('qa-package@clipia.com.br')
   await page.locator('#password').fill('SenhaQa123!')
-  await page.locator('input[type="checkbox"]').check()
+  const marketingConsent = page.getByRole('checkbox', { name: /Medição opcional/ })
+  await expect(marketingConsent).not.toBeChecked()
+  await page.getByRole('checkbox', { name: /Li e aceito os Termos de Uso/ }).check()
+  await expect(marketingConsent).not.toBeChecked()
   await page.locator('form button[type="submit"]').click()
 
   await expect(page).toHaveURL(/\/auth\/verify\?/)
@@ -709,8 +712,9 @@ test('cadastro e verificacao mantem pacote valido ate a selecao anterior ao chec
     utm_source: 'google',
     utm_medium: 'cpc',
     utm_campaign: 'criadores-faceless',
+    utm_content: 'register-content',
+    marketing_measurement_consent: false,
   })
-  expect(registerPayload).not.toHaveProperty('utm_content')
   expect(registerPayload).not.toHaveProperty('utm_term')
   expect(registerPayload).not.toHaveProperty('utm_id')
   expect(
@@ -782,11 +786,15 @@ test('cadastro ignora selected_package desconhecido', async ({ page }) => {
   await page.locator('#name').fill('QA Invalid')
   await page.locator('#email').fill('qa-invalid@clipia.com.br')
   await page.locator('#password').fill('SenhaQa123!')
-  await page.locator('input[type="checkbox"]').check()
+  const marketingConsent = page.getByRole('checkbox', { name: /Medição opcional/ })
+  await expect(marketingConsent).not.toBeChecked()
+  await page.getByRole('checkbox', { name: /Li e aceito os Termos de Uso/ }).check()
+  await expect(marketingConsent).not.toBeChecked()
   await page.locator('form button[type="submit"]').click()
 
   await expect(page).toHaveURL(/\/auth\/verify\?/)
   expect(registerPayload).not.toHaveProperty('selected_package')
+  expect(registerPayload).toMatchObject({ marketing_measurement_consent: false })
   expect(new URL(page.url()).searchParams.has('selected_package')).toBe(false)
 })
 

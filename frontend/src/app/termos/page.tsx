@@ -18,7 +18,7 @@ export default function TermosPage() {
   return (
     <div className="max-w-3xl mx-auto px-4 py-16 prose prose-invert prose-a:text-coral">
       <h1 className="text-3xl font-bold mb-8">Termos de Uso</h1>
-      <p className="text-slate-400 mb-8">Data de vigência: 02/07/2026</p>
+      <p className="text-slate-400 mb-8">Data de vigência: 16/07/2026</p>
 
       <h2>1. Aceitação dos Termos</h2>
       <p>
@@ -42,6 +42,17 @@ export default function TermosPage() {
       <p>
         Os créditos adquiridos <strong>não expiram</strong>. Quanto a reembolsos e estornos, observamos o seguinte:
       </p>
+      <p>
+        Em uma <strong>oferta de campanha</strong> identificada no cadastro, as condições exibidas na página da
+        campanha prevalecem para contas elegíveis. Na oferta creator20_v1, a confirmação do e-mail libera 20 créditos
+        no total: 2 créditos de boas-vindas e 18 créditos promocionais. O benefício é concedido uma vez por conta e não
+        acumula com recompensa de ativação por indicação.
+      </p>
+      <p>
+        Na <strong>indicação</strong>, apenas a pessoa que indicou recebe +18 créditos, depois que a pessoa convidada
+        verificar o e-mail e concluir o primeiro vídeo. A pessoa convidada recebe os créditos normais aplicáveis ao seu
+        próprio cadastro; não prometemos crédito extra para ambos.
+      </p>
       <ul>
         <li><strong>Estorno / chargeback:</strong> caso o pagamento seja revertido pelo provedor, pelo seu banco ou por decisão do intermediador (evento de <em>refund</em> ou <em>chargeback</em> junto ao Stripe ou ao Mercado Pago), os créditos correspondentes àquela compra são <strong>automaticamente revertidos</strong> da sua conta de forma idempotente, pelo mesmo valor creditado originalmente.</li>
         <li><strong>Uso já consumido:</strong> créditos gastos na geração de vídeos (bens digitais entregues e consumidos) <strong>não geram reembolso discricionário</strong>. Esta plataforma entrega conteúdo digital gerado sob demanda, imediatamente consumível, o que caracteriza exceção ao direito de arrependimento prevista no art. 49 do CDC para bens digitais já fornecidos e consumidos.</li>
@@ -50,7 +61,16 @@ export default function TermosPage() {
 
       <h2>5. Conteúdo Gerado e Direitos Autorais</h2>
       <p>
-        Os vídeos gerados através da plataforma são de propriedade do usuário. No entanto, o usuário concorda em conceder ao ClipIA uma licença irrevogável para usar vídeos gerados de forma anonimizada para fins de showcase, marketing e exibição na plataforma (exceto se o usuário expressamente solicitar opt-out).
+        Os vídeos gerados através da plataforma são de propriedade do usuário. Um vídeo de conta não é exposto
+        automaticamente: o <strong>compartilhamento público</strong> depende de uma ação expressa do usuário para criar
+        o link. Enquanto o link estiver ativo, qualquer pessoa que o possua poderá assistir ao vídeo. O usuário pode
+        revogar o link no painel, interrompendo o acesso público por aquele endereço.
+      </p>
+      <p>
+        Para proteger o programa contra abuso, uma visualização do link público só é qualificada depois de pelo menos
+        5 segundos com a página visível. Visitas repetidas da mesma sessão anônima, acessos do proprietário e tráfego
+        automatizado podem ser desconsiderados. Uma visualização elegível pode liberar a recompensa de compartilhamento
+        prevista nas regras vigentes, limitada pelos controles de unicidade do programa.
       </p>
 
       <h2>6. Uso Aceitável</h2>

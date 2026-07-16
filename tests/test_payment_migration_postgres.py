@@ -9,6 +9,7 @@ from alembic import command
 from alembic.config import Config
 
 from app.config import settings
+from tests.migration_contract import EXPECTED_ALEMBIC_HEAD
 
 _ADMIN_DSN = os.getenv(
     "POSTGRES_PAYMENT_TEST_ADMIN_DSN",
@@ -188,7 +189,7 @@ def test_postgres_migration_upgrades_from_dispatch_outbox_head(monkeypatch):
             dispatch_indexes,
             dispatch_constraints,
         ) = asyncio.run(inspect_migration())
-        assert revision == "d7e8f9a0b1c2"
+        assert revision == EXPECTED_ALEMBIC_HEAD
         assert {"payment_state", "currency", "snapshot_version", "snapshot_hash"} <= columns
         assert "uq_credit_purchase_provider_checkout" in indexes
         assert "mp_preference_id IS NOT NULL" in indexes["uq_credit_purchase_provider_checkout"]
@@ -281,7 +282,7 @@ def test_postgres_selected_package_upgrade_downgrade_upgrade_from_payment_head(m
 
         command.upgrade(config, "head")
         revision, column_exists, constraint = asyncio.run(selected_package_state())
-        assert revision == "d7e8f9a0b1c2"
+        assert revision == EXPECTED_ALEMBIC_HEAD
         assert column_exists is True
         assert constraint is not None and "professional" in constraint
         assert asyncio.run(existing_balance()) == 77
@@ -295,7 +296,7 @@ def test_postgres_selected_package_upgrade_downgrade_upgrade_from_payment_head(m
 
         command.upgrade(config, "head")
         revision, column_exists, constraint = asyncio.run(selected_package_state())
-        assert revision == "d7e8f9a0b1c2"
+        assert revision == EXPECTED_ALEMBIC_HEAD
         assert column_exists is True
         assert constraint is not None and "professional" in constraint
         assert asyncio.run(existing_balance()) == 77

@@ -33,9 +33,15 @@ class RegisterRequest(BaseModel):
     name: str = Field(..., min_length=1, max_length=255, description="Full name")
     password: str = Field(..., min_length=8, max_length=255, description="Password (min 8 chars, 1 uppercase, 1 digit)")
     referral_code: str | None = Field(default=None, max_length=12, description="Referral code from inviter")
+    offer_code: str | None = Field(default=None, max_length=100, description="Optional acquisition campaign offer")
+    marketing_measurement_consent: bool = Field(
+        default=False,
+        description="Optional consent for marketing measurement independent from legal terms acceptance",
+    )
     utm_source: str | None = Field(default=None, max_length=100)
     utm_medium: str | None = Field(default=None, max_length=100)
     utm_campaign: str | None = Field(default=None, max_length=100)
+    utm_content: str | None = Field(default=None, max_length=100)
     selected_package: PublicPackageIntent | None = Field(
         default=None,
         description="Optional public package intent to resume after email verification",
@@ -57,6 +63,12 @@ class RegisterRequest(BaseModel):
     @classmethod
     def normalize_name(cls, value: str) -> str:
         return value.strip()
+
+    @field_validator("offer_code", mode="before")
+    @classmethod
+    def normalize_offer_code(cls, value: str | None) -> str | None:
+        normalized = value.strip().lower() if value else None
+        return normalized or None
 
     @field_validator("password")
     @classmethod

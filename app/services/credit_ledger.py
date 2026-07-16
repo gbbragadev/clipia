@@ -30,9 +30,9 @@ async def set_credit_ledger_context(
 ) -> None:
     """Attach ledger metadata to subsequent credit mutations in this transaction.
 
-    PostgreSQL triggers consume transaction-local settings. SQLite intentionally
-    keeps generic metadata: its triggers exist to prove coverage and append-only
-    behavior in isolated tests, not to emulate connection-local PostgreSQL state.
+    PostgreSQL triggers consume transaction-local settings. SQLite triggers
+    consume connection-local UDF-backed context and clear it after the credit
+    mutation writes its ledger entry.
     """
 
     if not _ORIGIN_RE.fullmatch(origin):
@@ -42,7 +42,28 @@ async def set_credit_ledger_context(
     if not idempotency_key or len(idempotency_key) > 255:
         raise ValueError("invalid credit ledger idempotency key")
 
-    if session.get_bind().dialect.name != "postgresql":
+    dialect = session.get_bind().dialect.name
+    if dialect == "sqlite":
+        await session.execute(
+            text(
+                """
+                SELECT clipia_set_credit_context(
+                    :origin, :reason, :idempotency_key,
+                    :purchase_id, :job_id, :operation_id
+                )
+                """
+            ),
+            {
+                "origin": origin,
+                "reason": reason,
+                "idempotency_key": idempotency_key,
+                "purchase_id": _normalize_uuid(purchase_id) or None,
+                "job_id": _normalize_uuid(job_id) or None,
+                "operation_id": _normalize_uuid(operation_id) or None,
+            },
+        )
+        return
+    if dialect != "postgresql":
         return
 
     await session.execute(

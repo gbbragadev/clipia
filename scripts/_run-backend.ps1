@@ -7,7 +7,7 @@ $root = 'C:\Dev\clipia'
 $env:ENVIRONMENT = 'production'
 Set-Location $root
 while ($true) {
-    & .\.venv312\Scripts\python.exe -m uvicorn app.main:app --host 127.0.0.1 --port 8005 *>&1 | Out-File -Append -Encoding utf8 "$root\storage\backend.log"
+    & .\.venv312\Scripts\python.exe -m uvicorn app.main:app --host 127.0.0.1 --port 8005 --no-access-log *>&1 | Out-File -Append -Encoding utf8 "$root\storage\backend.log"
     Add-Content -Path "$root\storage\backend.log" -Value "$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') Backend encerrou. Reiniciando em 5s..."
     Start-Sleep 5
 }

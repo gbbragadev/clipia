@@ -2,10 +2,11 @@
 
 import { useState, useRef, useEffect, useCallback } from 'react'
 import { AnimatePresence } from 'motion/react'
-import { Loader2, Play } from 'lucide-react'
+import { Check, Copy, Link2Off, Loader2, Play, Share2 } from 'lucide-react'
 import { strings } from '@/lib/strings';
 import { ACTIVE_JOB_STATUSES, STEP_LABELS, type JobSummary } from '@/lib/editor-api'
 import { downloadAuthenticatedFile, fetchAuthenticatedBlobUrl } from '@/lib/download'
+import { canManagePublicShare, createPublicShare, revokePublicShare, type PublicShareCreated } from '@/lib/public-shares'
 import { GlowCard } from '@/components/ui/GlowCard'
 import { StatusBadge, jobStatusBadge } from '@/components/ui/StatusBadge'
 import { useToast } from '@/components/ui/feedback'
@@ -67,6 +68,9 @@ export default function VideoCard({ job, onEdit, onCancel }: VideoCardProps) {
   const [showPlayer, setShowPlayer] = useState(false)
   const [downloading, setDownloading] = useState(false)
   const [dlProgress, setDlProgress] = useState<number | null>(null)
+  const [publicShare, setPublicShare] = useState<PublicShareCreated | null>(null)
+  const [sharing, setSharing] = useState(false)
+  const [shareCopied, setShareCopied] = useState(false)
   const badge = jobStatusBadge(job.status)
   const gradient = STYLE_GRADIENTS[job.style] || 'from-gray-900/40 to-gray-800/40'
   const icon = STYLE_ICONS[job.style] || '🎬'
@@ -151,6 +155,46 @@ export default function VideoCard({ job, onEdit, onCancel }: VideoCardProps) {
       setDlProgress(null)
     }
   }, [job.download_url, job.job_id, downloading, toastSuccess, toastError])
+
+  const handlePublishShare = useCallback(async () => {
+    if (sharing) return
+    setSharing(true)
+    try {
+      const created = await createPublicShare(job.job_id)
+      setPublicShare(created)
+      toastSuccess('Link público criado', 'O vídeo agora pode ser visto por quem receber este link.')
+    } catch (err) {
+      toastError('Falha ao publicar', err instanceof Error ? err.message : 'Tente novamente em instantes.')
+    } finally {
+      setSharing(false)
+    }
+  }, [job.job_id, sharing, toastError, toastSuccess])
+
+  const handleCopyShare = useCallback(async () => {
+    if (!publicShare) return
+    try {
+      await navigator.clipboard.writeText(publicShare.url)
+      setShareCopied(true)
+      window.setTimeout(() => setShareCopied(false), 2000)
+    } catch {
+      toastError('Não foi possível copiar', 'Selecione o link e copie manualmente.')
+    }
+  }, [publicShare, toastError])
+
+  const handleRevokeShare = useCallback(async () => {
+    if (!publicShare || sharing) return
+    setSharing(true)
+    try {
+      await revokePublicShare(job.job_id)
+      setPublicShare(null)
+      setShareCopied(false)
+      toastSuccess('Link revogado', 'O vídeo deixou de estar disponível nesse endereço.')
+    } catch (err) {
+      toastError('Falha ao revogar', err instanceof Error ? err.message : 'Tente novamente em instantes.')
+    } finally {
+      setSharing(false)
+    }
+  }, [job.job_id, publicShare, sharing, toastError, toastSuccess])
 
   return (
     <GlowCard intensity={0.2} className="h-full">
@@ -316,6 +360,53 @@ export default function VideoCard({ job, onEdit, onCancel }: VideoCardProps) {
           )}
 
           {/* Confirmação de cancelamento */}
+          {canManagePublicShare(job) && (
+            <div className="mt-3 rounded-xl border border-white/10 bg-white/[0.035] p-3">
+              <p className="text-[11px] leading-relaxed text-slate-400">
+                Só fica público quando você publicar. Quem tiver o link poderá assistir até você revogá-lo.
+              </p>
+              {publicShare ? (
+                <>
+                  <input
+                    readOnly
+                    value={publicShare.url}
+                    aria-label="Link público do vídeo"
+                    className="mt-2 w-full truncate rounded-lg border border-white/10 bg-black/20 px-3 py-2 text-[11px] text-slate-300"
+                  />
+                  <div className="mt-2 flex gap-2">
+                    <button
+                      type="button"
+                      onClick={handleCopyShare}
+                      className="flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-azure/15 px-2 py-2 text-xs font-semibold text-azure hover:bg-azure/25 transition"
+                    >
+                      {shareCopied ? <Check size={13} /> : <Copy size={13} />}
+                      {shareCopied ? 'Link copiado' : 'Copiar link'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleRevokeShare}
+                      disabled={sharing}
+                      className="flex flex-1 items-center justify-center gap-1.5 rounded-lg border border-red-500/25 bg-red-500/10 px-2 py-2 text-xs font-semibold text-red-300 hover:bg-red-500/20 disabled:opacity-60 transition"
+                    >
+                      {sharing ? <Loader2 size={13} className="animate-spin" /> : <Link2Off size={13} />}
+                      Revogar link
+                    </button>
+                  </div>
+                </>
+              ) : (
+                <button
+                  type="button"
+                  onClick={handlePublishShare}
+                  disabled={sharing}
+                  className="mt-2 flex w-full items-center justify-center gap-1.5 rounded-lg border border-white/10 bg-white/10 px-3 py-2 text-xs font-semibold text-white hover:bg-white/15 disabled:opacity-60 transition"
+                >
+                  {sharing ? <Loader2 size={13} className="animate-spin" /> : <Share2 size={13} />}
+                  {sharing ? 'Publicando…' : 'Publicar link'}
+                </button>
+              )}
+            </div>
+          )}
+
           {confirmCancel && canCancel && (
             <div className="mt-2 rounded-lg border border-red-500/30 bg-red-500/5 p-3">
               <p className="text-xs text-red-200/80 mb-2">
