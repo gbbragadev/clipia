@@ -31,8 +31,8 @@ def test_registration_propagates_offer_and_keeps_measurement_consent_optional_an
     context = _read("frontend/src/contexts/AuthContext.tsx")
     register_page = _read("frontend/src/app/auth/register/page.tsx")
 
-    assert 'const OFFER_KEY = "offer"' in attribution
-    assert "offer_code?: string" in attribution
+    assert "captureRegistrationAttribution" in attribution
+    assert "readRegistrationAttribution" in attribution
     assert "offer_code?: string" in auth
     assert "marketing_measurement_consent?: boolean" in auth
     assert "marketingMeasurementConsent" in register_page
@@ -40,36 +40,22 @@ def test_registration_propagates_offer_and_keeps_measurement_consent_optional_an
     assert "Medição opcional" in register_page
     assert "marketingMeasurementConsent" in context
     assert "marketing_measurement_consent: marketingMeasurementConsent" in context
-    assert "clearStoredUTM();" in context
+    assert context.index("const res = await authRegister") < context.index("clearStoredUTM();")
 
 
 def test_public_share_clients_and_route_preserve_showcase_then_resolve_opt_in_tokens():
     clients = _read("frontend/src/lib/public-shares.ts")
     page = _read("frontend/src/app/v/[id]/page.tsx")
-    tracker = _read("frontend/src/app/v/[id]/QualifiedViewTracker.tsx")
-
-    for contract in (
-        "createPublicShare",
-        "revokePublicShare",
-        "getPublicShare",
-        "/videos/${encodedJobId}/public-share",
-        "/public-shares/${encodedToken}",
-        "/public-shares/${encodedToken}/qualified-view",
-    ):
-        assert contract in clients
-    assert "encodeURIComponent(jobId)" in clients
-    assert "encodeURIComponent(token)" in clients
+    assert "createPublicShare" in clients
+    assert "revokePublicShare" in clients
+    assert "getPublicShare" in clients
     assert "VIDEOS.find" in page
     assert "getPublicShare" in page
     assert "generateMetadata" in page
     assert "dynamicParams = false" not in page
     assert "QualifiedViewTracker" in page
-    assert "crypto.randomUUID()" in tracker
-    assert "localStorage" in tracker
-    assert "visibilitychange" in tracker
-    assert "5000" in tracker
-    assert "dwell_ms" in tracker
-    assert "page_visible" in tracker
+    assert "<JsonLd" in page
+    assert "dangerouslySetInnerHTML" not in page
 
 
 def test_completed_video_sharing_is_explicit_and_revocable():

@@ -6,9 +6,10 @@ import { cache } from "react";
 import Logo from "@/components/brand/Logo";
 import { FREE_CLAIM } from "@/components/landing/lib/data";
 import { Button } from "@/components/landing/ui/Button";
+import { JsonLd } from "@/components/StructuredData/JsonLd";
 import { ApiError } from "@/lib/http";
 import { getPublicShare } from "@/lib/public-shares";
-import { canonicalUrl } from "@/lib/site";
+import { buildShareJsonLd, buildShareMetadata, getShareDisplayTitle } from "@/lib/public-share-presentation";
 import showcase from "../../../../public/showcase/showcase.json";
 import QualifiedViewTracker from "./QualifiedViewTracker";
 
@@ -41,7 +42,8 @@ const resolveVideo = cache(async (id: string): Promise<ResolvedVideo | null> => 
     if (!publicShare.active) return null;
     return {
       id,
-      title: publicShare.title,
+      // O topic livre do job não entra em metadata, JSON-LD nem markup público.
+      title: "Vídeo publicado com ClipIA",
       template: "vídeo publicado",
       niche: "conteúdo de criador",
       // O navegador recebe apenas a rota pública; nenhum caminho de armazenamento é exposto.
@@ -60,36 +62,7 @@ export async function generateMetadata({
   const { id } = await params;
   const video = await resolveVideo(id);
   if (!video) return {};
-
-  const title = `${video.title} — feito com ClipIA`;
-  const description =
-    video.kind === "showcase"
-      ? "Vídeo vertical gerado e editado no ClipIA: roteiro, narração em português e legendas sincronizadas. Crie o seu grátis."
-      : "Assista a um vídeo que um criador decidiu publicar com o ClipIA e transforme sua própria ideia em vídeo.";
-  const pageUrl = canonicalUrl(`/v/${id}`);
-  const ogImage = video.kind === "showcase" ? `/showcase/og/${video.id}.jpg` : "/og-image.png";
-
-  return {
-    title,
-    description,
-    alternates: { canonical: pageUrl },
-    openGraph: {
-      title,
-      description,
-      type: "video.other",
-      url: pageUrl,
-      siteName: "ClipIA",
-      locale: "pt_BR",
-      images: [{ url: ogImage, width: 1200, height: 630, alt: video.title }],
-      videos: [{ url: canonicalUrl(video.video), type: "video/mp4" }],
-    },
-    twitter: {
-      card: "summary_large_image",
-      title,
-      description,
-      images: [ogImage],
-    },
-  };
+  return buildShareMetadata(video);
 }
 
 export default async function SharePage({ params }: PageProps<"/v/[id]">) {
@@ -99,27 +72,12 @@ export default async function SharePage({ params }: PageProps<"/v/[id]">) {
 
   const cta = `/auth/register?utm_source=share&utm_medium=organic&utm_campaign=v-page&utm_content=${encodeURIComponent(video.id)}`;
   const isShowcase = video.kind === "showcase";
+  const displayTitle = getShareDisplayTitle(video);
 
   return (
     <div className="flex min-h-screen flex-col bg-ink text-cloud antialiased">
       {!isShowcase && <QualifiedViewTracker token={video.id} />}
-      <script
-        type="application/ld+json"
-        dangerouslySetInnerHTML={{
-          __html: JSON.stringify({
-            "@context": "https://schema.org",
-            "@type": "VideoObject",
-            name: video.title,
-            description: isShowcase
-              ? `Vídeo vertical de ${video.niche} gerado e editado no ClipIA (template ${video.template}).`
-              : "Vídeo publicado pelo próprio criador por meio de um link público opt-in do ClipIA.",
-            thumbnailUrl: isShowcase ? canonicalUrl(`/showcase/og/${video.id}.jpg`) : canonicalUrl("/og-image.png"),
-            contentUrl: canonicalUrl(video.video),
-            ...(isShowcase ? { uploadDate: "2026-04-04" } : {}),
-            inLanguage: "pt-BR",
-          }),
-        }}
-      />
+      <JsonLd data={buildShareJsonLd(video)} />
       <header className="flex items-center justify-between px-5 py-4 sm:px-8">
         <Link href="/" aria-label="ClipIA — início">
           <Logo />
@@ -139,7 +97,7 @@ export default async function SharePage({ params }: PageProps<"/v/[id]">) {
                 controls
                 playsInline
                 preload="metadata"
-                aria-label={video.title}
+                aria-label={displayTitle}
                 className="absolute inset-0 h-full w-full object-cover"
               />
             </div>
@@ -147,7 +105,7 @@ export default async function SharePage({ params }: PageProps<"/v/[id]">) {
         </div>
 
         <h1 className="mt-6 max-w-md text-balance text-center text-2xl font-bold leading-tight">
-          {video.title}
+          {displayTitle}
         </h1>
         <p className="mt-2 flex items-center gap-2 text-sm text-mist">
           <span className="h-1.5 w-1.5 rounded-full bg-coral" />

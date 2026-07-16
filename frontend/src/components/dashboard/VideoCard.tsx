@@ -6,7 +6,7 @@ import { Check, Copy, Link2Off, Loader2, Play, Share2 } from 'lucide-react'
 import { strings } from '@/lib/strings';
 import { ACTIVE_JOB_STATUSES, STEP_LABELS, type JobSummary } from '@/lib/editor-api'
 import { downloadAuthenticatedFile, fetchAuthenticatedBlobUrl } from '@/lib/download'
-import { createPublicShare, revokePublicShare, type PublicShareCreated } from '@/lib/public-shares'
+import { canManagePublicShare, createPublicShare, revokePublicShare, type PublicShareCreated } from '@/lib/public-shares'
 import { GlowCard } from '@/components/ui/GlowCard'
 import { StatusBadge, jobStatusBadge } from '@/components/ui/StatusBadge'
 import { useToast } from '@/components/ui/feedback'
@@ -360,7 +360,7 @@ export default function VideoCard({ job, onEdit, onCancel }: VideoCardProps) {
           )}
 
           {/* Confirmação de cancelamento */}
-          {job.status === 'completed' && job.download_url && (
+          {canManagePublicShare(job) && (
             <div className="mt-3 rounded-xl border border-white/10 bg-white/[0.035] p-3">
               <p className="text-[11px] leading-relaxed text-slate-400">
                 Só fica público quando você publicar. Quem tiver o link poderá assistir até você revogá-lo.
