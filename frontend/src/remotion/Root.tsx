@@ -26,6 +26,10 @@ const defaultProps: CompositionData = {
   ],
   sceneOrder: [0, 1, 2, 3, 4],
   narrationStale: false,
+  editRevision: 0,
+  renderedRevision: 0,
+  renderingRevision: null,
+  renderedAt: null,
   words: [
     { word: 'Voce', start: 0.0, end: 0.3 },
     { word: 'sabia', start: 0.3, end: 0.78 },

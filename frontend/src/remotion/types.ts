@@ -77,6 +77,14 @@ export interface CompositionData {
   layoutType?: LayoutType
   pendingCredits?: number
   watermark?: string
+  /** Incrementa a cada alteração de conteúdo no editor. */
+  editRevision: number
+  /** Última revisão incorporada ao MP4 publicado. */
+  renderedRevision: number
+  /** Revisão capturada pelo render em andamento, se houver. */
+  renderingRevision: number | null
+  /** Instante ISO observado quando o MP4 desta revisão ficou pronto. */
+  renderedAt: string | null
 }
 
 export const DEFAULT_SUBTITLE_STYLE: SubtitleStyle = {

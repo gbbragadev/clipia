@@ -48,7 +48,19 @@ async function installEditorHarness(page) {
     scenes,
     sceneOrder: [0, 1, 2],
     narrationStale: false,
+    editRevision: 0,
+    renderedRevision: 0,
+    renderingRevision: null,
+    renderedAt: '2026-07-15T12:00:00.000Z',
   }
+  let jobStatus = {
+    status: 'completed',
+    progress: 1,
+    detail: 'Render concluido.',
+    error: '',
+    pending_credits: 0,
+  }
+  let renderCalls = 0
 
   await page.route('**/api/v1/jobs/job-editor/composition', (route) => {
     const physicalMedia = ['/test-media-0.png', '/test-media-1.png', '/test-media-2.png']
@@ -95,6 +107,27 @@ async function installEditorHarness(page) {
     })
   })
 
+  await page.route('**/api/v1/jobs/job-editor/status', (route) => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify(jobStatus),
+  }))
+
+  await page.route('**/api/v1/jobs/job-editor/render', (route) => {
+    renderCalls += 1
+    jobStatus = {
+      ...jobStatus,
+      status: 'rendering',
+      progress: 0.42,
+      detail: 'Renderizando com Remotion... 42%',
+    }
+    return route.fulfill({
+      status: 202,
+      contentType: 'application/json',
+      body: JSON.stringify({ status: 'rendering' }),
+    })
+  })
+
   await page.route('**/test-narration.wav', (route) => route.fulfill({
     status: 200,
     contentType: 'audio/wav',
@@ -109,7 +142,18 @@ async function installEditorHarness(page) {
     })
   })
 
-  return { getSavedComposition: () => savedComposition }
+  return {
+    getSavedComposition: () => savedComposition,
+    getRenderCalls: () => renderCalls,
+    completeRender: () => {
+      jobStatus = {
+        ...jobStatus,
+        status: 'completed',
+        progress: 1,
+        detail: 'Re-render concluido.',
+      }
+    },
+  }
 }
 
 test('desktop exposes filmstrips and a narration waveform', async ({ page }) => {
@@ -148,6 +192,9 @@ test('desktop zooms, reorders, autosaves and undoes one scene move', async ({ pa
 
   await page.getByRole('button', { name: 'Mover cena 3 para trás' }).click()
   await expect.poll(() => harness.getSavedComposition().sceneOrder).toEqual([0, 2, 1])
+  await page.getByRole('button', { name: /Exportar/i }).click()
+  await expect(page.getByText(/texto ou a ordem das cenas mudou/i)).toBeVisible()
+  await page.getByRole('button', { name: 'Fechar', exact: true }).click()
   await expect(page.getByText(/narração desatualizada/i)).toBeVisible()
 
   await page.getByRole('button', { name: 'Desfazer' }).click()
@@ -193,3 +240,48 @@ for (const width of [320, 390, 393]) {
     expect(viewportMetrics.scrollWidth).toBe(viewportMetrics.clientWidth)
   })
 }
+
+test('export reflects persistent revisions, free cost and real render progress', async ({ page }) => {
+  const harness = await installEditorHarness(page)
+
+  await page.goto('/editor/job-editor')
+  await page.getByRole('button', { name: /Exportar/i }).click()
+  await expect(page.getByRole('button', { name: /Baixar vídeo atual/i })).toBeVisible()
+  await expect(page.locator('.export-status__body')).toHaveText(/Revisão 0.*renderizada/i)
+  await expect(page.getByRole('button', { name: /Aplicar edições/i })).toHaveCount(0)
+  await page.getByRole('button', { name: 'Fechar', exact: true }).click()
+
+  await page.getByRole('button', { name: /Elementos/i }).click()
+  const musicGroup = page.getByRole('radiogroup', { name: /Trilha sonora/i })
+  await expect(musicGroup).toBeVisible()
+  const track = musicGroup.getByRole('radio', { name: /Lo-Fi Chill.*Relaxante/i })
+  await expect(track).toHaveAttribute('aria-checked', 'false')
+  await expect(page.getByRole('button', { name: /Ouvir prévia de Lo-Fi Chill/i })).toBeVisible()
+  await track.click()
+  await expect(track).toHaveAttribute('aria-checked', 'true')
+  await expect.poll(() => harness.getSavedComposition().musicAssetId).toBe('lofi-chill')
+
+  await page.getByRole('button', { name: /Exportar/i }).click()
+  await expect(page.getByText(/Grátis.*saldo não será alterado/i)).toBeVisible()
+  await expect(page.getByRole('button', { name: /Baixar versão anterior/i })).toBeVisible()
+  await page.getByRole('button', { name: /Aplicar edições e renderizar/i }).click()
+  await expect.poll(() => harness.getRenderCalls()).toBe(1)
+
+  await page.getByRole('button', { name: 'Fechar', exact: true }).click()
+  await page.getByRole('button', { name: /Exportar/i }).click()
+  const progress = page.getByRole('progressbar', { name: /Progresso da renderização/i })
+  await expect(progress).toHaveAttribute('aria-valuenow', '42')
+  await expect(page.getByText('42%', { exact: true })).toBeVisible()
+
+  harness.completeRender()
+  await expect(page.getByRole('button', { name: /Baixar vídeo atual/i })).toBeVisible({ timeout: 6000 })
+  await expect(page.locator('.export-status__body')).toHaveText(/Revisão 1.*Renderizado agora/i)
+  await expect(page.getByRole('button', { name: /Aplicar edições/i })).toHaveCount(0)
+
+  await page.getByRole('button', { name: 'Fechar', exact: true }).click()
+  await page.getByRole('button', { name: /Exportar/i }).click()
+  await expect(page.getByRole('button', { name: /Baixar vídeo atual/i })).toBeVisible()
+  await expect(page.locator('.export-status__body')).toHaveText(/Revisão 1.*Renderizad[oa]/i)
+  await expect(page.getByRole('button', { name: /Aplicar edições/i })).toHaveCount(0)
+  expect(harness.getRenderCalls()).toBe(1)
+})

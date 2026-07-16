@@ -4,6 +4,7 @@ import { getToken } from '@/lib/auth'
 import { fetchAuthenticatedBlobUrl } from '@/lib/download'
 import { fetchJson, readApiError } from '@/lib/http'
 import { normalizeSceneOrder } from '@/lib/editor-timeline'
+import { normalizeRenderRevision } from '@/lib/editor-render-revision'
 
 const API_BASE = '/api/v1'
 
@@ -39,6 +40,7 @@ export async function fetchComposition(jobId: string): Promise<CompositionData> 
 
   // Restore from saved editor_state if available
   const saved = data.editor_state?.composition as Partial<CompositionData> | undefined
+  const renderRevision = normalizeRenderRevision(saved, saved !== undefined)
   const scenes = (data.script.scenes ?? []).map((scene) => ({
     ...scene,
     keywords_en: scene.keywords_en ?? [],
@@ -72,6 +74,7 @@ export async function fetchComposition(jobId: string): Promise<CompositionData> 
     templateId: data.template_id || 'stock_narration',
     layoutType: (data.layout_type as import('@/remotion/types').LayoutType) || 'fullscreen',
     pendingCredits: data.pending_credits || 0,
+    ...renderRevision,
   }
 }
 

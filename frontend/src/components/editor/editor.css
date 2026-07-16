@@ -388,6 +388,7 @@
 .export-status--ready { border-color: rgba(16,185,129,0.25); background: rgba(16,185,129,0.08); color: #6ee7b7; }
 .export-status--error { border-color: rgba(239,68,68,0.25); background: rgba(239,68,68,0.08); color: #fca5a5; }
 .export-status__body { flex: 1; min-width: 0; }
+.export-status__note { margin-top: 3px; font-size: 11px; color: rgba(255,255,255,0.58); }
 .export-status__spinner { flex-shrink: 0; margin-top: 2px; animation: spin 0.9s linear infinite; }
 .export-status__retry {
   margin-left: auto; flex-shrink: 0; border: none; border-radius: 6px;
@@ -400,6 +401,8 @@
   height: 4px; width: 100%; margin-top: 8px;
   border-radius: 999px; overflow: hidden; background: rgba(255,255,255,0.08);
 }
+.export-progress__label { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.export-progress__label strong { flex-shrink: 0; font-variant-numeric: tabular-nums; }
 .export-progress__fill {
   height: 100%; width: 100%; border-radius: 999px;
   background: linear-gradient(90deg, var(--color-coral), var(--color-azure, #3e9bff));
@@ -420,6 +423,9 @@
 .export-download--previous { background: rgba(255,255,255,0.08); color: rgba(255,255,255,0.75); border: 1px solid rgba(255,255,255,0.12); }
 .export-download--previous:hover:not(:disabled) { background: rgba(255,255,255,0.12); opacity: 1; }
 .export-download__hint { font-size: 11px; font-weight: 400; color: rgba(255,255,255,0.4); margin: -6px 0 12px; text-align: center; }
+.export-cost-free {
+  margin: 0 0 10px; color: #6ee7b7; font-size: 12px; font-weight: 600; text-align: center;
+}
 
 .export-stale {
   border: 1px solid rgba(245,158,11,0.3); background: rgba(245,158,11,0.1);
