@@ -5,6 +5,7 @@ import json
 import logging
 import os
 import re
+import socket
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -12,10 +13,12 @@ from pathlib import Path
 import asyncpg
 import pytest
 import sqlalchemy as sa
+import uvicorn
 from alembic import command
 from alembic.config import Config
 from alembic.migration import MigrationContext
 from alembic.operations import Operations
+from httpx import AsyncClient
 from pydantic import ValidationError
 from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
@@ -29,6 +32,13 @@ from app.db import models
 from app.public_shares.service import create_public_share, record_qualified_view
 
 _BROWSER_HEADERS = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/126.0"}
+_REPO_ROOT = Path(__file__).resolve().parents[1]
+_DIRECT_UVICORN_LAUNCHERS = (
+    "Dockerfile",
+    "scripts/start-all.ps1",
+    "scripts/install-windows-services.ps1",
+    "scripts/_run-backend.ps1",
+)
 
 
 async def _completed_job(test_db, job_factory, *, user_id=None, topic="Video publico"):
@@ -506,6 +516,69 @@ async def test_public_share_access_logs_redact_capability_and_omit_raw_ip(
     assert normal_payload["client_ip"] == "203.0.113.77"
 
 
+def test_controlled_uvicorn_launcher_inventory_disables_builtin_access_log():
+    for relative_path in _DIRECT_UVICORN_LAUNCHERS:
+        source = (_REPO_ROOT / relative_path).read_text(encoding="utf-8")
+        commands = [
+            line for line in source.splitlines() if re.search(r"\buvicorn\b.*\bapp\.main:app\b", line, re.IGNORECASE)
+        ]
+        assert commands, f"missing inventoried Uvicorn command in {relative_path}"
+        assert all("--no-access-log" in command for command in commands), relative_path
+
+    delegates = {
+        "docker-compose.yml": "build: .",
+        "scripts/start-production.ps1": "_run-backend.ps1",
+        "scripts/restart-backend-only.ps1": "_run-backend.ps1",
+    }
+    for relative_path, expected_delegate in delegates.items():
+        source = (_REPO_ROOT / relative_path).read_text(encoding="utf-8")
+        assert expected_delegate in source
+
+
+@pytest.mark.asyncio
+async def test_configured_uvicorn_server_emits_only_redacted_middleware_access_log(app, caplog):
+    launcher = (_REPO_ROOT / "scripts/_run-backend.ps1").read_text(encoding="utf-8")
+    access_log_enabled = "--no-access-log" not in launcher
+    capability = "sensitive-public-share-capability-token"
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    sock.bind(("127.0.0.1", 0))
+    sock.listen(128)
+    port = sock.getsockname()[1]
+    config = uvicorn.Config(
+        app,
+        host="127.0.0.1",
+        port=port,
+        access_log=access_log_enabled,
+        lifespan="off",
+        log_config=None,
+    )
+    server = uvicorn.Server(config)
+
+    caplog.clear()
+    with caplog.at_level(logging.INFO):
+        server_task = asyncio.create_task(server.serve(sockets=[sock]))
+        try:
+            for _ in range(200):
+                if server.started:
+                    break
+                await asyncio.sleep(0.01)
+            assert server.started
+            async with AsyncClient(base_url=f"http://127.0.0.1:{port}") as network_client:
+                response = await network_client.get(f"/api/v1/public-shares/{capability}")
+            assert response.status_code == 404
+        finally:
+            server.should_exit = True
+            await asyncio.wait_for(server_task, timeout=5)
+            sock.close()
+
+    uvicorn_access = [record.getMessage() for record in caplog.records if record.name == "uvicorn.access"]
+    middleware_access = [record.getMessage() for record in caplog.records if record.name == "clipia.access"]
+    assert uvicorn_access == []
+    assert any("/api/v1/public-shares/[redacted]" in message for message in middleware_access)
+    assert capability not in "\n".join(middleware_access)
+
+
 @pytest.mark.asyncio
 async def test_share_server_analytics_reject_arbitrary_properties(db_session, verified_user, monkeypatch):
     monkeypatch.setattr(settings, "ANALYTICS_ENABLED", True)
@@ -558,12 +631,32 @@ def test_sqlite_f9_upgrade_and_downgrade_enforce_share_uniqueness():
     migration = _load_public_share_migration()
     engine = sa.create_engine("sqlite://")
     metadata = sa.MetaData()
-    users = sa.Table("users", metadata, sa.Column("id", sa.Uuid(), primary_key=True))
+    users = sa.Table(
+        "users",
+        metadata,
+        sa.Column("id", sa.Uuid(), primary_key=True),
+        sa.Column("credits", sa.Integer(), nullable=False, server_default="5"),
+    )
     jobs = sa.Table(
         "jobs",
         metadata,
         sa.Column("id", sa.Uuid(), primary_key=True),
         sa.Column("user_id", sa.Uuid(), sa.ForeignKey(users.c.id), nullable=False),
+    )
+    credit_ledger_entries = sa.Table(
+        "credit_ledger_entries",
+        metadata,
+        sa.Column("id", sa.String(36), primary_key=True),
+        sa.Column("user_id", sa.Uuid(), sa.ForeignKey(users.c.id), nullable=False),
+        sa.Column("delta", sa.Integer(), nullable=False),
+        sa.Column("origin", sa.String(50), nullable=False),
+        sa.Column("purchase_id", sa.Uuid()),
+        sa.Column("job_id", sa.Uuid()),
+        sa.Column("operation_id", sa.Uuid()),
+        sa.Column("reason", sa.String(255), nullable=False),
+        sa.Column("idempotency_key", sa.String(255), nullable=False, unique=True),
+        sa.Column("balance_after", sa.Integer(), nullable=False),
+        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
     )
     sa.Table(
         "analytics_events",
@@ -576,6 +669,23 @@ def test_sqlite_f9_upgrade_and_downgrade_enforce_share_uniqueness():
     owner_id, job_id = uuid.uuid4(), uuid.uuid4()
     share_id, other_share_id = uuid.uuid4(), uuid.uuid4()
     with engine.begin() as connection:
+        connection.exec_driver_sql(
+            """
+            CREATE TRIGGER credit_ledger_users_update
+            AFTER UPDATE OF credits ON users
+            WHEN NEW.credits <> OLD.credits
+            BEGIN
+                INSERT INTO credit_ledger_entries (
+                    id, user_id, delta, origin, reason, idempotency_key,
+                    balance_after, created_at
+                ) VALUES (
+                    lower(hex(randomblob(16))), NEW.id, NEW.credits - OLD.credits,
+                    'unclassified', 'legacy trigger',
+                    'shadow:' || lower(hex(randomblob(16))), NEW.credits, CURRENT_TIMESTAMP
+                );
+            END
+            """
+        )
         operations = Operations(MigrationContext.configure(connection))
         migration.op = operations
         migration.upgrade()
@@ -591,9 +701,34 @@ def test_sqlite_f9_upgrade_and_downgrade_enforce_share_uniqueness():
         assert "share_page_visited" in analytics_check
         assert "social_share_rewarded" in analytics_check
         assert "public_share_published" not in analytics_check
+        contextual_trigger = connection.exec_driver_sql(
+            "SELECT sql FROM sqlite_master WHERE type = 'trigger' AND name = 'credit_ledger_users_update'"
+        ).scalar_one()
+        assert "clipia_get_credit_context" in contextual_trigger
 
         connection.execute(users.insert().values(id=owner_id))
         connection.execute(jobs.insert().values(id=job_id, user_id=owner_id))
+        operation_id = uuid.uuid4()
+        idempotency_key = f"acquisition:{owner_id}:social_share"
+        connection.exec_driver_sql(
+            "SELECT clipia_set_credit_context(?, ?, ?, ?, ?, ?)",
+            (
+                "social_share_reward",
+                "social_share acquisition reward",
+                idempotency_key,
+                None,
+                str(job_id),
+                str(operation_id),
+            ),
+        )
+        connection.execute(users.update().where(users.c.id == owner_id).values(credits=7))
+        ledger_row = connection.execute(sa.select(credit_ledger_entries)).mappings().one()
+        assert ledger_row["delta"] == 2
+        assert ledger_row["origin"] == "social_share_reward"
+        assert ledger_row["idempotency_key"] == idempotency_key
+        assert ledger_row["job_id"] == job_id
+        assert ledger_row["operation_id"] == operation_id
+        assert ledger_row["balance_after"] == 7
         shares = sa.table(
             "public_video_shares",
             sa.column("id", sa.Uuid()),
@@ -662,6 +797,11 @@ def test_sqlite_f9_upgrade_and_downgrade_enforce_share_uniqueness():
         migration.downgrade()
         assert "public_video_shares" not in sa.inspect(connection).get_table_names()
         assert "public_share_visits" not in sa.inspect(connection).get_table_names()
+        downgraded_trigger = connection.exec_driver_sql(
+            "SELECT sql FROM sqlite_master WHERE type = 'trigger' AND name = 'credit_ledger_users_update'"
+        ).scalar_one()
+        assert "clipia_get_credit_context" not in downgraded_trigger
+        assert "unclassified" in downgraded_trigger
 
 
 _POSTGRES_ADMIN_DSN = os.getenv(

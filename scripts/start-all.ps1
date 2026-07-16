@@ -33,7 +33,7 @@ Write-Host "[3/5] Aplicando migrations..." -ForegroundColor Cyan
 
 Write-Host "[4/5] Abrindo 3 terminais (backend, worker, frontend)..." -ForegroundColor Cyan
 
-$backendCmd = "cd '$root'; .\.venv312\Scripts\Activate.ps1; uvicorn app.main:app --reload --port 8005"
+$backendCmd = "cd '$root'; .\.venv312\Scripts\Activate.ps1; uvicorn app.main:app --reload --port 8005 --no-access-log"
 $workerCmd  = "cd '$root'; .\.venv312\Scripts\Activate.ps1; celery -A app.worker.celery_app worker -l info --concurrency=1 --pool=solo"
 $frontCmd   = "cd '$root\frontend'; npm run dev -- -p 3003"
 

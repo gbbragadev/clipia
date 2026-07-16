@@ -30,9 +30,9 @@ async def set_credit_ledger_context(
 ) -> None:
     """Attach ledger metadata to subsequent credit mutations in this transaction.
 
-    PostgreSQL triggers consume transaction-local settings. SQLite intentionally
-    keeps generic metadata: its triggers exist to prove coverage and append-only
-    behavior in isolated tests, not to emulate connection-local PostgreSQL state.
+    PostgreSQL triggers consume transaction-local settings. SQLite triggers
+    consume connection-local UDF-backed context and clear it after the credit
+    mutation writes its ledger entry.
     """
 
     if not _ORIGIN_RE.fullmatch(origin):
