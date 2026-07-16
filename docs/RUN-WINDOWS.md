@@ -83,6 +83,35 @@ Mapeamento (arquivo `~\.cloudflared\config.yml` ou via dashboard):
 
 Setup inicial do tunnel — ver Task Scheduler ou servico Windows (Task 17 do plano).
 
+## 4.1 Autorecuperacao da producao
+
+O boot no logon (`ClipIA Production`) nao basta para quedas que acontecem depois
+do login. Instale o watchdog completo uma vez:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\install-production-watchdog.ps1
+```
+
+A tarefa `ClipIA Production Watchdog` roda a cada 2 minutos e valida:
+
+- backend `:8005` e o payload de `/health/deep` (Postgres, Redis, storage e Celery);
+- frontend `:3003` e o build ativo apontado por `storage/frontend-active-build.txt`;
+- tunnel `clipia` e o dominio `https://clipia.com.br/`;
+- configuracao do tunnel apontando para a origem canonica `localhost:3003`.
+
+Quando necessario, reergue somente o launcher afetado. O watchdog antigo
+`ClipIA Tunnel Watchdog` e desativado pelo instalador para evitar reciclagem
+concorrente. Eventos ficam em `storage/production-watchdog.log`.
+
+Alertas de WhatsApp usam `CLIPIA_WPP_NUMBER`, `CLIPIA_WPP_KEY` e
+`CLIPIA_WPP_ENDPOINT`; na ausencia delas, reutilizam `TU_WPP_*`. Sem chave, o
+watchdog continua se recuperando e registra `ALERT-SKIP` no log.
+
+Limite fisico: Task Scheduler, watchdog e tunnel nao mantem o site online com o
+PC desligado ou sem energia. Para esse risco, usar UPS; quando o produto justificar
+o custo, migrar frontend/API/filas para um host 24x7 e deixar apenas o render GPU
+na maquina local.
+
 ## 5. Backup manual e restore
 
 Backup:
