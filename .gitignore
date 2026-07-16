@@ -39,7 +39,12 @@ pytestbasetemp-current/
 
 # Screenshots de smoke/evidencia das sessoes de agente (ficam so no disco)
 /*.png
+/*.jpeg
 /frontend/smoke-*.png
+
+# Artefatos locais de browser/QA e relatorios gerados
+.playwright-cli/
+outputs/
 
 # Evidencias de sessao (screenshots de smoke/QA na raiz do frontend)
 frontend/*.png
