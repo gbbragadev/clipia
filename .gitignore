@@ -43,8 +43,8 @@ pytestbasetemp-current/
 /frontend/smoke-*.png
 
 # Artefatos locais de browser/QA e relatorios gerados
-.playwright-cli/
-outputs/
+/.playwright-cli/
+/outputs/
 
 # Evidencias de sessao (screenshots de smoke/QA na raiz do frontend)
 frontend/*.png

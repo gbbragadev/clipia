@@ -94,8 +94,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts\install-production-w
 
 A tarefa `ClipIA Production Watchdog` roda a cada 2 minutos e valida:
 
-- backend `:8005` e o payload de `/health/deep` (Postgres, Redis, storage e Celery);
-- frontend `:3003` e o build ativo apontado por `storage/frontend-active-build.txt`;
+- backend `:8005` e o payload de `/health/deep` (Postgres, Redis, Celery e storage com `status=up` e `writable=true`);
+- frontend `:3003`, conferindo se o `BUILD_ID` apontado por `storage/frontend-active-build.txt` e realmente servido pela origem;
 - tunnel `clipia` e o dominio `https://clipia.com.br/`;
 - configuracao do tunnel apontando para a origem canonica `localhost:3003`.
 
@@ -104,8 +104,9 @@ Quando necessario, reergue somente o launcher afetado. O watchdog antigo
 concorrente. Eventos ficam em `storage/production-watchdog.log`.
 
 Alertas de WhatsApp usam `CLIPIA_WPP_NUMBER`, `CLIPIA_WPP_KEY` e
-`CLIPIA_WPP_ENDPOINT`; na ausencia delas, reutilizam `TU_WPP_*`. Sem chave, o
-watchdog continua se recuperando e registra `ALERT-SKIP` no log.
+`CLIPIA_WPP_ENDPOINT`; na ausencia delas, reutilizam `TU_WPP_*`. Sem chave ou
+numero configurado, o watchdog continua se recuperando e registra `ALERT-SKIP`
+no log.
 
 Limite fisico: Task Scheduler, watchdog e tunnel nao mantem o site online com o
 PC desligado ou sem energia. Para esse risco, usar UPS; quando o produto justificar

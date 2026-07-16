@@ -7,6 +7,7 @@ param(
 # a fonte canonica dos processos e este script apenas os reergue quando necessario.
 $ErrorActionPreference = "SilentlyContinue"
 $root = "C:\Dev\clipia"
+. (Join-Path $PSScriptRoot "watchdog-production-core.ps1")
 $logDir = Join-Path $root "storage"
 $eventLog = Join-Path $logDir "production-watchdog.log"
 $tunnelConfig = Join-Path $env:USERPROFILE ".cloudflared\clipia.yml"
@@ -17,7 +18,7 @@ foreach ($key in @("CLIPIA_WPP_NUMBER", "CLIPIA_WPP_KEY", "CLIPIA_WPP_ENDPOINT",
     if ($value) { Set-Item -Path "env:$key" -Value $value }
 }
 
-$wppNumber = if ($env:CLIPIA_WPP_NUMBER) { $env:CLIPIA_WPP_NUMBER } elseif ($env:TU_WPP_NUMBER) { $env:TU_WPP_NUMBER } else { "5545998296112" }
+$wppNumber = if ($env:CLIPIA_WPP_NUMBER) { $env:CLIPIA_WPP_NUMBER } else { $env:TU_WPP_NUMBER }
 $wppKey = if ($env:CLIPIA_WPP_KEY) { $env:CLIPIA_WPP_KEY } else { $env:TU_WPP_KEY }
 $wppEndpoint = if ($env:CLIPIA_WPP_ENDPOINT) { $env:CLIPIA_WPP_ENDPOINT } elseif ($env:TU_WPP_ENDPOINT) { $env:TU_WPP_ENDPOINT } else { "http://localhost:8081/message/sendText/grafana-alerts" }
 
@@ -80,12 +81,6 @@ function Stop-MatchingProcesses([string[]]$Patterns) {
     }
 }
 
-function Stop-PortOwner([int]$Port) {
-    Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue | ForEach-Object {
-        Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue
-    }
-}
-
 function Start-Launcher([string]$Name) {
     Start-Process powershell.exe -WindowStyle Hidden -ArgumentList `
         "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", (Join-Path $root "scripts\$Name")
@@ -93,7 +88,7 @@ function Start-Launcher([string]$Name) {
 
 function Restart-Backend {
     Stop-MatchingProcesses @("*_run-backend.ps1*", "*uvicorn app.main:app*--port 8005*")
-    Stop-PortOwner 8005
+    Stop-PortOwnerSafely -Port 8005 -Root $root
     Start-Sleep -Seconds 2
     Start-Launcher "_run-backend.ps1"
 }
@@ -106,7 +101,7 @@ function Restart-Worker {
 
 function Restart-Frontend {
     Stop-MatchingProcesses @("*_run-frontend.ps1*")
-    Stop-PortOwner 3003
+    Stop-PortOwnerSafely -Port 3003 -Root $root
     Start-Sleep -Seconds 2
     Start-Launcher "_run-frontend.ps1"
 }
@@ -160,8 +155,19 @@ if (-not (Test-Http "http://127.0.0.1:8005/health")) {
 
 $deepHealth = Get-DeepHealth
 if ($null -eq $deepHealth) {
-    $unresolved.Add("backend sem health profundo")
-} else {
+    $deepHealth = Repair-NullDeepHealth `
+        -EnsureContainers { Ensure-Containers } `
+        -RestartBackend { Restart-Backend; [void]$restarted.Add("backend :8005") } `
+        -WaitForBackend { Start-Sleep -Seconds 12 } `
+        -GetDeepHealth { Get-DeepHealth }
+    if ($null -ne $deepHealth) {
+        $restarted.Add("Postgres/Redis")
+    } else {
+        $unresolved.Add("backend sem health profundo apos recuperar dependencias")
+    }
+}
+
+if ($null -ne $deepHealth) {
     if ($deepHealth.checks.database.status -ne "up" -or $deepHealth.checks.redis.status -ne "up") {
         if (Ensure-Containers) {
             $restarted.Add("Postgres/Redis")
@@ -185,22 +191,33 @@ if ($null -eq $deepHealth) {
     if ($null -eq $deepHealth -or $deepHealth.checks.celery.status -ne "up") {
         $unresolved.Add("Celery segue indisponivel")
     }
+    if ($null -eq $deepHealth -or $deepHealth.checks.storage.status -ne "up" -or $deepHealth.checks.storage.writable -ne $true) {
+        $unresolved.Add("storage segue indisponivel ou somente leitura")
+    }
 }
 
 # Frontend local e a origem do tunnel. Um 200 apenas na landing nao mascara a
 # indisponibilidade do backend porque o health profundo foi validado acima.
-if (-not (Test-Http "http://127.0.0.1:3003/")) {
+$frontendHealthy = (Test-Http "http://127.0.0.1:3003/") -and (Test-FrontendActiveBuild -Root $root -ProbeBuild {
+    param($BuildId)
+    Test-Http "http://127.0.0.1:3003/_next/static/$BuildId/_buildManifest.js"
+})
+if (-not $frontendHealthy) {
     Restart-Frontend
     $restarted.Add("frontend :3003")
     Start-Sleep -Seconds 12
-    if (-not (Test-Http "http://127.0.0.1:3003/")) {
+    $frontendHealthy = (Test-Http "http://127.0.0.1:3003/") -and (Test-FrontendActiveBuild -Root $root -ProbeBuild {
+        param($BuildId)
+        Test-Http "http://127.0.0.1:3003/_next/static/$BuildId/_buildManifest.js"
+    })
+    if (-not $frontendHealthy) {
         $unresolved.Add("frontend segue indisponivel")
     }
 }
 
 # Nao reciclar tunnel quando a origem local esta fora. Isso evita o flap que
 # mascara falha de backend/frontend como se fosse Cloudflare.
-if (Test-Http "http://127.0.0.1:3003/") {
+if ($frontendHealthy) {
     if (-not (Test-TunnelConfig)) {
         $unresolved.Add("clipia.yml nao aponta para localhost:3003")
     } elseif (-not (Test-Http "https://clipia.com.br/")) {
