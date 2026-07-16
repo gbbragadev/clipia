@@ -14,7 +14,7 @@ export interface QualifiedViewClock {
 
 export interface QualifiedViewSchedulerOptions {
   token: string
-  anonymousSessionId: string
+  getAnonymousSessionId(): string
   clock: QualifiedViewClock
   transport(token: string, payload: QualifiedViewPayload): Promise<unknown>
   retryDelaysMs?: readonly number[]
@@ -53,7 +53,8 @@ export function isTransientQualifiedViewError(error: unknown): boolean {
 
 export class QualifiedViewScheduler {
   private token: string
-  private readonly anonymousSessionId: string
+  private readonly getAnonymousSessionId: QualifiedViewSchedulerOptions['getAnonymousSessionId']
+  private anonymousSessionId: string | null = null
   private readonly clock: QualifiedViewClock
   private readonly transport: QualifiedViewSchedulerOptions['transport']
   private readonly retryDelaysMs: readonly number[]
@@ -74,7 +75,7 @@ export class QualifiedViewScheduler {
 
   constructor(options: QualifiedViewSchedulerOptions) {
     this.token = options.token
-    this.anonymousSessionId = options.anonymousSessionId
+    this.getAnonymousSessionId = options.getAnonymousSessionId
     this.clock = options.clock
     this.transport = options.transport
     this.retryDelaysMs = options.retryDelaysMs ?? [500, 1500, 3000]
@@ -173,6 +174,9 @@ export class QualifiedViewScheduler {
     const token = this.token
     this.sending = true
     this.attempts += 1
+    if (this.anonymousSessionId === null) {
+      this.anonymousSessionId = this.getAnonymousSessionId()
+    }
     const payload: QualifiedViewPayload = {
       anonymous_session_id: this.anonymousSessionId,
       dwell_ms: Math.max(this.dwellMs, Math.round(this.visibleDwellMs)),

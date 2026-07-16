@@ -79,3 +79,32 @@ Initial result: `11 tests, 0 passed, 11 failed`. Each failure was an assertion t
 - `npx.cmd tsc --noEmit`: passed.
 - `$env:NEXT_DIST_DIR='.next-task3-review'; npx.cmd next build`: passed on Next.js 16.2.2; all 40 static pages generated and `/v/[id]` compiled.
 - The isolated build directory was removed and its generated `tsconfig.json` includes were reverted. `package-lock.json`, plan and progress were not changed.
+
+## Final Fix: Lazy Anonymous Session ID
+
+### RED
+
+The scheduler regression was written before the implementation and run with:
+
+```powershell
+node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test src/lib/qualified-view-scheduler.test.ts
+```
+
+Observed result: `6 tests, 5 passed, 1 failed`. At the first qualified send the transport ran, but the new lazy getter had not been called (`reads/writes/creations = 0` instead of `1/1/1`).
+
+### Fix
+
+- `QualifiedViewScheduler` now receives `getAnonymousSessionId` and invokes it only while constructing the first request after at least 5 seconds of accumulated visible dwell.
+- The resolved UUID is cached by the scheduler: retries and a token-generation reset reuse it, while stale in-flight results remain ignored.
+- `QualifiedViewTracker` passes the browser resolver by reference, so mount, hidden time, sub-threshold visible time and early disposal do not read or write storage and do not call `crypto.randomUUID()`.
+- The behavioral test uses storage/factory spies to prove zero pre-qualification work, one lazy creation and payload at qualification, UUID reuse across retry/token reset, and zero work after disposal before 5 seconds.
+
+### GREEN and verification
+
+- Focused scheduler suite: `6 tests, 6 passed, 0 failed`.
+- Full Node behavioral suite: `13 tests, 13 passed, 0 failed` (`260.1952ms`).
+- `C:\Dev\clipia\.venv\Scripts\python.exe -m pytest -q tests/test_frontend_growth_contract.py`: `5 passed, 19 warnings in 0.12s`; warnings remain the pre-existing SlowAPI deprecation notices.
+- `npx.cmd next typegen`: passed.
+- `npx.cmd tsc --noEmit`: passed.
+- `$env:NEXT_DIST_DIR='.next-task3-lazy'; npx.cmd next build`: passed on Next.js 16.2.2; all 40 static pages generated and `/v/[id]` compiled.
+- The isolated build directory was removed and its generated `tsconfig.json` includes were reverted. `package-lock.json`, plan and progress were not changed.

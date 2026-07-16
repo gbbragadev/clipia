@@ -83,13 +83,93 @@ test('anonymous session id is durable in storage', async () => {
   assert.equal(second, first)
 })
 
+test('anonymous session id stays lazy until qualified send and is reused by retries', async () => {
+  const module = await import('./qualified-view-scheduler.ts') as Record<string, unknown>
+  const getDurableAnonymousSessionId = module.getDurableAnonymousSessionId as (
+    storage: { getItem: (key: string) => string | null; setItem: (key: string, value: string) => void },
+    randomUUID: () => string,
+  ) => string
+  const Scheduler = await loadScheduler()
+  const clock = new FakeClock()
+  const values = new Map<string, string>()
+  let reads = 0
+  let writes = 0
+  let creations = 0
+  const storage = {
+    getItem: (key: string) => {
+      reads += 1
+      return values.get(key) ?? null
+    },
+    setItem: (key: string, value: string) => {
+      writes += 1
+      values.set(key, value)
+    },
+  }
+  const getAnonymousSessionId = () => getDurableAnonymousSessionId(storage, () => {
+    creations += 1
+    return '88888888-8888-4888-8888-888888888888'
+  })
+  const payloads: Array<Record<string, unknown>> = []
+  let attempts = 0
+  const scheduler = new Scheduler({
+    token: 'token-lazy',
+    getAnonymousSessionId,
+    clock,
+    transport: async (_token: string, payload: Record<string, unknown>) => {
+      attempts += 1
+      payloads.push(payload)
+      if (attempts === 1) throw new Error('temporary')
+    },
+    retryDelaysMs: [100],
+    shouldRetry: () => true,
+  })
+
+  await clock.advance(20_000)
+  assert.deepEqual({ reads, writes, creations, attempts }, { reads: 0, writes: 0, creations: 0, attempts: 0 })
+  scheduler.setVisible(true)
+  await clock.advance(4999)
+  assert.deepEqual({ reads, writes, creations, attempts }, { reads: 0, writes: 0, creations: 0, attempts: 0 })
+  scheduler.setVisible(false)
+  await clock.advance(20_000)
+  assert.deepEqual({ reads, writes, creations, attempts }, { reads: 0, writes: 0, creations: 0, attempts: 0 })
+
+  scheduler.setVisible(true)
+  await clock.advance(1)
+  assert.deepEqual({ reads, writes, creations, attempts }, { reads: 1, writes: 1, creations: 1, attempts: 1 })
+  assert.equal(payloads[0]?.anonymous_session_id, '88888888-8888-4888-8888-888888888888')
+  await clock.advance(100)
+  assert.deepEqual({ reads, writes, creations, attempts }, { reads: 1, writes: 1, creations: 1, attempts: 2 })
+  assert.equal(payloads[1]?.anonymous_session_id, payloads[0]?.anonymous_session_id)
+
+  let disposedReads = 0
+  let disposedWrites = 0
+  let disposedCreations = 0
+  const disposed = new Scheduler({
+    token: 'token-disposed',
+    getAnonymousSessionId: () => getDurableAnonymousSessionId({
+      getItem: () => { disposedReads += 1; return null },
+      setItem: () => { disposedWrites += 1 },
+    }, () => { disposedCreations += 1; return '99999999-9999-4999-8999-999999999999' }),
+    clock,
+    transport: async () => undefined,
+  })
+  disposed.setVisible(true)
+  await clock.advance(4999)
+  disposed.dispose()
+  await clock.advance(10_000)
+  assert.deepEqual(
+    { disposedReads, disposedWrites, disposedCreations },
+    { disposedReads: 0, disposedWrites: 0, disposedCreations: 0 },
+  )
+})
+
 test('qualified dwell accumulates only while visible and sends the exact payload once', async () => {
   const Scheduler = await loadScheduler()
   const clock = new FakeClock()
   const calls: Array<{ token: string; payload: Record<string, unknown> }> = []
   const scheduler = new Scheduler({
     token: 'token-a',
-    anonymousSessionId: '11111111-1111-4111-8111-111111111111',
+    getAnonymousSessionId: () => '11111111-1111-4111-8111-111111111111',
     clock,
     transport: async (token: string, payload: Record<string, unknown>) => { calls.push({ token, payload }) },
     retryDelaysMs: [100, 200],
@@ -126,7 +206,7 @@ test('transient failures retry with bounded backoff and mark sent only after suc
   let calls = 0
   const scheduler = new Scheduler({
     token: 'token-retry',
-    anonymousSessionId: '22222222-2222-4222-8222-222222222222',
+    getAnonymousSessionId: () => '22222222-2222-4222-8222-222222222222',
     clock,
     transport: async () => {
       calls += 1
@@ -159,7 +239,7 @@ test('retry pauses while hidden and permanent or exhausted failures never loop',
   let transientCalls = 0
   const transient = new Scheduler({
     token: 'token-hidden',
-    anonymousSessionId: '33333333-3333-4333-8333-333333333333',
+    getAnonymousSessionId: () => '33333333-3333-4333-8333-333333333333',
     clock,
     transport: async () => { transientCalls += 1; throw new Error('temporary') },
     retryDelaysMs: [100, 200],
@@ -181,7 +261,7 @@ test('retry pauses while hidden and permanent or exhausted failures never loop',
   let permanentCalls = 0
   const permanent = new Scheduler({
     token: 'token-permanent',
-    anonymousSessionId: '44444444-4444-4444-8444-444444444444',
+    getAnonymousSessionId: () => '44444444-4444-4444-8444-444444444444',
     clock,
     transport: async () => { permanentCalls += 1; throw new Error('bad request') },
     retryDelaysMs: [100, 200],
@@ -198,12 +278,18 @@ test('retry pauses while hidden and permanent or exhausted failures never loop',
 test('changing token resets dwell and ignores an old in-flight success', async () => {
   const Scheduler = await loadScheduler()
   const clock = new FakeClock()
-  const pending: Array<{ token: string; resolve: () => void }> = []
+  let sessionIdCalls = 0
+  const pending: Array<{ token: string; payload: Record<string, unknown>; resolve: () => void }> = []
   const scheduler = new Scheduler({
     token: 'token-old',
-    anonymousSessionId: '55555555-5555-4555-8555-555555555555',
+    getAnonymousSessionId: () => {
+      sessionIdCalls += 1
+      return '55555555-5555-4555-8555-555555555555'
+    },
     clock,
-    transport: (token: string) => new Promise<void>((resolve) => pending.push({ token, resolve })),
+    transport: (token: string, payload: Record<string, unknown>) => new Promise<void>((resolve) => {
+      pending.push({ token, payload, resolve })
+    }),
     retryDelaysMs: [100],
     shouldRetry: () => true,
   })
@@ -221,6 +307,8 @@ test('changing token resets dwell and ignores an old in-flight success', async (
   assert.equal(pending.length, 1)
   await clock.advance(1)
   assert.equal(pending[1]?.token, 'token-new')
+  assert.equal(sessionIdCalls, 1)
+  assert.equal(pending[1]?.payload.anonymous_session_id, pending[0]?.payload.anonymous_session_id)
   pending[1].resolve()
   await Promise.resolve()
   await Promise.resolve()

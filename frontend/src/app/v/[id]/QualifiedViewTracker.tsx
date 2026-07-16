@@ -31,7 +31,7 @@ export default function QualifiedViewTracker({ token }: { token: string }) {
   useEffect(() => {
     const scheduler = new QualifiedViewScheduler({
       token,
-      anonymousSessionId: browserAnonymousSessionId(),
+      getAnonymousSessionId: browserAnonymousSessionId,
       clock: browserClock,
       transport: qualifyPublicShareView,
       retryDelaysMs: [500, 1500, 3000],
