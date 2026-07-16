@@ -42,7 +42,11 @@ from app.db.engine import get_db
 from app.db.models import CreditPurchase, Job, MarketingOffer, PasswordResetToken, User
 from app.observability import record_credit_metric
 from app.payments.states import canonical_payment_state
-from app.services.acquisition_rewards import claim_campaign_reward
+from app.services.acquisition_rewards import (
+    CAMPAIGN_OFFER_CODE,
+    CAMPAIGN_REWARD_CREDITS,
+    claim_campaign_reward,
+)
 from app.services.credit_ledger import set_credit_ledger_context
 from app.utils.locks import get_lock
 from app.utils.ratelimit import client_ip
@@ -97,6 +101,8 @@ async def register(request: Request, response: Response, body: RegisterRequest, 
             offer = await db.scalar(
                 select(MarketingOffer).where(
                     MarketingOffer.code == body.offer_code,
+                    MarketingOffer.code == CAMPAIGN_OFFER_CODE,
+                    MarketingOffer.bonus_credits == CAMPAIGN_REWARD_CREDITS,
                     MarketingOffer.is_active.is_(True),
                     (MarketingOffer.expires_at.is_(None) | (MarketingOffer.expires_at > registered_at)),
                 )

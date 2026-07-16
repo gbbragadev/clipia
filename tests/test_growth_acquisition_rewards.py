@@ -14,7 +14,7 @@ from sqlalchemy import CheckConstraint, Index, UniqueConstraint, func, select
 from app.analytics.schemas import CreditBalanceChangedProperties
 from app.auth.schemas import RegisterRequest
 from app.db import models
-from app.services import job_operations
+from app.services import acquisition_rewards, job_operations
 
 
 async def _seed_offer(db_session, *, active: bool = True, expires_at: datetime | None = None):
@@ -241,6 +241,142 @@ async def test_creator_offer_verification_adds_base_then_campaign_reward_once(cl
         await db_session.scalars(select(models.AcquisitionReward).where(models.AcquisitionReward.user_id == user_id))
     )
     assert [(reward.reward_type, reward.credits) for reward in rewards] == [("campaign_signup", 18)]
+
+
+@pytest.mark.asyncio
+async def test_registration_rejects_active_noncanonical_or_wrong_value_campaign_offers(client, db_session):
+    db_session.add_all(
+        [
+            models.MarketingOffer(code="creator20_v2", bonus_credits=18, is_active=True),
+            models.MarketingOffer(code="creator20_v1", bonus_credits=17, is_active=True),
+        ]
+    )
+    await db_session.commit()
+
+    for email, offer_code in (
+        ("other-active-offer@example.com", "creator20_v2"),
+        ("wrong-value-offer@example.com", "creator20_v1"),
+    ):
+        assert (await _register(client, email, offer_code=offer_code)).status_code == 201
+        user = await db_session.scalar(select(models.User).where(models.User.email == email))
+        assert user is not None and user.verification_code
+        assert user.acquisition_offer_id is None
+        verified = await client.post(
+            "/api/v1/auth/verify-email",
+            json={"email": email, "code": user.verification_code},
+        )
+        assert verified.json() == {"status": "verified", "credits": 2}
+
+
+@pytest.mark.asyncio
+async def test_campaign_claim_returns_zero_for_noncanonical_or_wrong_value_offer(db_session):
+    other = models.MarketingOffer(code="creator20_v2", bonus_credits=18, is_active=True)
+    wrong_value = models.MarketingOffer(code="creator20_v1", bonus_credits=17, is_active=True)
+    db_session.add_all([other, wrong_value])
+    await db_session.flush()
+    users = [
+        models.User(
+            email=f"ineligible-claim-{index}@example.com",
+            name="Ineligible claim",
+            password_hash="hashed",
+            credits=2,
+            email_verified=True,
+            acquisition_offer_id=offer.id,
+        )
+        for index, offer in enumerate((other, wrong_value))
+    ]
+    db_session.add_all(users)
+    await db_session.commit()
+
+    results = [
+        await acquisition_rewards.claim_campaign_reward(db_session, user, datetime.now(timezone.utc)) for user in users
+    ]
+
+    assert results == [0, 0]
+    assert await db_session.scalar(select(func.count()).select_from(models.AcquisitionReward)) == 0
+
+
+@pytest.mark.asyncio
+async def test_enabled_reward_analytics_failure_rolls_back_verification_reward_and_balance(
+    client,
+    db_session,
+    monkeypatch,
+):
+    monkeypatch.setattr("app.auth.routes.settings.ANALYTICS_ENABLED", False)
+    await _seed_offer(db_session)
+    assert (
+        await _register(client, "strict-reward-analytics@example.com", offer_code="creator20_v1")
+    ).status_code == 201
+    user = await db_session.scalar(
+        select(models.User).where(models.User.email == "strict-reward-analytics@example.com")
+    )
+    assert user is not None and user.verification_code
+    user_id = user.id
+    code = user.verification_code
+    await db_session.execute(
+        sa.text(
+            """
+            CREATE TRIGGER fail_campaign_reward_analytics
+            BEFORE INSERT ON analytics_events
+            WHEN NEW.event_name = 'credit_balance_changed'
+              AND json_extract(NEW.properties, '$.reason') = 'campaign_signup'
+            BEGIN SELECT RAISE(ABORT, 'campaign reward analytics unavailable'); END
+            """
+        )
+    )
+    await db_session.commit()
+    monkeypatch.setattr("app.auth.routes.settings.ANALYTICS_ENABLED", True)
+
+    response = await client.post(
+        "/api/v1/auth/verify-email",
+        json={"email": user.email, "code": code},
+    )
+
+    assert response.status_code == 500
+    db_session.expire_all()
+    persisted = await db_session.get(models.User, user_id)
+    assert persisted is not None
+    assert persisted.email_verified is False
+    assert persisted.credits == 0
+    assert persisted.verification_code == code
+    assert await db_session.scalar(select(func.count()).select_from(models.AcquisitionReward)) == 0
+
+
+@pytest.mark.asyncio
+async def test_historical_referral_credit_award_remains_insertable_and_readable(db_session):
+    referrer = models.User(
+        email="historical-referrer@example.com",
+        name="Historical referrer",
+        password_hash="hashed",
+        email_verified=True,
+    )
+    referred = models.User(
+        email="historical-referred@example.com",
+        name="Historical referred",
+        password_hash="hashed",
+        email_verified=True,
+    )
+    db_session.add_all([referrer, referred])
+    await db_session.flush()
+    referrer_id = referrer.id
+    referred_id = referred.id
+    award = models.ReferralCreditAward(
+        referred_user_id=referred_id,
+        referrer_user_id=referrer_id,
+        credits=2,
+    )
+    db_session.add(award)
+    await db_session.commit()
+    award_id = award.id
+
+    db_session.expire_all()
+    persisted = await db_session.get(models.ReferralCreditAward, award_id)
+    assert persisted is not None
+    assert (persisted.referred_user_id, persisted.referrer_user_id, persisted.credits) == (
+        referred_id,
+        referrer_id,
+        2,
+    )
 
 
 @pytest.mark.asyncio

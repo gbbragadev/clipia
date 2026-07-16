@@ -121,6 +121,6 @@ def test_postgres_analytics_concurrency_append_only_and_migration_round_trip(mon
         assert asyncio.run(inspect_state()) == ("e1f2a3b4c5d6", False, False)
 
         command.upgrade(config, "head")
-        assert asyncio.run(inspect_state()) == ("d7e8f9a0b1c2", True, True)
+        assert asyncio.run(inspect_state()) == ("e8f9a0b1c2d3", True, True)
     finally:
         asyncio.run(_drop_database(database_name))

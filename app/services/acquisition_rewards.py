@@ -6,11 +6,13 @@ from datetime import datetime
 from sqlalchemy import func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.analytics.service import append_server_event_safely
+from app.analytics.service import append_server_event
 from app.db.models import AcquisitionReward, Job, MarketingOffer, User
 from app.services.credit_ledger import set_credit_ledger_context
 
 CAMPAIGN_REWARD_TYPE = "campaign_signup"
+CAMPAIGN_OFFER_CODE = "creator20_v1"
+CAMPAIGN_REWARD_CREDITS = 18
 REFERRAL_REWARD_TYPE = "referral_activation"
 REFERRAL_ACTIVATION_CREDITS = 18
 _ACQUISITION_REWARD_TYPES = (CAMPAIGN_REWARD_TYPE, REFERRAL_REWARD_TYPE)
@@ -58,7 +60,7 @@ async def _credit_reward(
         .values(credits=User.credits + reward.credits)
         .execution_options(synchronize_session=False)
     )
-    await append_server_event_safely(
+    await append_server_event(
         db,
         event_name="credit_balance_changed",
         user=recipient,
@@ -78,13 +80,13 @@ async def claim_campaign_reward(db: AsyncSession, user: User, occurred_at: datet
         return 0
 
     offer = await db.scalar(
-        select(MarketingOffer)
-        .where(
+        select(MarketingOffer).where(
             MarketingOffer.id == recipient.acquisition_offer_id,
+            MarketingOffer.code == CAMPAIGN_OFFER_CODE,
+            MarketingOffer.bonus_credits == CAMPAIGN_REWARD_CREDITS,
             MarketingOffer.is_active.is_(True),
             or_(MarketingOffer.expires_at.is_(None), MarketingOffer.expires_at > occurred_at),
         )
-        .with_for_update()
     )
     if offer is None:
         return 0
@@ -92,7 +94,7 @@ async def claim_campaign_reward(db: AsyncSession, user: User, occurred_at: datet
     reward = AcquisitionReward(
         user_id=recipient.id,
         reward_type=CAMPAIGN_REWARD_TYPE,
-        credits=offer.bonus_credits,
+        credits=CAMPAIGN_REWARD_CREDITS,
         marketing_offer_id=offer.id,
         occurred_at=occurred_at,
     )

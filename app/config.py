@@ -153,8 +153,8 @@ class Settings(BaseSettings):
     CREDIT_COST_VOICE_DESIGN: int = 5  # criar voz custom (ElevenLabs Voice Design) — operacao paga
     CREDIT_COST_VOICE_CLONE: int = 5  # clonar voz (ElevenLabs Instant Voice Clone) — operacao paga
 
-    # Oferta publica fixa: 2 creditos depois da verificacao. Testadores recebem +18
-    # somente pelo ajuste admin auditado, com reason=beta_invite_2026.
+    # Cadastro direto permanece em 2 creditos. A oferta persistida creator20_v1
+    # adiciona +18 uma unica vez depois da verificacao, sem alterar este valor-base.
     WELCOME_CREDIT_BONUS: Literal[2] = 2
 
     # Oferta publica de compra: o bonus de 20% e congelado no checkout e aplicado pelo

@@ -21,7 +21,7 @@ def _load_migration():
 def test_selected_package_migration_is_expansive_successor_with_one_head(monkeypatch):
     migration = _load_migration()
     assert migration.down_revision == "d0e1f2a3b4c5"
-    assert ScriptDirectory.from_config(Config("alembic.ini")).get_heads() == ["d7e8f9a0b1c2"]
+    assert ScriptDirectory.from_config(Config("alembic.ini")).get_heads() == ["e8f9a0b1c2d3"]
 
     engine = sa.create_engine("sqlite:///:memory:")
     metadata = sa.MetaData()
