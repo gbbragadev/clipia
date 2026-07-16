@@ -7,7 +7,7 @@ export const ATTRIBUTION_KEYS = [
   'utm_id',
 ] as const
 
-const AUTH_SAFE_UTM_KEYS = ['utm_source', 'utm_medium', 'utm_campaign'] as const
+const AUTH_SAFE_UTM_KEYS = ['utm_source', 'utm_medium', 'utm_campaign', 'utm_content'] as const
 const STORAGE_PREFIX = 'clipia_'
 
 export type AttributionKey = (typeof ATTRIBUTION_KEYS)[number]

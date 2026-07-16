@@ -20,6 +20,7 @@ from app.db.engine import get_db
 from app.db.models import AcquisitionReward, CreditLedgerEntry, Job, MarketingOffer, User
 from app.main import create_app
 from app.services.acquisition_rewards import claim_campaign_reward, claim_referral_activation_reward
+from tests.migration_contract import EXPECTED_ALEMBIC_HEAD
 
 _ADMIN_DSN = os.getenv(
     "POSTGRES_PAYMENT_TEST_ADMIN_DSN",
@@ -111,7 +112,7 @@ def test_postgres_growth_migration_seeds_only_canonical_offer(postgres_growth_da
             await connection.close()
 
     revision, offer, user_columns, index_definition = asyncio.run(inspect_migration())
-    assert revision == "f9a0b1c2d3e4"
+    assert revision == EXPECTED_ALEMBIC_HEAD
     assert dict(offer) == {
         "code": "creator20_v1",
         "bonus_credits": 18,

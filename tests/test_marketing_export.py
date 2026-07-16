@@ -9,7 +9,7 @@ import pytest
 from fastapi import HTTPException
 from httpx import AsyncClient
 from pydantic import SecretStr
-from sqlalchemy import update
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
@@ -63,6 +63,67 @@ async def test_marketing_export_requires_configured_constant_time_token(
     assert absent.status_code == 401
     assert wrong.status_code == 401
     assert valid.status_code == 200
+
+
+async def test_public_share_cta_attribution_survives_registration_event_and_export_without_capability_or_pii(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(settings, "ANALYTICS_ENABLED", True)
+    monkeypatch.setattr(settings, "MARKETING_EXPORT_TOKEN", SecretStr("marketing-token-value"))
+    monkeypatch.setattr(settings, "MARKETING_PSEUDONYM_SECRET", SecretStr("pseudonym-secret-value"))
+    email = "public-share-attribution@example.com"
+    registration = await client.post(
+        "/api/v1/auth/register",
+        json={
+            "email": email,
+            "name": "Public Share Attribution",
+            "password": "Secret123",
+            "consent": True,
+            "offer_code": "creator20_v1",
+            "utm_source": "public_share",
+            "utm_medium": "organic_social",
+            "utm_campaign": "creator20_v1",
+            "utm_content": "public_video",
+        },
+    )
+    assert registration.status_code == 201
+
+    user = await db_session.scalar(select(User).where(User.email == email))
+    assert user is not None
+    assert (user.utm_source, user.utm_medium, user.utm_campaign, user.utm_content) == (
+        "public_share",
+        "organic_social",
+        "creator20_v1",
+        "public_video",
+    )
+    event = await db_session.scalar(
+        select(AnalyticsEvent).where(
+            AnalyticsEvent.user_id == user.id,
+            AnalyticsEvent.event_name == "user_registered",
+        )
+    )
+    assert event is not None and event.utm_content == "public_video"
+
+    exported = await client.get(
+        "/api/v1/internal/marketing/conversions?limit=20",
+        headers=_marketing_headers(),
+    )
+    assert exported.status_code == 200
+    item = next(row for row in exported.json()["items"] if row["event_type"] == "user_registered")
+    assert item["attribution"] == {
+        "acquisition_source": "social",
+        "utm_source": "public_share",
+        "utm_medium": "organic_social",
+        "utm_campaign": "creator20_v1",
+        "utm_content": "public_video",
+        "utm_term": None,
+    }
+    serialized = json.dumps(item).lower()
+    assert email not in serialized
+    assert "public-shares/" not in serialized
+    assert "token" not in serialized
 
 
 async def test_marketing_token_rejects_non_ascii_without_compare_digest_error(
@@ -280,7 +341,7 @@ async def test_marketing_attribution_exports_only_explicit_field_allowlists(
     allowed.utm_source = "meta"
     allowed.utm_medium = "paid_social"
     allowed.utm_campaign = "clipia_creator20_pilot"
-    allowed.utm_content = "share"
+    allowed.utm_content = "public_video"
     allowed.utm_term = None
     arbitrary_values = (
         "alice",
@@ -317,7 +378,7 @@ async def test_marketing_attribution_exports_only_explicit_field_allowlists(
         "utm_source": "meta",
         "utm_medium": "paid_social",
         "utm_campaign": "clipia_creator20_pilot",
-        "utm_content": "share",
+        "utm_content": "public_video",
         "utm_term": None,
     }
     serialized = json.dumps(items, sort_keys=True).lower()

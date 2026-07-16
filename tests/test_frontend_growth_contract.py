@@ -18,8 +18,7 @@ def test_creator_campaign_is_the_only_registration_surface_that_promises_twenty_
     assert "20 créditos" in campaign_page
     assert "2 créditos de boas-vindas + 18 créditos da oferta" in campaign_page
     assert (
-        "/auth/register?offer=creator20_v1&utm_source=meta&utm_medium=paid_social"
-        "&utm_campaign=clipia_creator20_pilot"
+        "/auth/register?offer=creator20_v1&utm_source=meta&utm_medium=paid_social&utm_campaign=clipia_creator20_pilot"
     ) in campaign_page
     assert "cronômetro" not in campaign_page.lower()
     assert "últimas vagas" not in campaign_page.lower()
@@ -56,6 +55,10 @@ def test_public_share_clients_and_route_preserve_showcase_then_resolve_opt_in_to
     assert "QualifiedViewTracker" in page
     assert "<JsonLd" in page
     assert "dangerouslySetInnerHTML" not in page
+    assert (
+        "utm_source=public_share&utm_medium=organic_social&utm_campaign=creator20_v1&utm_content=public_video"
+    ) in page
+    assert "utm_content=${encodeURIComponent(video.id)}" not in page
 
 
 def test_completed_video_sharing_is_explicit_and_revocable():

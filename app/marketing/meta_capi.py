@@ -7,12 +7,13 @@ import logging
 import re
 import uuid
 from contextlib import asynccontextmanager
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from typing import AsyncIterator
 
 import httpx
-from sqlalchemy import select, update
+from sqlalchemy import and_, func, or_, select, update
 from sqlalchemy.dialects.postgresql import insert as postgresql_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -24,8 +25,18 @@ from app.marketing.export import pseudonymous_customer_ref
 _SUPPORTED_EVENTS = {"CompleteRegistration", "Purchase"}
 _API_VERSION = re.compile(r"^v\d+\.\d+$")
 _DISPATCH_TIMEOUT_SECONDS = 5.0
+_DISPATCH_LEASE_SECONDS = 30
 _MAX_ATTEMPTS = 5
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class _ClaimedConversion:
+    id: uuid.UUID
+    user_id: uuid.UUID
+    payload: dict
+    attempts: int
+    lease_token: str
 
 
 def _meta_configured() -> bool:
@@ -137,9 +148,14 @@ async def cancel_pending_meta_conversions(db: AsyncSession, *, user_id: uuid.UUI
         update(MetaConversionOutbox)
         .where(
             MetaConversionOutbox.user_id == user_id,
-            MetaConversionOutbox.status.in_(("pending", "retry")),
+            MetaConversionOutbox.status.in_(("pending", "retry", "dispatching")),
         )
-        .values(status="cancelled", last_error=reason[:255])
+        .values(
+            status="cancelled",
+            last_error=reason[:255],
+            lease_token=None,
+            lease_until=None,
+        )
     )
     return int(result.rowcount or 0)
 
@@ -151,6 +167,211 @@ async def _dispatch_client(client: httpx.AsyncClient | None) -> AsyncIterator[ht
         return
     async with httpx.AsyncClient() as created:
         yield created
+
+
+def _due_predicate(attempted_at: datetime):
+    return or_(
+        and_(
+            MetaConversionOutbox.status.in_(("pending", "retry")),
+            MetaConversionOutbox.next_attempt_at <= attempted_at,
+        ),
+        and_(
+            MetaConversionOutbox.status == "dispatching",
+            MetaConversionOutbox.lease_until.is_not(None),
+            MetaConversionOutbox.lease_until <= attempted_at,
+        ),
+    )
+
+
+def _user_allows_delivery(user: User | None) -> bool:
+    return bool(user is not None and user.marketing_measurement_consented_at is not None and user.plan != "deleted")
+
+
+async def _unsupported_dispatch(
+    db: AsyncSession,
+    *,
+    attempted_at: datetime,
+    limit: int,
+) -> int:
+    """SQLite can cancel ineligible rows but never claims or delivers them."""
+    rows = list(
+        await db.scalars(
+            select(MetaConversionOutbox)
+            .where(_due_predicate(attempted_at))
+            .order_by(MetaConversionOutbox.next_attempt_at, MetaConversionOutbox.created_at)
+            .limit(limit)
+        )
+    )
+    cancelled = 0
+    for row in rows:
+        if _user_allows_delivery(await db.get(User, row.user_id)):
+            continue
+        row.status = "cancelled"
+        row.last_error = "consent_revoked"
+        row.lease_token = None
+        row.lease_until = None
+        cancelled += 1
+    if cancelled:
+        await db.commit()
+    else:
+        await db.rollback()
+    return cancelled
+
+
+async def _claim_due_conversions(
+    db: AsyncSession,
+    *,
+    attempted_at: datetime,
+    limit: int,
+) -> tuple[list[_ClaimedConversion], int]:
+    """Claim under SKIP LOCKED and release every DB lock before HTTP."""
+    rows = list(
+        await db.scalars(
+            select(MetaConversionOutbox)
+            .where(_due_predicate(attempted_at))
+            .order_by(MetaConversionOutbox.next_attempt_at, MetaConversionOutbox.created_at)
+            .limit(limit)
+            .with_for_update(skip_locked=True)
+        )
+    )
+    claimed: list[_ClaimedConversion] = []
+    cancelled = 0
+    for row in rows:
+        if not _user_allows_delivery(await db.get(User, row.user_id)):
+            row.status = "cancelled"
+            row.last_error = "consent_revoked"
+            row.lease_token = None
+            row.lease_until = None
+            cancelled += 1
+            continue
+        lease_token = str(uuid.uuid4())
+        row.status = "dispatching"
+        row.lease_token = lease_token
+        row.lease_until = attempted_at + timedelta(seconds=_DISPATCH_LEASE_SECONDS)
+        claimed.append(
+            _ClaimedConversion(
+                id=row.id,
+                user_id=row.user_id,
+                payload=row.payload,
+                attempts=row.attempts,
+                lease_token=lease_token,
+            )
+        )
+    await db.commit()
+    return claimed, cancelled
+
+
+async def _recheck_claim(db: AsyncSession, claim: _ClaimedConversion) -> str:
+    """Recheck account and cancellation state, then end the read transaction."""
+    row = (
+        await db.execute(
+            select(
+                MetaConversionOutbox.status,
+                MetaConversionOutbox.lease_token,
+                User.marketing_measurement_consented_at,
+                User.plan,
+            )
+            .join(User, User.id == MetaConversionOutbox.user_id, isouter=True)
+            .where(MetaConversionOutbox.id == claim.id)
+        )
+    ).one_or_none()
+    await db.rollback()
+    if row is None:
+        return "lost"
+    if row.status != "dispatching" or row.lease_token != claim.lease_token:
+        return "cancelled" if row.status == "cancelled" else "lost"
+    if row.marketing_measurement_consented_at is not None and row.plan != "deleted":
+        return "deliver"
+    cancelled = await db.execute(
+        update(MetaConversionOutbox)
+        .where(
+            MetaConversionOutbox.id == claim.id,
+            MetaConversionOutbox.status == "dispatching",
+            MetaConversionOutbox.lease_token == claim.lease_token,
+        )
+        .values(
+            status="cancelled",
+            last_error="consent_revoked",
+            lease_token=None,
+            lease_until=None,
+        )
+    )
+    await db.commit()
+    return "cancelled" if cancelled.rowcount else "lost"
+
+
+async def _finalize_claims(
+    db: AsyncSession,
+    claims: list[_ClaimedConversion],
+    *,
+    attempted_at: datetime,
+    error: str | None,
+) -> dict[str, int]:
+    stats = {"sent": 0, "retried": 0, "failed": 0, "cancelled": 0}
+    missed: list[uuid.UUID] = []
+    for claim in claims:
+        attempts = claim.attempts + 1
+        if error is None:
+            values = {
+                "status": "sent",
+                "attempts": attempts,
+                "last_attempt_at": attempted_at,
+                "last_error": None,
+                "sent_at": attempted_at,
+                "lease_token": None,
+                "lease_until": None,
+            }
+            outcome = "sent"
+        elif attempts >= _MAX_ATTEMPTS:
+            values = {
+                "status": "failed",
+                "attempts": attempts,
+                "last_attempt_at": attempted_at,
+                "last_error": error,
+                "lease_token": None,
+                "lease_until": None,
+            }
+            outcome = "failed"
+        else:
+            values = {
+                "status": "retry",
+                "attempts": attempts,
+                "next_attempt_at": attempted_at + timedelta(seconds=60 * (2 ** (attempts - 1))),
+                "last_attempt_at": attempted_at,
+                "last_error": error,
+                "lease_token": None,
+                "lease_until": None,
+            }
+            outcome = "retried"
+        updated = await db.execute(
+            update(MetaConversionOutbox)
+            .where(
+                MetaConversionOutbox.id == claim.id,
+                MetaConversionOutbox.status == "dispatching",
+                MetaConversionOutbox.lease_token == claim.lease_token,
+            )
+            .values(**values)
+        )
+        if updated.rowcount:
+            stats[outcome] += 1
+        else:
+            missed.append(claim.id)
+    await db.commit()
+    if missed:
+        cancelled = int(
+            await db.scalar(
+                select(func.count())
+                .select_from(MetaConversionOutbox)
+                .where(
+                    MetaConversionOutbox.id.in_(missed),
+                    MetaConversionOutbox.status == "cancelled",
+                )
+            )
+            or 0
+        )
+        stats["cancelled"] += cancelled
+        await db.rollback()
+    return stats
 
 
 async def dispatch_pending_meta_conversions(
@@ -167,44 +388,24 @@ async def dispatch_pending_meta_conversions(
         raise ValueError("Meta dispatch limit must be between 1 and 100")
 
     attempted_at = datetime.now(timezone.utc)
-    statement = (
-        select(MetaConversionOutbox)
-        .where(
-            MetaConversionOutbox.status.in_(("pending", "retry")),
-            MetaConversionOutbox.next_attempt_at <= attempted_at,
-        )
-        .order_by(MetaConversionOutbox.next_attempt_at, MetaConversionOutbox.created_at)
-        .limit(limit)
-    )
     dialect = db.get_bind().dialect.name
-    if dialect == "postgresql":
-        statement = statement.with_for_update(skip_locked=True)
-    rows = list(await db.scalars(statement))
-    if not rows:
-        return stats
-
-    deliverable = []
-    for row in rows:
-        user_statement = select(User).where(User.id == row.user_id)
-        if dialect == "postgresql":
-            user_statement = user_statement.with_for_update()
-        user = await db.scalar(user_statement)
-        if user is None or user.marketing_measurement_consented_at is None or user.plan == "deleted":
-            row.status = "cancelled"
-            row.last_error = "consent_revoked"
-            stats["cancelled"] += 1
-        else:
-            deliverable.append(row)
-
     if dialect != "postgresql":
         stats["unsupported"] = 1
-        if stats["cancelled"]:
-            await db.commit()
-        else:
-            await db.rollback()
+        stats["cancelled"] = await _unsupported_dispatch(db, attempted_at=attempted_at, limit=limit)
         return stats
+    claimed, cancelled = await _claim_due_conversions(db, attempted_at=attempted_at, limit=limit)
+    stats["cancelled"] += cancelled
+    if not claimed:
+        return stats
+
+    deliverable: list[_ClaimedConversion] = []
+    for claim in claimed:
+        state = await _recheck_claim(db, claim)
+        if state == "deliver":
+            deliverable.append(claim)
+        elif state == "cancelled":
+            stats["cancelled"] += 1
     if not deliverable:
-        await db.commit()
         return stats
 
     url = (
@@ -224,26 +425,11 @@ async def dispatch_pending_meta_conversions(
         # Exception messages may echo request data or credentials. Persist only
         # a bounded diagnostic code; detailed context stays in protected logs.
         error = exc.__class__.__name__[:255]
-        for row in deliverable:
-            row.attempts += 1
-            row.last_attempt_at = attempted_at
-            row.last_error = error
-            if row.attempts >= _MAX_ATTEMPTS:
-                row.status = "failed"
-                stats["failed"] += 1
-            else:
-                row.status = "retry"
-                row.next_attempt_at = attempted_at + timedelta(seconds=60 * (2 ** (row.attempts - 1)))
-                stats["retried"] += 1
-        await db.commit()
+        finalized = await _finalize_claims(db, deliverable, attempted_at=attempted_at, error=error)
+        for key, value in finalized.items():
+            stats[key] += value
         return stats
-
-    for row in deliverable:
-        row.attempts += 1
-        row.status = "sent"
-        row.last_attempt_at = attempted_at
-        row.last_error = None
-        row.sent_at = attempted_at
-        stats["sent"] += 1
-    await db.commit()
+    finalized = await _finalize_claims(db, deliverable, attempted_at=attempted_at, error=None)
+    for key, value in finalized.items():
+        stats[key] += value
     return stats

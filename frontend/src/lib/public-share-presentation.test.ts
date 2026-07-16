@@ -45,6 +45,7 @@ test('dynamic public-share metadata and JSON-LD never contain free-form topic or
     niche: malicious,
     template: malicious,
     video: malicious,
+    published_at: '2026-07-16T12:34:56+00:00',
   }
 
   const metadata = buildShareMetadata(input)
@@ -58,6 +59,7 @@ test('dynamic public-share metadata and JSON-LD never contain free-form topic or
   assert.equal((metadata.openGraph as { title: string }).title, 'Vídeo publicado com ClipIA')
   assert.equal(((metadata.openGraph as { images: Array<{ alt: string }> }).images[0]).alt, 'Vídeo publicado com ClipIA')
   assert.equal(jsonLd.name, 'Vídeo publicado com ClipIA')
+  assert.equal(jsonLd.uploadDate, '2026-07-16T12:34:56+00:00')
   assert.equal(getShareDisplayTitle(input), 'Vídeo publicado com ClipIA')
 })
 

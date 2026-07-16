@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from app.config import settings
 from app.db.models import CreditLedgerEntry, User
 from app.services.credit_ledger import reconcile_credit_ledger, set_credit_ledger_context
+from tests.migration_contract import EXPECTED_ALEMBIC_HEAD
 
 _ADMIN_DSN = os.getenv(
     "POSTGRES_PAYMENT_TEST_ADMIN_DSN",
@@ -182,6 +183,6 @@ def test_postgres_credit_ledger_shadow_enforce_and_migration_round_trip(monkeypa
         assert asyncio.run(inspect_downgrade()) == ("a4b5c6d7e8f9", False, False)
         command.upgrade(config, "head")
         revision, table_exists, trigger_exists = asyncio.run(inspect_downgrade())
-        assert (revision, table_exists, trigger_exists) == ("e8f9a0b1c2d3", True, True)
+        assert (revision, table_exists, trigger_exists) == (EXPECTED_ALEMBIC_HEAD, True, True)
     finally:
         asyncio.run(_drop_database(database_name))

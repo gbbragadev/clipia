@@ -33,10 +33,10 @@ _CONVERSION_EVENT_NAMES = (
     "checkout_started",
 )
 _ATTRIBUTION_ALLOWLISTS: dict[str, frozenset[str]] = {
-    "utm_source": frozenset({"meta", "instagram", "tiktok", "youtube"}),
+    "utm_source": frozenset({"meta", "instagram", "tiktok", "youtube", "public_share"}),
     "utm_medium": frozenset({"paid_social", "organic_social"}),
     "utm_campaign": frozenset({"clipia_creator20_pilot", "creator20_v1"}),
-    "utm_content": frozenset({"share", "v-page"}),
+    "utm_content": frozenset({"public_video"}),
     "utm_term": frozenset(),
 }
 _CURSOR_CONTEXT = b"clipia-marketing-cursor:v1:"
@@ -236,7 +236,7 @@ async def build_marketing_conversions(
             User.utm_source.label("utm_source"),
             User.utm_medium.label("utm_medium"),
             User.utm_campaign.label("utm_campaign"),
-            cast(null(), String(100)).label("utm_content"),
+            User.utm_content.label("utm_content"),
             cast(null(), String(100)).label("utm_term"),
         )
         .join(User, User.id == CreditPurchase.user_id)

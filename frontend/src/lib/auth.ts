@@ -97,6 +97,7 @@ export interface RegisterPayload {
   utm_source?: string;
   utm_medium?: string;
   utm_campaign?: string;
+  utm_content?: string;
   turnstile_token?: string;
   consent?: boolean;
   selected_package?: SelectedPackage;

@@ -17,7 +17,11 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from app.config import settings
 from app.db.base import Base
 from app.db.models import MetaConversionOutbox, User
-from app.marketing.meta_capi import dispatch_pending_meta_conversions, enqueue_meta_conversion
+from app.marketing.meta_capi import (
+    cancel_pending_meta_conversions,
+    dispatch_pending_meta_conversions,
+    enqueue_meta_conversion,
+)
 
 _ADMIN_DSN = os.getenv(
     "POSTGRES_MARKETING_TEST_ADMIN_DSN",
@@ -76,6 +80,19 @@ class _Client:
         self.calls += 1
         if self.failure is not None:
             raise self.failure
+        return _Response()
+
+
+class _BlockingClient:
+    def __init__(self) -> None:
+        self.calls = 0
+        self.started = asyncio.Event()
+        self.release = asyncio.Event()
+
+    async def post(self, *_args: object, **_kwargs: object) -> _Response:
+        self.calls += 1
+        self.started.set()
+        await self.release.wait()
         return _Response()
 
 
@@ -173,6 +190,105 @@ async def test_postgres_dispatch_failure_persists_retry_without_losing_event(
     async with sessions() as verify:
         row = await verify.get(MetaConversionOutbox, row_id)
         assert row is not None and row.status == "retry" and row.attempts == 1
+
+
+@pytest.mark.asyncio
+async def test_postgres_dispatch_releases_user_lock_before_waiting_on_http(
+    postgres_meta_sessions: async_sessionmaker[AsyncSession], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _configure_meta(monkeypatch)
+    sessions = postgres_meta_sessions
+    user_id, _row_id = await _seed_event(sessions)
+    client = _BlockingClient()
+
+    async with sessions() as dispatch:
+        task = asyncio.create_task(dispatch_pending_meta_conversions(dispatch, client=client))
+        await asyncio.wait_for(client.started.wait(), timeout=2)
+        mutation_blocked = False
+        async with sessions() as mutate:
+            try:
+                await asyncio.wait_for(
+                    mutate.execute(update(User).where(User.id == user_id).values(name="Concurrent mutation")),
+                    timeout=0.75,
+                )
+                await asyncio.wait_for(mutate.commit(), timeout=0.75)
+            except TimeoutError:
+                mutation_blocked = True
+                await mutate.rollback()
+            finally:
+                client.release.set()
+        result = await asyncio.wait_for(task, timeout=2)
+
+    assert mutation_blocked is False
+    assert result == {"sent": 1, "retried": 0, "failed": 0, "cancelled": 0, "unsupported": 0}
+
+
+@pytest.mark.asyncio
+async def test_postgres_cancel_during_http_is_not_blocked_or_overwritten(
+    postgres_meta_sessions: async_sessionmaker[AsyncSession], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _configure_meta(monkeypatch)
+    sessions = postgres_meta_sessions
+    user_id, row_id = await _seed_event(sessions)
+    client = _BlockingClient()
+
+    async with sessions() as dispatch:
+        task = asyncio.create_task(dispatch_pending_meta_conversions(dispatch, client=client))
+        await asyncio.wait_for(client.started.wait(), timeout=2)
+        cancellation_blocked = False
+        async with sessions() as cancel:
+            try:
+                cancelled = await asyncio.wait_for(
+                    cancel_pending_meta_conversions(cancel, user_id=user_id, reason="consent_revoked"),
+                    timeout=0.75,
+                )
+                await asyncio.wait_for(cancel.commit(), timeout=0.75)
+            except TimeoutError:
+                cancellation_blocked = True
+                cancelled = 0
+                await cancel.rollback()
+            finally:
+                client.release.set()
+        result = await asyncio.wait_for(task, timeout=2)
+
+    assert cancellation_blocked is False
+    assert cancelled == 1
+    assert result == {"sent": 0, "retried": 0, "failed": 0, "cancelled": 1, "unsupported": 0}
+    async with sessions() as verify:
+        row = await verify.get(MetaConversionOutbox, row_id)
+        assert row is not None
+        assert row.status == "cancelled"
+        assert row.sent_at is None
+
+
+@pytest.mark.asyncio
+async def test_postgres_expired_dispatch_lease_is_reclaimed_after_worker_crash(
+    postgres_meta_sessions: async_sessionmaker[AsyncSession], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _configure_meta(monkeypatch)
+    sessions = postgres_meta_sessions
+    _user_id, row_id = await _seed_event(sessions)
+    async with sessions() as stale:
+        await stale.execute(
+            update(MetaConversionOutbox)
+            .where(MetaConversionOutbox.id == row_id)
+            .values(
+                status="dispatching",
+                lease_token=str(uuid.uuid4()),
+                lease_until=datetime.now(timezone.utc).replace(year=2025),
+            )
+        )
+        await stale.commit()
+    client = _Client()
+
+    async with sessions() as dispatch:
+        result = await dispatch_pending_meta_conversions(dispatch, client=client)
+
+    assert result == {"sent": 1, "retried": 0, "failed": 0, "cancelled": 0, "unsupported": 0}
+    async with sessions() as verify:
+        row = await verify.get(MetaConversionOutbox, row_id)
+        assert row is not None and row.status == "sent"
+        assert row.lease_token is None and row.lease_until is None
 
 
 @pytest.mark.asyncio

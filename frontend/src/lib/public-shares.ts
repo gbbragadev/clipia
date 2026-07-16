@@ -21,6 +21,7 @@ export interface PublicShareMetadata {
   title: string;
   video_url: string;
   active: boolean;
+  published_at: string;
 }
 
 export interface QualifiedViewPayload {

@@ -37,6 +37,8 @@ def test_meta_capi_defaults_off_and_outbox_has_durable_retry_fields() -> None:
         "attempts",
         "next_attempt_at",
         "last_attempt_at",
+        "lease_token",
+        "lease_until",
         "sent_at",
     }.issubset(columns.keys())
     assert columns.event_id.unique is True
@@ -49,6 +51,7 @@ def test_meta_capi_defaults_off_and_outbox_has_durable_retry_fields() -> None:
         if constraint.name == "ck_meta_outbox_status"
     )
     assert "cancelled" in str(status_check.sqltext)
+    assert "dispatching" in str(status_check.sqltext)
 
 
 def test_meta_capi_service_module_exists() -> None:

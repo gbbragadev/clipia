@@ -11,6 +11,7 @@ export interface SharePresentationInput {
   template: string
   niche: string
   video: string
+  published_at?: string
 }
 
 function absoluteUrl(path: string): string {
@@ -72,7 +73,7 @@ export function buildShareJsonLd(input: SharePresentationInput): Record<string, 
       : PUBLIC_DESCRIPTION,
     thumbnailUrl: absoluteUrl(isShowcase ? `/showcase/og/${encodeURIComponent(input.id)}.jpg` : '/og-image.png'),
     contentUrl: absoluteUrl(isShowcase ? input.video : publicVideoPath(input.id)),
-    ...(isShowcase ? { uploadDate: '2026-04-04' } : {}),
+    ...(isShowcase ? { uploadDate: '2026-04-04' } : input.published_at ? { uploadDate: input.published_at } : {}),
     inLanguage: 'pt-BR',
   }
 }

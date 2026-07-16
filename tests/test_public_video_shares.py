@@ -30,6 +30,8 @@ from app.auth.session import AUTH_COOKIE_NAME
 from app.config import settings
 from app.db import models
 from app.public_shares.service import create_public_share, record_qualified_view
+from app.services.job_operations import finalize_generation
+from tests.migration_contract import EXPECTED_ALEMBIC_HEAD
 
 _BROWSER_HEADERS = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/126.0"}
 _REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -58,6 +60,57 @@ async def _completed_job(test_db, job_factory, *, user_id=None, topic="Video pub
     return job
 
 
+@pytest.mark.asyncio
+async def test_finalized_editable_video_can_be_shared_and_rewarded(
+    client,
+    db_session,
+    test_db,
+    verified_user,
+    auth_headers,
+):
+    """Exercise the delivered state emitted by the real generation finalizer."""
+    initial_balance = verified_user.credits
+    job = models.Job(
+        user_id=verified_user.id,
+        topic="Entrega editavel real",
+        style="educational",
+        duration_target=30,
+        status="finalizing",
+    )
+    db_session.add(job)
+    await db_session.commit()
+    result = await finalize_generation(
+        db_session,
+        job.id,
+        script={"scenes": []},
+        video_url=f"/storage/output/{job.id}.mp4",
+        telemetry={},
+    )
+    await db_session.commit()
+    await db_session.refresh(job)
+    assert result == "finalized"
+    assert job.status == "editable"
+
+    output_dir = test_db["storage_dir"] / "output"
+    output_dir.mkdir(parents=True, exist_ok=True)
+    (output_dir / f"{job.id}.mp4").write_bytes(b"finalized-editable-video")
+
+    created = await _create_share(client, job.id, verified_user, auth_headers)
+    assert created.status_code == 200
+    token = created.json()["token"]
+    qualified = await client.post(
+        f"/api/v1/public-shares/{token}/qualified-view",
+        json=_view_payload(),
+        headers=_BROWSER_HEADERS,
+    )
+    assert qualified.status_code == 200
+    assert qualified.json() == {"qualified": True, "rewarded": True}
+
+    db_session.expire_all()
+    owner = await db_session.get(models.User, verified_user.id)
+    assert owner is not None and owner.credits == initial_balance + 2
+
+
 async def _create_share(client, job_id, user, auth_headers):
     return await client.post(
         f"/api/v1/videos/{job_id}/public-share",
@@ -74,7 +127,7 @@ def _view_payload(session_id=None, *, dwell_ms=5000, page_visible=True):
 
 
 @pytest.mark.asyncio
-async def test_public_share_requires_owned_completed_video_and_is_idempotent(
+async def test_public_share_requires_owned_delivered_video_and_is_idempotent(
     client,
     test_db,
     job_factory,
@@ -120,7 +173,8 @@ async def test_public_share_metadata_and_video_never_expose_or_trust_storage_pat
     verified_user,
     auth_headers,
 ):
-    job = await _completed_job(test_db, job_factory, topic="Titulo publico")
+    hostile_topic = "owner@example.com C:\\private\\customer\\raw-output.mp4 secret-token"
+    job = await _completed_job(test_db, job_factory, topic=hostile_topic)
     async with test_db["session_factory"]() as session:
         persisted = await session.get(models.Job, job.id)
         assert persisted is not None
@@ -134,13 +188,13 @@ async def test_public_share_metadata_and_video_never_expose_or_trust_storage_pat
     metadata = await client.get(f"/api/v1/public-shares/{token}")
     assert metadata.status_code == 200
     payload = metadata.json()
-    assert payload["title"] == "Titulo publico"
+    assert payload["title"] == "Vídeo publicado com ClipIA"
     assert payload["active"] is True
+    assert datetime.fromisoformat(payload["published_at"]).tzinfo is not None
     assert payload["video_url"].endswith(f"/api/v1/public-shares/{token}/video")
     serialized = str(payload).lower()
-    assert "storage" not in serialized
-    assert "private" not in serialized
-    assert "raw-output" not in serialized
+    for forbidden in ("owner@example.com", "storage", "private", "raw-output", "secret-token"):
+        assert forbidden not in serialized
 
     video = await client.get(f"/api/v1/public-shares/{token}/video")
     assert video.status_code == 200
@@ -893,7 +947,7 @@ def test_postgres_public_share_migration_is_head_and_hash_only(postgres_public_s
             await connection.close()
 
     revision, share_columns, visit_columns, active_index = asyncio.run(inspect_migration())
-    assert revision == "f9a0b1c2d3e4"
+    assert revision == EXPECTED_ALEMBIC_HEAD
     assert "token_hash" in share_columns and "token" not in share_columns
     assert all("ip" not in column.lower() for column in visit_columns)
     assert "UNIQUE" in active_index and "WHERE (active = true)" in active_index

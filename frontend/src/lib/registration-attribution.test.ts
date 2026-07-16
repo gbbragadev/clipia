@@ -12,7 +12,7 @@ async function loadAttribution(): Promise<Record<string, unknown>> {
   return import('./registration-attribution.ts').catch(() => ({})) as Promise<Record<string, unknown>>
 }
 
-test('campaign query is captured separately and registration reads only allowed attribution fields', async () => {
+test('campaign query is captured separately and registration reads the safe public-share taxonomy', async () => {
   const module = await loadAttribution()
   assert.equal(typeof module.captureRegistrationAttribution, 'function')
   assert.equal(typeof module.readRegistrationAttribution, 'function')
@@ -25,7 +25,7 @@ test('campaign query is captured separately and registration reads only allowed 
     utm_source: 'meta',
     utm_medium: 'paid_social',
     utm_campaign: 'clipia_creator20_pilot',
-    utm_content: 'creative-a',
+    utm_content: 'public_video',
     utm_term: 'ignored-by-auth',
   })
 
@@ -37,6 +37,7 @@ test('campaign query is captured separately and registration reads only allowed 
     utm_source: 'meta',
     utm_medium: 'paid_social',
     utm_campaign: 'clipia_creator20_pilot',
+    utm_content: 'public_video',
     referral_code: 'invite123',
     offer_code: 'creator20_v1',
   })

@@ -22,6 +22,7 @@ from app.services.acquisition_rewards import claim_social_share_reward
 
 _TOKEN_CONTEXT = b"clipia-public-share:v1:"
 _TOKEN_BYTES = 32
+DELIVERED_JOB_STATUSES = ("editable", "completed")
 _BOT_USER_AGENT = re.compile(
     r"bot|crawler|spider|slurp|headless|curl|wget|python-requests|python-httpx|facebookexternalhit|preview",
     re.IGNORECASE,
@@ -108,7 +109,7 @@ async def create_public_share(db: AsyncSession, owner: User, job_id: str | uuid.
         .where(
             Job.id == _as_uuid(job_id),
             Job.user_id == owner.id,
-            Job.status == "completed",
+            Job.status.in_(DELIVERED_JOB_STATUSES),
             Job.completed_at.is_not(None),
             Job.video_url.is_not(None),
         )
@@ -197,7 +198,7 @@ async def get_active_public_share(
             PublicVideoShare.id == share_id,
             PublicVideoShare.token_hash == _token_hash(token),
             PublicVideoShare.active.is_(True),
-            Job.status == "completed",
+            Job.status.in_(DELIVERED_JOB_STATUSES),
             Job.completed_at.is_not(None),
             Job.video_url.is_not(None),
         )

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import uuid
+from datetime import timezone
 
 from fastapi import APIRouter, Depends, Request, Response
 from fastapi.responses import FileResponse
@@ -32,6 +33,7 @@ from app.utils.ratelimit import client_ip
 
 router = APIRouter(tags=["public-shares"])
 limiter = Limiter(key_func=client_ip)
+PUBLIC_SHARE_TITLE = "Vídeo publicado com ClipIA"
 
 
 def _viewer_user_ids(request: Request) -> frozenset[uuid.UUID]:
@@ -109,9 +111,14 @@ async def get_public_share_metadata(
     except PublicShareNotFound:
         raise not_found_error() from None
     return PublicShareMetadata(
-        title=record.job.topic,
+        title=PUBLIC_SHARE_TITLE,
         video_url=str(request.url_for("stream_public_share_video", token=token)),
         active=record.share.active,
+        published_at=(
+            record.share.created_at.replace(tzinfo=timezone.utc)
+            if record.share.created_at.tzinfo is None
+            else record.share.created_at.astimezone(timezone.utc)
+        ),
     )
 
 

@@ -8,6 +8,8 @@ from alembic.migration import MigrationContext
 from alembic.operations import Operations
 from alembic.script import ScriptDirectory
 
+from tests.migration_contract import EXPECTED_ALEMBIC_HEAD
+
 
 def _load_migration():
     migrations = list(Path("alembic/versions").glob("*_add_append_only_analytics_events.py"))
@@ -37,7 +39,7 @@ def _insert_event(connection, event_id: str) -> None:
 def test_analytics_migration_is_single_head_and_append_only_on_sqlite(monkeypatch):
     migration = _load_migration()
     assert migration.down_revision == "e1f2a3b4c5d6"
-    assert ScriptDirectory.from_config(Config("alembic.ini")).get_heads() == ["e8f9a0b1c2d3"]
+    assert ScriptDirectory.from_config(Config("alembic.ini")).get_heads() == [EXPECTED_ALEMBIC_HEAD]
 
     engine = sa.create_engine("sqlite:///:memory:")
     metadata = sa.MetaData()

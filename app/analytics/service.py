@@ -195,6 +195,7 @@ async def append_server_event(
     utm_source = _safe_campaign_token(user.utm_source) if user else None
     utm_medium = _safe_campaign_token(user.utm_medium) if user else None
     utm_campaign = _safe_campaign_token(user.utm_campaign) if user else None
+    utm_content = _safe_campaign_token(user.utm_content) if user else None
     user_id = user.id if user else None
     acquisition_source = (
         "social"
@@ -215,6 +216,7 @@ async def append_server_event(
         "utm_source": utm_source,
         "utm_medium": utm_medium,
         "utm_campaign": utm_campaign,
+        "utm_content": utm_content,
         "device_class": "unknown",
         "properties": typed_properties,
     }
@@ -230,7 +232,6 @@ async def append_server_event(
             "received_at": datetime.now(timezone.utc),
             "anonymous_session_id": anonymous_session_id,
             "user_id": user_id,
-            "utm_content": None,
             "utm_term": None,
             "payload_hash": payload_hash,
         },

@@ -24,5 +24,5 @@ export async function revokePublicShare(
 }
 
 export function canManagePublicShare(job: { status: string; download_url: string | null }): boolean {
-  return job.status === 'completed' && Boolean(job.download_url)
+  return ['editable', 'completed'].includes(job.status) && Boolean(job.download_url)
 }

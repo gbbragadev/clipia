@@ -229,10 +229,15 @@ class MetaConversionOutbox(Base):
     __tablename__ = "meta_conversion_outbox"
     __table_args__ = (
         CheckConstraint(
-            "status IN ('pending', 'retry', 'sent', 'failed', 'cancelled')",
+            "status IN ('pending', 'retry', 'dispatching', 'sent', 'failed', 'cancelled')",
             name="ck_meta_outbox_status",
         ),
         CheckConstraint("attempts >= 0", name="ck_meta_outbox_attempts_nonnegative"),
+        CheckConstraint(
+            "(status = 'dispatching' AND lease_token IS NOT NULL AND lease_until IS NOT NULL) "
+            "OR (status <> 'dispatching' AND lease_token IS NULL AND lease_until IS NULL)",
+            name="ck_meta_outbox_lease_state",
+        ),
         Index("ix_meta_outbox_dispatch", "status", "next_attempt_at"),
         Index("ix_meta_outbox_user_status", "user_id", "status"),
     )
@@ -249,6 +254,8 @@ class MetaConversionOutbox(Base):
     )
     last_attempt_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     last_error: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    lease_token: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    lease_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
     sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
@@ -663,6 +670,7 @@ class User(Base):
     utm_source: Mapped[str | None] = mapped_column(String(100), nullable=True)
     utm_medium: Mapped[str | None] = mapped_column(String(100), nullable=True)
     utm_campaign: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    utm_content: Mapped[str | None] = mapped_column(String(100), nullable=True)
     selected_package: Mapped[str | None] = mapped_column(String(20), nullable=True)
     otp_attempts: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     referral_code: Mapped[str] = mapped_column(

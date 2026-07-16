@@ -28,13 +28,13 @@ test('publish and revoke use encoded job routes with their exact HTTP methods', 
   ])
 })
 
-test('public sharing gating accepts only completed videos with a downloadable artifact', async () => {
+test('public sharing gating accepts delivered editable or completed videos with a downloadable artifact', async () => {
   const module = await loadPublicShareActions()
   assert.equal(typeof module.canManagePublicShare, 'function')
   const canManagePublicShare = module.canManagePublicShare as (job: { status: string; download_url: string | null }) => boolean
 
   assert.equal(canManagePublicShare({ status: 'completed', download_url: '/download/video' }), true)
   assert.equal(canManagePublicShare({ status: 'completed', download_url: null }), false)
-  assert.equal(canManagePublicShare({ status: 'editable', download_url: '/download/video' }), false)
+  assert.equal(canManagePublicShare({ status: 'editable', download_url: '/download/video' }), true)
   assert.equal(canManagePublicShare({ status: 'processing', download_url: '/download/video' }), false)
 })

@@ -214,7 +214,7 @@ async def claim_social_share_reward(
     """Reward an owner once after the first qualified visit to any public share."""
     if (
         completed_job.user_id != owner.id
-        or completed_job.status != "completed"
+        or completed_job.status not in {"editable", "completed"}
         or completed_job.completed_at is None
         or completed_job.video_url is None
     ):

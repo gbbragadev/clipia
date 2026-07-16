@@ -20,6 +20,7 @@ interface ShowcaseEntry {
   niche: string;
   video: string;
   poster?: string;
+  published_at?: string;
 }
 
 interface ResolvedVideo extends ShowcaseEntry {
@@ -48,6 +49,7 @@ const resolveVideo = cache(async (id: string): Promise<ResolvedVideo | null> => 
       niche: "conteúdo de criador",
       // O navegador recebe apenas a rota pública; nenhum caminho de armazenamento é exposto.
       video: `/api/v1/public-shares/${encodeURIComponent(id)}/video`,
+      published_at: publicShare.published_at,
       kind: "public",
     };
   } catch (error) {
@@ -70,7 +72,7 @@ export default async function SharePage({ params }: PageProps<"/v/[id]">) {
   const video = await resolveVideo(id);
   if (!video) notFound();
 
-  const cta = `/auth/register?utm_source=share&utm_medium=organic&utm_campaign=v-page&utm_content=${encodeURIComponent(video.id)}`;
+  const cta = "/auth/register?utm_source=public_share&utm_medium=organic_social&utm_campaign=creator20_v1&utm_content=public_video";
   const isShowcase = video.kind === "showcase";
   const displayTitle = getShareDisplayTitle(video);
 

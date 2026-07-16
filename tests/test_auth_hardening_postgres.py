@@ -14,6 +14,7 @@ from app.auth.reset_tokens import consume_password_reset_token
 from app.auth.service import hash_password
 from app.config import settings
 from app.db.models import PasswordResetToken, User
+from tests.migration_contract import EXPECTED_ALEMBIC_HEAD
 
 _ADMIN_DSN = os.getenv(
     "POSTGRES_PAYMENT_TEST_ADMIN_DSN",
@@ -120,6 +121,6 @@ def test_postgres_reset_token_is_consumed_exactly_once_and_migration_round_trips
 
         assert asyncio.run(inspect_state()) == ("f3a4b5c6d7e8", False, False)
         command.upgrade(config, "head")
-        assert asyncio.run(inspect_state()) == ("e8f9a0b1c2d3", True, True)
+        assert asyncio.run(inspect_state()) == (EXPECTED_ALEMBIC_HEAD, True, True)
     finally:
         asyncio.run(_drop_database(database_name))

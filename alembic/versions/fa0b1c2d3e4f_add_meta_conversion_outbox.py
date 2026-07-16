@@ -18,6 +18,7 @@ depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
+    op.add_column("users", sa.Column("utm_content", sa.String(length=100), nullable=True))
     payload_type = sa.JSON().with_variant(postgresql.JSONB(astext_type=sa.Text()), "postgresql")
     op.create_table(
         "meta_conversion_outbox",
@@ -31,12 +32,19 @@ def upgrade() -> None:
         sa.Column("next_attempt_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
         sa.Column("last_attempt_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("last_error", sa.String(length=255), nullable=True),
+        sa.Column("lease_token", sa.String(length=36), nullable=True),
+        sa.Column("lease_until", sa.DateTime(timezone=True), nullable=True),
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
         sa.Column("sent_at", sa.DateTime(timezone=True), nullable=True),
         sa.CheckConstraint("attempts >= 0", name="ck_meta_outbox_attempts_nonnegative"),
         sa.CheckConstraint(
-            "status IN ('pending', 'retry', 'sent', 'failed', 'cancelled')",
+            "status IN ('pending', 'retry', 'dispatching', 'sent', 'failed', 'cancelled')",
             name="ck_meta_outbox_status",
+        ),
+        sa.CheckConstraint(
+            "(status = 'dispatching' AND lease_token IS NOT NULL AND lease_until IS NOT NULL) "
+            "OR (status <> 'dispatching' AND lease_token IS NULL AND lease_until IS NULL)",
+            name="ck_meta_outbox_lease_state",
         ),
         sa.ForeignKeyConstraint(["user_id"], ["users.id"], ondelete="CASCADE"),
         sa.PrimaryKeyConstraint("id"),
@@ -60,3 +68,4 @@ def downgrade() -> None:
     op.drop_index("ix_meta_outbox_user_status", table_name="meta_conversion_outbox")
     op.drop_index("ix_meta_outbox_dispatch", table_name="meta_conversion_outbox")
     op.drop_table("meta_conversion_outbox")
+    op.drop_column("users", "utm_content")

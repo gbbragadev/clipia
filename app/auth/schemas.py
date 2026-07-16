@@ -41,6 +41,7 @@ class RegisterRequest(BaseModel):
     utm_source: str | None = Field(default=None, max_length=100)
     utm_medium: str | None = Field(default=None, max_length=100)
     utm_campaign: str | None = Field(default=None, max_length=100)
+    utm_content: str | None = Field(default=None, max_length=100)
     selected_package: PublicPackageIntent | None = Field(
         default=None,
         description="Optional public package intent to resume after email verification",

@@ -1,3 +1,5 @@
+from datetime import datetime
+
 from pydantic import UUID4, BaseModel, ConfigDict, Field
 
 
@@ -16,6 +18,7 @@ class PublicShareMetadata(StrictModel):
     title: str
     video_url: str
     active: bool
+    published_at: datetime
 
 
 class QualifiedViewRequest(StrictModel):
