@@ -291,6 +291,60 @@ class AcquisitionReward(Base):
     occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
+class PublicVideoShare(Base):
+    """Revocable public capability for one completed, owner-controlled video."""
+
+    __tablename__ = "public_video_shares"
+    __table_args__ = (
+        CheckConstraint(
+            "(active = true AND revoked_at IS NULL) OR (active = false AND revoked_at IS NOT NULL)",
+            name="ck_public_video_share_revocation_state",
+        ),
+        Index(
+            "uq_public_video_shares_active_job",
+            "job_id",
+            unique=True,
+            postgresql_where=text("active = true"),
+            sqlite_where=text("active = 1"),
+        ),
+        Index("ix_public_video_shares_owner_created", "owner_id", "created_at"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(GUID(), primary_key=True, default=uuid.uuid4)
+    job_id: Mapped[uuid.UUID] = mapped_column(GUID(), ForeignKey("jobs.id", ondelete="RESTRICT"), nullable=False)
+    owner_id: Mapped[uuid.UUID] = mapped_column(GUID(), ForeignKey("users.id", ondelete="RESTRICT"), nullable=False)
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
+    active: Mapped[bool] = mapped_column(default=True, server_default="true", nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class PublicShareVisit(Base):
+    """One qualified, pseudonymous visit; raw network addresses are never stored."""
+
+    __tablename__ = "public_share_visits"
+    __table_args__ = (
+        UniqueConstraint(
+            "share_id",
+            "anonymous_session_id",
+            name="uq_public_share_visit_session",
+        ),
+        CheckConstraint(
+            "user_agent_classification IN ('browser', 'bot', 'unknown')",
+            name="ck_public_share_visit_user_agent_classification",
+        ),
+        Index("ix_public_share_visits_share_visited", "share_id", "visited_at"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(GUID(), primary_key=True, default=uuid.uuid4)
+    share_id: Mapped[uuid.UUID] = mapped_column(
+        GUID(), ForeignKey("public_video_shares.id", ondelete="RESTRICT"), nullable=False
+    )
+    anonymous_session_id: Mapped[uuid.UUID] = mapped_column(GUID(), nullable=False)
+    user_agent_classification: Mapped[str] = mapped_column(String(20), nullable=False)
+    visited_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
 class ReferralCreditAward(Base):
     """Historical record of the retired verified-referral credit policy."""
 
@@ -438,7 +492,8 @@ class AnalyticsEvent(Base):
             "'onboarding_step_viewed', 'editor_opened', 'user_registered', "
             "'email_verified', 'generation_requested', 'generation_completed', "
             "'generation_failed', 'video_exported', 'checkout_started', "
-            "'payment_completed', 'credit_balance_changed', 'second_generation_requested')",
+            "'payment_completed', 'credit_balance_changed', 'second_generation_requested', "
+            "'public_share_published', 'public_share_visited', 'public_share_rewarded')",
             name="ck_analytics_event_name",
         ),
         CheckConstraint("schema_version = 1", name="ck_analytics_schema_version"),

@@ -304,6 +304,7 @@ class CreditBalanceChangedProperties(StrictModel):
         "referral",
         "campaign_signup",
         "referral_activation",
+        "social_share",
         "other",
     ]
     delta: int = Field(ge=-10_000, le=10_000)

@@ -4,6 +4,8 @@ import uuid
 from datetime import datetime
 
 from sqlalchemy import func, or_, select, update
+from sqlalchemy.dialects.postgresql import insert as postgresql_insert
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.analytics.service import append_server_event
@@ -15,6 +17,8 @@ CAMPAIGN_OFFER_CODE = "creator20_v1"
 CAMPAIGN_REWARD_CREDITS = 18
 REFERRAL_REWARD_TYPE = "referral_activation"
 REFERRAL_ACTIVATION_CREDITS = 18
+SOCIAL_SHARE_REWARD_TYPE = "social_share"
+SOCIAL_SHARE_REWARD_CREDITS = 2
 _ACQUISITION_REWARD_TYPES = (CAMPAIGN_REWARD_TYPE, REFERRAL_REWARD_TYPE)
 
 
@@ -45,6 +49,25 @@ async def _credit_reward(
 ) -> int:
     db.add(reward)
     await db.flush()
+    return await _apply_reward_credit(
+        db,
+        recipient=recipient,
+        reward=reward,
+        reason=reason,
+        origin=origin,
+        occurred_at=occurred_at,
+    )
+
+
+async def _apply_reward_credit(
+    db: AsyncSession,
+    *,
+    recipient: User,
+    reward: AcquisitionReward,
+    reason: str,
+    origin: str,
+    occurred_at: datetime,
+) -> int:
     idempotency_key = f"acquisition:{recipient.id}:{reward.reward_type}"
     await set_credit_ledger_context(
         db,
@@ -69,6 +92,30 @@ async def _credit_reward(
         occurred_at=occurred_at,
     )
     return reward.credits
+
+
+async def _insert_social_reward_once(db: AsyncSession, reward: AcquisitionReward) -> bool:
+    values = {
+        "id": reward.id,
+        "user_id": reward.user_id,
+        "reward_type": reward.reward_type,
+        "credits": reward.credits,
+        "marketing_offer_id": reward.marketing_offer_id,
+        "source_user_id": reward.source_user_id,
+        "completed_job_id": reward.completed_job_id,
+        "occurred_at": reward.occurred_at,
+    }
+    dialect = db.get_bind().dialect.name
+    if dialect == "postgresql":
+        statement = postgresql_insert(AcquisitionReward).values(**values)
+    elif dialect == "sqlite":
+        statement = sqlite_insert(AcquisitionReward).values(**values)
+    else:  # pragma: no cover - supported deployments/tests are PostgreSQL/SQLite
+        raise RuntimeError(f"Unsupported acquisition reward database dialect: {dialect}")
+    statement = statement.on_conflict_do_nothing(
+        index_elements=[AcquisitionReward.user_id, AcquisitionReward.reward_type]
+    ).returning(AcquisitionReward.id)
+    return (await db.execute(statement)).scalar_one_or_none() is not None
 
 
 async def claim_campaign_reward(db: AsyncSession, user: User, occurred_at: datetime) -> int:
@@ -154,5 +201,43 @@ async def claim_referral_activation_reward(
         reward=reward,
         reason=REFERRAL_REWARD_TYPE,
         origin="referral_activation_reward",
+        occurred_at=occurred_at,
+    )
+
+
+async def claim_social_share_reward(
+    db: AsyncSession,
+    owner: User,
+    completed_job: Job,
+    occurred_at: datetime,
+) -> int:
+    """Reward an owner once after the first qualified visit to any public share."""
+    if (
+        completed_job.user_id != owner.id
+        or completed_job.status != "completed"
+        or completed_job.completed_at is None
+        or completed_job.video_url is None
+    ):
+        return 0
+
+    recipient = await _lock_reward_recipient(db, owner.id)
+    if recipient is None:
+        return 0
+    reward = AcquisitionReward(
+        id=uuid.uuid4(),
+        user_id=recipient.id,
+        reward_type=SOCIAL_SHARE_REWARD_TYPE,
+        credits=SOCIAL_SHARE_REWARD_CREDITS,
+        completed_job_id=completed_job.id,
+        occurred_at=occurred_at,
+    )
+    if not await _insert_social_reward_once(db, reward):
+        return 0
+    return await _apply_reward_credit(
+        db,
+        recipient=recipient,
+        reward=reward,
+        reason=SOCIAL_SHARE_REWARD_TYPE,
+        origin="social_share_reward",
         occurred_at=occurred_at,
     )
