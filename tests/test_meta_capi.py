@@ -2,19 +2,27 @@ from __future__ import annotations
 
 import importlib.util
 import json
+from collections.abc import Awaitable, Callable
 from datetime import datetime, timedelta, timezone
+from typing import Protocol
 
 import pytest
+from httpx import AsyncClient
 from pydantic import SecretStr
 from sqlalchemy import func, select, update
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings, settings
 from app.db.base import Base
-from app.db.models import MetaConversionOutbox, User
+from app.db.models import CreditPurchase, MetaConversionOutbox, User
 from app.marketing import meta_capi
 
 
-def test_meta_capi_defaults_off_and_outbox_has_durable_retry_fields():
+class _PurchaseFactory(Protocol):
+    def __call__(self, *, provider: str, snapshot: bool) -> Awaitable[CreditPurchase]: ...
+
+
+def test_meta_capi_defaults_off_and_outbox_has_durable_retry_fields() -> None:
     configured = Settings(_env_file=None)
     assert configured.META_CAPI_ENABLED is False
 
@@ -43,17 +51,17 @@ def test_meta_capi_defaults_off_and_outbox_has_durable_retry_fields():
     assert "cancelled" in str(status_check.sqltext)
 
 
-def test_meta_capi_service_module_exists():
+def test_meta_capi_service_module_exists() -> None:
     assert importlib.util.find_spec("app.marketing.meta_capi") is not None
 
 
-def test_meta_dispatcher_is_callable_and_wired_to_conservative_beat(monkeypatch):
+def test_meta_dispatcher_is_callable_and_wired_to_conservative_beat(monkeypatch: pytest.MonkeyPatch) -> None:
     from app.worker import tasks
     from app.worker.celery_app import celery_app
 
     calls = 0
 
-    async def fake_dispatch():
+    async def fake_dispatch() -> dict[str, int]:
         nonlocal calls
         calls += 1
         return {"sent": 1, "retried": 0, "failed": 0, "cancelled": 0, "unsupported": 0}
@@ -72,7 +80,7 @@ def test_meta_dispatcher_is_callable_and_wired_to_conservative_beat(monkeypatch)
     assert timedelta(minutes=1) <= entry["schedule"] <= timedelta(minutes=10)
 
 
-def _configure_meta(monkeypatch, *, enabled: bool = True) -> None:
+def _configure_meta(monkeypatch: pytest.MonkeyPatch, *, enabled: bool = True) -> None:
     monkeypatch.setattr(settings, "META_CAPI_ENABLED", enabled)
     monkeypatch.setattr(settings, "META_CAPI_PIXEL_ID", "pixel-123")
     monkeypatch.setattr(settings, "META_CAPI_ACCESS_TOKEN", SecretStr("meta-access-token"))
@@ -82,8 +90,8 @@ def _configure_meta(monkeypatch, *, enabled: bool = True) -> None:
 
 @pytest.mark.asyncio
 async def test_enqueue_requires_enabled_complete_config_and_consent_and_never_stores_raw_email(
-    db_session, verified_user, monkeypatch
-):
+    db_session: AsyncSession, verified_user: User, monkeypatch: pytest.MonkeyPatch
+) -> None:
     assert hasattr(meta_capi, "enqueue_meta_conversion")
     enqueue_meta_conversion = meta_capi.enqueue_meta_conversion
     verified_user.marketing_measurement_consented_at = datetime.now(timezone.utc)
@@ -162,11 +170,13 @@ class _SuccessfulResponse:
 
 
 class _RecordingClient:
-    def __init__(self, *, failure: Exception | None = None):
+    def __init__(self, *, failure: Exception | None = None) -> None:
         self.failure = failure
-        self.calls: list[dict] = []
+        self.calls: list[dict[str, object]] = []
 
-    async def post(self, url, *, json, headers, timeout):
+    async def post(
+        self, url: str, *, json: dict[str, object], headers: dict[str, str], timeout: float
+    ) -> _SuccessfulResponse:
         self.calls.append({"url": url, "json": json, "headers": headers, "timeout": timeout})
         if self.failure is not None:
             raise self.failure
@@ -175,8 +185,8 @@ class _RecordingClient:
 
 @pytest.mark.asyncio
 async def test_dispatch_is_disabled_without_config_and_sqlite_is_explicitly_unsupported_without_network(
-    db_session, verified_user, monkeypatch
-):
+    db_session: AsyncSession, verified_user: User, monkeypatch: pytest.MonkeyPatch
+) -> None:
     assert hasattr(meta_capi, "dispatch_pending_meta_conversions")
     _configure_meta(monkeypatch)
     consented_at = datetime.now(timezone.utc)
@@ -209,7 +219,9 @@ async def test_dispatch_is_disabled_without_config_and_sqlite_is_explicitly_unsu
 
 
 @pytest.mark.asyncio
-async def test_dispatch_revalidates_consent_and_cancels_without_network(db_session, verified_user, monkeypatch):
+async def test_dispatch_revalidates_consent_and_cancels_without_network(
+    db_session: AsyncSession, verified_user: User, monkeypatch: pytest.MonkeyPatch
+) -> None:
     _configure_meta(monkeypatch)
     verified_user.marketing_measurement_consented_at = datetime.now(timezone.utc)
     event_id = f"complete-registration:{verified_user.id}"
@@ -235,8 +247,12 @@ async def test_dispatch_revalidates_consent_and_cancels_without_network(db_sessi
 
 @pytest.mark.asyncio
 async def test_account_deletion_cancels_pending_meta_outbox(
-    client, db_session, verified_user, auth_headers, monkeypatch
-):
+    client: AsyncClient,
+    db_session: AsyncSession,
+    verified_user: User,
+    auth_headers: Callable[[User], dict[str, str]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     _configure_meta(monkeypatch)
     consented_at = datetime.now(timezone.utc)
     verified_user.marketing_measurement_consented_at = consented_at
@@ -267,8 +283,8 @@ async def test_account_deletion_cancels_pending_meta_outbox(
 
 @pytest.mark.asyncio
 async def test_successful_email_verification_enqueues_one_deterministic_complete_registration(
-    client, db_session, monkeypatch
-):
+    client: AsyncClient, db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
     _configure_meta(monkeypatch)
     registered = await client.post(
         "/api/v1/auth/register",
@@ -303,8 +319,11 @@ async def test_successful_email_verification_enqueues_one_deterministic_complete
 
 @pytest.mark.asyncio
 async def test_canonical_paid_transition_enqueues_one_deterministic_purchase(
-    db_session, verified_user, purchase_factory, monkeypatch
-):
+    db_session: AsyncSession,
+    verified_user: User,
+    purchase_factory: _PurchaseFactory,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from app.payments.service import _apply_payment_event
 
     _configure_meta(monkeypatch)
@@ -352,7 +371,9 @@ async def test_canonical_paid_transition_enqueues_one_deterministic_purchase(
 
 
 @pytest.mark.asyncio
-async def test_meta_enqueue_failure_never_rolls_back_email_verification(client, db_session, monkeypatch):
+async def test_meta_enqueue_failure_never_rolls_back_email_verification(
+    client: AsyncClient, db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
     _configure_meta(monkeypatch)
     registered = await client.post(
         "/api/v1/auth/register",
@@ -369,7 +390,7 @@ async def test_meta_enqueue_failure_never_rolls_back_email_verification(client, 
     assert user is not None and user.verification_code is not None
     user_id = user.id
 
-    async def fail_enqueue(*_args, **_kwargs):
+    async def fail_enqueue(*_args: object, **_kwargs: object) -> None:
         raise RuntimeError("optional marketing persistence failed")
 
     monkeypatch.setattr(meta_capi, "enqueue_meta_conversion", fail_enqueue)
@@ -387,8 +408,11 @@ async def test_meta_enqueue_failure_never_rolls_back_email_verification(client, 
 
 @pytest.mark.asyncio
 async def test_meta_enqueue_failure_never_rolls_back_paid_transition(
-    db_session, verified_user, purchase_factory, monkeypatch
-):
+    db_session: AsyncSession,
+    verified_user: User,
+    purchase_factory: _PurchaseFactory,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from app.payments.service import _apply_payment_event
 
     _configure_meta(monkeypatch)
@@ -401,7 +425,7 @@ async def test_meta_enqueue_failure_never_rolls_back_paid_transition(
     purchase = await purchase_factory(provider="stripe", snapshot=True)
     initial_credits = (await db_session.get(User, verified_user.id)).credits
 
-    async def fail_enqueue(*_args, **_kwargs):
+    async def fail_enqueue(*_args: object, **_kwargs: object) -> None:
         raise RuntimeError("optional marketing persistence failed")
 
     monkeypatch.setattr(meta_capi, "enqueue_meta_conversion", fail_enqueue)

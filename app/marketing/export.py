@@ -42,7 +42,9 @@ _ATTRIBUTION_ALLOWLISTS: dict[str, frozenset[str]] = {
 _CURSOR_CONTEXT = b"clipia-marketing-cursor:v1:"
 _CUSTOMER_CONTEXT = b"clipia-marketing-customer:v1:"
 _CURSOR_VERSION = 1
-_CURSOR_EVENT_ID = re.compile(r"^(analytics|purchase):[0-9a-f]{8}-[0-9a-f-]{27}$")
+_CURSOR_EVENT_ID = re.compile(
+    r"^(?:analytics|purchase):(?P<uuid>[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$"
+)
 _EARLIEST_CURSOR_TIME = datetime(2020, 1, 1, tzinfo=timezone.utc)
 
 
@@ -149,7 +151,8 @@ def _decode_cursor(cursor: str | None) -> tuple[datetime, str] | None:
         if not _EARLIEST_CURSOR_TIME <= occurred_at <= datetime.now(timezone.utc) + timedelta(minutes=5):
             raise ValueError
         event_id = str(payload["e"])
-        if not _CURSOR_EVENT_ID.fullmatch(event_id):
+        event_id_match = _CURSOR_EVENT_ID.fullmatch(event_id)
+        if event_id_match is None or str(uuid.UUID(event_id_match.group("uuid"))) != event_id_match.group("uuid"):
             raise ValueError
         return occurred_at, event_id
     except (binascii.Error, KeyError, OverflowError, TypeError, UnicodeError, ValueError, json.JSONDecodeError) as exc:

@@ -4,6 +4,7 @@ import asyncio
 import os
 import re
 import uuid
+from collections.abc import AsyncGenerator
 from datetime import datetime, timezone
 
 import asyncpg
@@ -30,7 +31,7 @@ def _require_postgres_tests() -> None:
 
 
 @pytest_asyncio.fixture
-async def postgres_meta_sessions():
+async def postgres_meta_sessions() -> AsyncGenerator[async_sessionmaker[AsyncSession], None]:
     _require_postgres_tests()
     database_name = f"clipia_meta_test_{uuid.uuid4().hex[:12]}"
     assert re.fullmatch(r"clipia_meta_test_[0-9a-f]{12}", database_name)
@@ -53,7 +54,7 @@ async def postgres_meta_sessions():
         await admin.close()
 
 
-def _configure_meta(monkeypatch) -> None:
+def _configure_meta(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(settings, "META_CAPI_ENABLED", True)
     monkeypatch.setattr(settings, "META_CAPI_PIXEL_ID", "pixel-postgres")
     monkeypatch.setattr(settings, "META_CAPI_ACCESS_TOKEN", SecretStr("postgres-access-token"))
@@ -67,18 +68,18 @@ class _Response:
 
 
 class _Client:
-    def __init__(self, *, failure: Exception | None = None):
+    def __init__(self, *, failure: Exception | None = None) -> None:
         self.calls = 0
         self.failure = failure
 
-    async def post(self, *_args, **_kwargs):
+    async def post(self, *_args: object, **_kwargs: object) -> _Response:
         self.calls += 1
         if self.failure is not None:
             raise self.failure
         return _Response()
 
 
-async def _seed_event(sessions) -> tuple[uuid.UUID, uuid.UUID]:
+async def _seed_event(sessions: async_sessionmaker[AsyncSession]) -> tuple[uuid.UUID, uuid.UUID]:
     async with sessions() as db:
         user = User(
             email=f"meta-pg-{uuid.uuid4().hex}@example.com",
@@ -104,7 +105,9 @@ async def _seed_event(sessions) -> tuple[uuid.UUID, uuid.UUID]:
 
 
 @pytest.mark.asyncio
-async def test_postgres_dispatch_skips_locked_outbox_row(postgres_meta_sessions, monkeypatch):
+async def test_postgres_dispatch_skips_locked_outbox_row(
+    postgres_meta_sessions: async_sessionmaker[AsyncSession], monkeypatch: pytest.MonkeyPatch
+) -> None:
     _configure_meta(monkeypatch)
     sessions = postgres_meta_sessions
     _user_id, row_id = await _seed_event(sessions)
@@ -132,7 +135,9 @@ async def test_postgres_dispatch_skips_locked_outbox_row(postgres_meta_sessions,
 
 
 @pytest.mark.asyncio
-async def test_postgres_dispatch_revalidates_revoked_consent_before_network(postgres_meta_sessions, monkeypatch):
+async def test_postgres_dispatch_revalidates_revoked_consent_before_network(
+    postgres_meta_sessions: async_sessionmaker[AsyncSession], monkeypatch: pytest.MonkeyPatch
+) -> None:
     _configure_meta(monkeypatch)
     sessions = postgres_meta_sessions
     user_id, row_id = await _seed_event(sessions)
@@ -152,7 +157,9 @@ async def test_postgres_dispatch_revalidates_revoked_consent_before_network(post
 
 
 @pytest.mark.asyncio
-async def test_postgres_dispatch_failure_persists_retry_without_losing_event(postgres_meta_sessions, monkeypatch):
+async def test_postgres_dispatch_failure_persists_retry_without_losing_event(
+    postgres_meta_sessions: async_sessionmaker[AsyncSession], monkeypatch: pytest.MonkeyPatch
+) -> None:
     _configure_meta(monkeypatch)
     sessions = postgres_meta_sessions
     _user_id, row_id = await _seed_event(sessions)
@@ -169,7 +176,9 @@ async def test_postgres_dispatch_failure_persists_retry_without_losing_event(pos
 
 
 @pytest.mark.asyncio
-async def test_postgres_concurrent_same_event_id_inserts_once(postgres_meta_sessions, monkeypatch):
+async def test_postgres_concurrent_same_event_id_inserts_once(
+    postgres_meta_sessions: async_sessionmaker[AsyncSession], monkeypatch: pytest.MonkeyPatch
+) -> None:
     _configure_meta(monkeypatch)
     sessions = postgres_meta_sessions
     async with sessions() as seed:

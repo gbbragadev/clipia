@@ -7,8 +7,10 @@ from typing import get_type_hints
 
 import pytest
 from fastapi import HTTPException
+from httpx import AsyncClient
 from pydantic import SecretStr
 from sqlalchemy import update
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.db.models import AnalyticsEvent, CreditPurchase, User
@@ -19,7 +21,9 @@ from app.marketing.schemas import Attribution, MarketingConversion, MarketingCon
 pytestmark = pytest.mark.asyncio
 
 
-def _server_event(*, user_id, event_name: str, occurred_at: datetime, source: str = "paid") -> AnalyticsEvent:
+def _server_event(
+    *, user_id: uuid.UUID, event_name: str, occurred_at: datetime, source: str = "paid"
+) -> AnalyticsEvent:
     return AnalyticsEvent(
         event_id=uuid.uuid4(),
         event_name=event_name,
@@ -45,7 +49,9 @@ def _marketing_headers() -> dict[str, str]:
     return {"X-Marketing-Token": "marketing-token-value"}
 
 
-async def test_marketing_export_requires_configured_constant_time_token(client, monkeypatch):
+async def test_marketing_export_requires_configured_constant_time_token(
+    client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
     monkeypatch.setattr(settings, "MARKETING_EXPORT_TOKEN", SecretStr("marketing-token-value"), raising=False)
     monkeypatch.setattr(settings, "MARKETING_PSEUDONYM_SECRET", SecretStr("pseudonym-secret-value"), raising=False)
 
@@ -59,7 +65,9 @@ async def test_marketing_export_requires_configured_constant_time_token(client, 
     assert valid.status_code == 200
 
 
-async def test_marketing_token_rejects_non_ascii_without_compare_digest_error(monkeypatch):
+async def test_marketing_token_rejects_non_ascii_without_compare_digest_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setattr(settings, "MARKETING_EXPORT_TOKEN", SecretStr("marketing-token-value"))
 
     with pytest.raises(HTTPException) as exc_info:
@@ -68,12 +76,14 @@ async def test_marketing_token_rejects_non_ascii_without_compare_digest_error(mo
     assert exc_info.value.status_code == 401
 
 
-async def test_marketing_routes_declare_response_return_annotations():
+async def test_marketing_routes_declare_response_return_annotations() -> None:
     assert get_type_hints(marketing_summary)["return"] is MarketingSummary
     assert get_type_hints(marketing_conversions)["return"] is MarketingConversionPage
 
 
-async def test_marketing_summary_rejects_reversed_oversized_and_future_ranges(client, monkeypatch):
+async def test_marketing_summary_rejects_reversed_oversized_and_future_ranges(
+    client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
     monkeypatch.setattr(settings, "MARKETING_EXPORT_TOKEN", SecretStr("marketing-token-value"))
     monkeypatch.setattr(settings, "MARKETING_PSEUDONYM_SECRET", SecretStr("pseudonym-secret-value"))
     headers = {"X-Marketing-Token": "marketing-token-value"}
@@ -91,7 +101,9 @@ async def test_marketing_summary_rejects_reversed_oversized_and_future_ranges(cl
     assert future_range.status_code == 422
 
 
-async def test_marketing_summary_allows_exactly_ninety_inclusive_utc_dates(client, monkeypatch):
+async def test_marketing_summary_allows_exactly_ninety_inclusive_utc_dates(
+    client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
     monkeypatch.setattr(settings, "MARKETING_EXPORT_TOKEN", SecretStr("marketing-token-value"))
     monkeypatch.setattr(settings, "MARKETING_PSEUDONYM_SECRET", SecretStr("pseudonym-secret-value"))
     today_utc = datetime.now(timezone.utc).date()
@@ -113,8 +125,11 @@ async def test_marketing_summary_allows_exactly_ninety_inclusive_utc_dates(clien
 
 
 async def test_marketing_summary_uses_first_party_events_and_only_paid_purchases(
-    client, db_session, verified_user, monkeypatch
-):
+    client: AsyncClient,
+    db_session: AsyncSession,
+    verified_user: User,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setattr(settings, "MARKETING_EXPORT_TOKEN", SecretStr("marketing-token-value"))
     monkeypatch.setattr(settings, "MARKETING_PSEUDONYM_SECRET", SecretStr("pseudonym-secret-value"))
     occurred_at = datetime(2026, 7, 10, 12, tzinfo=timezone.utc)
@@ -162,8 +177,11 @@ async def test_marketing_summary_uses_first_party_events_and_only_paid_purchases
 
 
 async def test_marketing_conversions_are_cursor_paginated_stable_and_recursively_pii_free(
-    client, db_session, verified_user, monkeypatch
-):
+    client: AsyncClient,
+    db_session: AsyncSession,
+    verified_user: User,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setattr(settings, "MARKETING_EXPORT_TOKEN", SecretStr("marketing-token-value"))
     monkeypatch.setattr(settings, "MARKETING_PSEUDONYM_SECRET", SecretStr("pseudonym-secret-value"))
     # Historical rows may predate stricter attribution validation. The export
@@ -249,8 +267,11 @@ async def test_marketing_conversions_are_cursor_paginated_stable_and_recursively
 
 
 async def test_marketing_attribution_exports_only_explicit_field_allowlists(
-    client, db_session, verified_user, monkeypatch
-):
+    client: AsyncClient,
+    db_session: AsyncSession,
+    verified_user: User,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setattr(settings, "MARKETING_EXPORT_TOKEN", SecretStr("marketing-token-value"))
     monkeypatch.setattr(settings, "MARKETING_PSEUDONYM_SECRET", SecretStr("pseudonym-secret-value"))
     occurred_at = datetime.now(timezone.utc) - timedelta(minutes=1)
@@ -308,7 +329,12 @@ async def test_marketing_attribution_exports_only_explicit_field_allowlists(
         assert all(value is None for key, value in item["attribution"].items() if key.startswith("utm_"))
 
 
-async def test_marketing_conversion_keyset_walks_all_global_ties_once(client, db_session, verified_user, monkeypatch):
+async def test_marketing_conversion_keyset_walks_all_global_ties_once(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    verified_user: User,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setattr(settings, "MARKETING_EXPORT_TOKEN", SecretStr("marketing-token-value"))
     monkeypatch.setattr(settings, "MARKETING_PSEUDONYM_SECRET", SecretStr("pseudonym-secret-value"))
     occurred_at = datetime.now(timezone.utc) - timedelta(minutes=1)
@@ -371,8 +397,11 @@ async def test_marketing_conversion_keyset_walks_all_global_ties_once(client, db
 
 
 async def test_marketing_cursor_is_signed_and_rejects_tampering_and_extreme_dates(
-    client, db_session, verified_user, monkeypatch
-):
+    client: AsyncClient,
+    db_session: AsyncSession,
+    verified_user: User,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setattr(settings, "MARKETING_EXPORT_TOKEN", SecretStr("marketing-token-value"))
     monkeypatch.setattr(settings, "MARKETING_PSEUDONYM_SECRET", SecretStr("pseudonym-secret-value"))
     event = _server_event(
@@ -424,3 +453,25 @@ async def test_marketing_cursor_is_signed_and_rejects_tampering_and_extreme_date
     assert bad_payload.status_code == 422
     assert bad_signature.status_code == 422
     assert extreme_date.status_code == 422
+
+
+async def test_marketing_cursor_rejects_signed_noncanonical_event_uuid(
+    client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(settings, "MARKETING_EXPORT_TOKEN", SecretStr("marketing-token-value"))
+    monkeypatch.setattr(settings, "MARKETING_PSEUDONYM_SECRET", SecretStr("pseudonym-secret-value"))
+    malformed = MarketingConversion(
+        event_id="analytics:00000000-0000-4000-8000-00000000000-",
+        event_type="email_verified",
+        occurred_at=datetime.now(timezone.utc) - timedelta(minutes=1),
+        customer_ref="a" * 64,
+        attribution=Attribution(acquisition_source="direct"),
+    )
+
+    response = await client.get(
+        "/api/v1/internal/marketing/conversions",
+        params={"cursor": _encode_cursor(malformed)},
+        headers=_marketing_headers(),
+    )
+
+    assert response.status_code == 422

@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import logging
 import re
+import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
@@ -130,7 +131,7 @@ async def enqueue_meta_conversion_safely(
         return False
 
 
-async def cancel_pending_meta_conversions(db: AsyncSession, *, user_id, reason: str) -> int:
+async def cancel_pending_meta_conversions(db: AsyncSession, *, user_id: uuid.UUID, reason: str) -> int:
     """Cancel unsent events when measurement consent or the account is withdrawn."""
     result = await db.execute(
         update(MetaConversionOutbox)
