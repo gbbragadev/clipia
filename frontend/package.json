@@ -7,6 +7,7 @@
     "build": "next build",
     "start": "next start",
     "test:e2e": "playwright test",
+    "test:editor-unit": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test src/lib/editor-render-revision.test.ts src/lib/render-background.test.ts src/lib/editor-timeline.test.ts src/lib/signed-media-url.test.ts",
     "test:release-b": "playwright test tests/release-b-public.spec.js --config=playwright.config.mjs --project=chromium"
   },
   "dependencies": {

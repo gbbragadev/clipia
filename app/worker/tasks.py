@@ -493,6 +493,31 @@ def _mark_generation_worker_started(
         return parsed_dispatch_id is None
 
 
+def _persisted_rendered_revision(job_id: str) -> int | None:
+    state_path = get_job_dir(job_id) / "editor_state.json"
+    try:
+        state = _read_json_file(state_path) if state_path.exists() else {}
+        composition = state.get("composition", {}) if isinstance(state, dict) else {}
+        revision = composition.get("renderedRevision") if isinstance(composition, dict) else None
+        return revision if type(revision) is int and revision >= 0 else None
+    except Exception:  # noqa: BLE001 - revision history must not reinterpret corrupt state
+        logger.warning("Ignoring invalid persisted render revision job=%s", job_id, exc_info=True)
+        return None
+
+
+def _prune_revision_archives(archive_dir: Path, *, keep: int = 5) -> None:
+    revisions: list[tuple[int, Path]] = []
+    for candidate in archive_dir.glob("revision-*.mp4"):
+        try:
+            revision = int(candidate.stem.removeprefix("revision-"))
+        except ValueError:
+            continue
+        if revision >= 0:
+            revisions.append((revision, candidate))
+    for _, stale_path in sorted(revisions)[:-keep]:
+        stale_path.unlink(missing_ok=True)
+
+
 def _publish_rerender_operation(
     job_id: str,
     operation_id: str | None,
@@ -517,6 +542,14 @@ def _publish_rerender_operation(
     canonical_thumbnail = output_dir / f"{job_id}.jpg"
     backup_video = output_dir / f".{job_id}.{operation_suffix}.backup.mp4"
     backup_thumbnail = output_dir / f".{job_id}.{operation_suffix}.backup.jpg"
+    previous_revision = _persisted_rendered_revision(job_id)
+    archive_dir = output_dir / "revisions" / job_id
+    archive_video = archive_dir / f"revision-{previous_revision}.mp4" if previous_revision is not None else None
+    archive_temp = (
+        archive_dir / f".revision-{previous_revision}.{operation_suffix}.part"
+        if previous_revision is not None
+        else None
+    )
     final_src: str | None = None
 
     async def _publish() -> str | None:
@@ -543,6 +576,10 @@ def _publish_rerender_operation(
             thumbnail_published = False
             try:
                 if canonical_video.exists():
+                    if archive_video is not None and archive_temp is not None and not archive_video.exists():
+                        archive_dir.mkdir(parents=True, exist_ok=True)
+                        shutil.copy2(canonical_video, archive_temp)
+                        archive_temp.replace(archive_video)
                     canonical_video.replace(backup_video)
                 prepared_video.replace(canonical_video)
                 video_published = True
@@ -552,6 +589,11 @@ def _publish_rerender_operation(
                     prepared_thumbnail.replace(canonical_thumbnail)
                     thumbnail_published = True
                 await session.commit()
+                if archive_video is not None:
+                    try:
+                        _prune_revision_archives(archive_dir)
+                    except OSError:
+                        logger.warning("Could not prune render revisions job=%s", job_id, exc_info=True)
             except Exception:
                 await session.rollback()
                 if video_published:
@@ -579,6 +621,8 @@ def _publish_rerender_operation(
         prepared_thumbnail.unlink(missing_ok=True)
         backup_video.unlink(missing_ok=True)
         backup_thumbnail.unlink(missing_ok=True)
+        if archive_temp is not None:
+            archive_temp.unlink(missing_ok=True)
 
 
 def _refund_rerender_operation(job_id: str, operation_id: str | None) -> bool:
@@ -2421,6 +2465,11 @@ def task_rerender_video(
         if editor_state_path.exists():
             editor_state = json.loads(editor_state_path.read_text(encoding="utf-8"))
             comp_data = editor_state.get("composition", {})
+
+        from app.services.scene_order import apply_scene_order, validate_scene_order
+
+        scene_order = validate_scene_order(comp_data.get("sceneOrder"), len(script.get("scenes", [])), strict=False)
+        media_paths = apply_scene_order(media_paths, scene_order)
 
         if settings.RENDER_ENGINE == "remotion":
             from app.services.remotion import invoke_remotion_render

@@ -2,57 +2,7 @@
 
 import { useRef, useEffect, useState } from 'react'
 import { useEditor } from '@/contexts/EditorContext'
-
-function SceneThumbnail({ videoUrl }: { videoUrl: string | undefined }) {
-  const videoRef = useRef<HTMLVideoElement>(null)
-  const canvasRef = useRef<HTMLCanvasElement>(null)
-  const [thumb, setThumb] = useState<string | null>(null)
-
-  useEffect(() => {
-    if (!videoUrl) return
-    const video = document.createElement('video')
-    video.crossOrigin = 'anonymous'
-    video.muted = true
-    video.src = videoUrl
-    video.currentTime = 0.5
-    video.addEventListener('seeked', () => {
-      const canvas = document.createElement('canvas')
-      canvas.width = 120
-      canvas.height = 213 // 9:16
-      const ctx = canvas.getContext('2d')
-      if (ctx) {
-        ctx.drawImage(video, 0, 0, canvas.width, canvas.height)
-        setThumb(canvas.toDataURL('image/jpeg', 0.6))
-      }
-    }, { once: true })
-    video.load()
-  }, [videoUrl])
-
-  if (!thumb) {
-    return (
-      <div style={{
-        width: '100%', aspectRatio: '9/16',
-        background: 'linear-gradient(135deg, rgba(255,86,56,0.15), rgba(62,155,255,0.1))',
-        borderRadius: 6,
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-        fontSize: 20, color: 'rgba(255,255,255,0.2)',
-      }}>
-        ▶
-      </div>
-    )
-  }
-
-  return (
-    <img
-      src={thumb}
-      alt=""
-      style={{
-        width: '100%', aspectRatio: '9/16', objectFit: 'cover',
-        borderRadius: 6,
-      }}
-    />
-  )
-}
+import { SceneThumbnail } from './SceneThumbnail'
 
 export function SceneGrid() {
   const { composition, selectedSceneIndex, selectScene, updateScene, seekToFrame, totalFrames } = useEditor()
@@ -108,7 +58,10 @@ export function SceneGrid() {
           >
             {/* Thumbnail */}
             <div style={{ flex: '0 0 64px' }}>
-              <SceneThumbnail videoUrl={composition.mediaUrls[i]} />
+              <SceneThumbnail
+                mediaUrl={composition.mediaUrls[i]}
+                sceneNumber={i + 1}
+              />
             </div>
 
             {/* Content */}

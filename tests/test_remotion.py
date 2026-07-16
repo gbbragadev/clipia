@@ -92,3 +92,41 @@ def test_build_props_falls_back_to_ai_images(tmp_path, monkeypatch):
         "http://x:8005/storage/jobs/job4/images/scene_1.png",
         "http://x:8005/storage/jobs/job4/images/scene_2.png",
     ]
+
+
+def test_build_props_applies_scene_order_only_to_authoritative_media(tmp_path, monkeypatch):
+    monkeypatch.setattr(settings, "STORAGE_DIR", tmp_path)
+    job_dir = _make_job(tmp_path, "job5")
+    scenes = [
+        {"text": "c", "duration_hint": 5},
+        {"text": "a", "duration_hint": 5},
+        {"text": "b", "duration_hint": 5},
+    ]
+    (job_dir / "script.json").write_text(json.dumps({"title": "T", "scenes": scenes}), encoding="utf-8")
+    (job_dir / "words.json").write_text("[]", encoding="utf-8")
+    for index in range(3):
+        (job_dir / "media" / f"scene_{index}.mp4").write_bytes(b"owned")
+    (job_dir / "editor_state.json").write_text(
+        json.dumps(
+            {
+                "composition": {
+                    "sceneOrder": [2, 0, 1],
+                    "mediaUrls": [
+                        "file:///etc/passwd",
+                        "http://169.254.169.254/latest/meta-data",
+                        r"\\server\share\clip.mp4",
+                    ],
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    props = build_composition_props("job5", backend_url="http://x:8005")
+
+    assert [url.split("?")[0] for url in props["mediaUrls"]] == [
+        "http://x:8005/storage/jobs/job5/media/scene_2.mp4",
+        "http://x:8005/storage/jobs/job5/media/scene_0.mp4",
+        "http://x:8005/storage/jobs/job5/media/scene_1.mp4",
+    ]
+    assert [scene["text"] for scene in props["scenes"]] == ["c", "a", "b"]

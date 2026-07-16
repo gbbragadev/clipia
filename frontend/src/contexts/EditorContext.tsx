@@ -5,6 +5,14 @@ import type { PlayerRef } from '@remotion/player'
 import type { CompositionData, Scene, SubtitleStyle, VideoOverlay, VoiceConfig } from '@/remotion/types'
 import type { MusicAssetId } from '@/remotion/music-assets'
 import { fetchComposition, saveEditorState } from '@/lib/editor-api'
+import { reorderComposition } from '@/lib/editor-timeline'
+import {
+  finishRenderRevision,
+  hasUnrenderedChanges as hasPendingRender,
+  nextEditRevision,
+  restoreRevision as restoreRevisionState,
+  startRenderRevision,
+} from '@/lib/editor-render-revision'
 
 type PanelKey = 'scenes' | 'voice' | 'subtitles' | 'elements' | 'ai'
 
@@ -28,11 +36,13 @@ interface EditorContextValue {
   playerRef: React.RefObject<PlayerRef | null>
   totalFrames: number
   narrationStale: boolean
+  hasUnrenderedChanges: boolean
 
   // Actions
   selectScene: (index: number) => void
   setActivePanel: (panel: PanelKey) => void
   updateScene: (index: number, updates: Partial<Scene>) => void
+  reorderScenes: (fromIndex: number, toIndex: number) => void
   updateSubtitleStyle: (updates: Partial<SubtitleStyle>) => void
   updateVoiceConfig: (updates: Partial<VoiceConfig>) => void
   setPlayerFrame: (frame: number) => void
@@ -49,6 +59,14 @@ interface EditorContextValue {
   redo: () => void
   canUndo: boolean
   canRedo: boolean
+  /** Persiste a revisão exata que será enviada ao worker. */
+  prepareRender: (author?: string) => Promise<boolean>
+  /** Marca e persiste a revisão incorporada ao MP4 publicado. */
+  completeRender: (renderedAt?: string) => Promise<boolean>
+  /** Limpa a revisão em voo após uma falha terminal confirmada. */
+  clearRenderTracking: () => Promise<boolean>
+  /** Restaura os ajustes de uma revisao arquivada como uma nova edicao pendente. */
+  restoreRevision: (revision: number) => boolean
 }
 
 const EditorContext = createContext<EditorContextValue | null>(null)
@@ -69,8 +87,8 @@ export function EditorProvider({ jobId, children }: { jobId: string; children: R
   const [isPlaying, setIsPlaying] = useState(false)
 
   const playerRef = useRef<PlayerRef | null>(null)
+  const compositionRef = useRef<CompositionData | null>(null)
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const [narrationStale, setNarrationStale] = useState(false)
   const baselineTextsRef = useRef<string[]>([])
 
   // Undo/redo
@@ -82,11 +100,14 @@ export function EditorProvider({ jobId, children }: { jobId: string; children: R
   const totalFrames = composition && composition.words.length > 0
     ? Math.round((composition.words[composition.words.length - 1].end + 0.5) * composition.fps)
     : 900 // 30s * 30fps fallback
+  const narrationStale = composition?.narrationStale ?? false
+  const hasUnrenderedChanges = composition ? hasPendingRender(composition) : false
 
   // Load composition
   useEffect(() => {
     fetchComposition(jobId)
       .then((data) => {
+        compositionRef.current = data
         setComposition(data)
         baselineTextsRef.current = data.scenes.map((s: Scene) => s.text)
         setHistory([data])
@@ -117,19 +138,18 @@ export function EditorProvider({ jobId, children }: { jobId: string; children: R
   }, [])
 
   // Save com 1 retry (~2s): backend piscando não pode significar edição perdida em silêncio.
-  const doSave = useCallback(async (): Promise<boolean> => {
-    if (!composition) return true
+  const persistSnapshot = useCallback(async (snapshot: CompositionData): Promise<boolean> => {
     setSaving(true)
     try {
-      await saveEditorState(jobId, { composition })
-      setDirty(false)
+      await saveEditorState(jobId, { composition: snapshot })
+      setDirty(compositionRef.current !== snapshot)
       setSaveError(false)
       return true
     } catch {
       await new Promise((resolve) => setTimeout(resolve, 2000))
       try {
-        await saveEditorState(jobId, { composition })
-        setDirty(false)
+        await saveEditorState(jobId, { composition: snapshot })
+        setDirty(compositionRef.current !== snapshot)
         setSaveError(false)
         return true
       } catch {
@@ -140,7 +160,13 @@ export function EditorProvider({ jobId, children }: { jobId: string; children: R
     } finally {
       setSaving(false)
     }
-  }, [composition, jobId])
+  }, [jobId])
+
+  const doSave = useCallback(async (): Promise<boolean> => {
+    const snapshot = compositionRef.current
+    if (!snapshot) return true
+    return persistSnapshot(snapshot)
+  }, [persistSnapshot])
 
   // O render exporta o que está NO DISCO (script.json/editor_state.json), não o estado do
   // React: com o debounce de 1,5s, editar e exportar em seguida renderizava estado velho —
@@ -175,11 +201,82 @@ export function EditorProvider({ jobId, children }: { jobId: string; children: R
     setHistoryIndex(newIdx)
   }, [])
 
+  const replaceCurrentComposition = useCallback((next: CompositionData) => {
+    compositionRef.current = next
+    setComposition(next)
+    setHistory((prev) => prev.map((item, index) => (
+      index === historyIndexRef.current ? next : item
+    )))
+  }, [])
+
+  const prepareRender = useCallback(async (author = 'Você'): Promise<boolean> => {
+    const current = compositionRef.current
+    if (!current || !hasPendingRender(current)) return false
+    if (saveTimerRef.current) {
+      clearTimeout(saveTimerRef.current)
+      saveTimerRef.current = null
+    }
+
+    const started = startRenderRevision(current, {
+      author,
+      startedAt: new Date().toISOString(),
+    })
+    replaceCurrentComposition(started)
+    const saved = await persistSnapshot(started)
+    if (!saved) {
+      const reverted = { ...started, renderingRevision: null }
+      replaceCurrentComposition(reverted)
+      setDirty(true)
+    }
+    return saved
+  }, [persistSnapshot, replaceCurrentComposition])
+
+  const completeRender = useCallback(async (renderedAt = new Date().toISOString()): Promise<boolean> => {
+    const current = compositionRef.current
+    if (!current) return false
+    const completed = finishRenderRevision(current, renderedAt)
+    replaceCurrentComposition(completed)
+    const saved = await persistSnapshot(completed)
+    if (!saved) setDirty(true)
+    return saved
+  }, [persistSnapshot, replaceCurrentComposition])
+
+  const clearRenderTracking = useCallback(async (): Promise<boolean> => {
+    const current = compositionRef.current
+    if (!current || current.renderingRevision === null) return true
+    const failedRevision = current.renderingRevision
+    const cleared = {
+      ...current,
+      renderingRevision: null,
+      renderStartedAt: null,
+      revisionHistory: current.revisionHistory.filter((entry) => (
+        !(entry.revision === failedRevision && entry.status === 'rendering')
+      )),
+    }
+    replaceCurrentComposition(cleared)
+    const saved = await persistSnapshot(cleared)
+    if (!saved) setDirty(true)
+    return saved
+  }, [persistSnapshot, replaceCurrentComposition])
+
+  const restoreRevision = useCallback((revision: number): boolean => {
+    const current = compositionRef.current
+    if (!current || current.renderingRevision !== null) return false
+    const restored = restoreRevisionState(current, revision)
+    if (restored === current) return false
+    compositionRef.current = restored
+    setComposition(restored)
+    pushHistory(restored)
+    setDirty(true)
+    return true
+  }, [pushHistory])
+
   // Composition updater (with history)
   const updateComposition = useCallback((updater: (prev: CompositionData) => CompositionData) => {
     setComposition((prev) => {
       if (!prev) return prev
-      const next = updater(prev)
+      const next = nextEditRevision(updater(prev))
+      compositionRef.current = next
       pushHistory(next)
       return next
     })
@@ -189,15 +286,49 @@ export function EditorProvider({ jobId, children }: { jobId: string; children: R
   const selectScene = useCallback((index: number) => setSelectedSceneIndex(index), [])
 
   const updateScene = useCallback((index: number, updates: Partial<Scene>) => {
-    if (updates.text !== undefined && updates.text !== baselineTextsRef.current[index]) {
-      setNarrationStale(true)
-    }
     updateComposition((prev) => {
       const newScenes = [...prev.scenes]
       newScenes[index] = { ...newScenes[index], ...updates }
-      return { ...prev, scenes: newScenes }
+      return {
+        ...prev,
+        scenes: newScenes,
+        narrationStale: prev.narrationStale || (
+          updates.text !== undefined
+          && updates.text !== baselineTextsRef.current[index]
+        ),
+      }
     })
   }, [updateComposition])
+
+  const reorderScenes = useCallback((fromIndex: number, toIndex: number) => {
+    if (
+      !composition
+      || fromIndex === toIndex
+      || fromIndex < 0
+      || toIndex < 0
+      || fromIndex >= composition.scenes.length
+      || toIndex >= composition.scenes.length
+    ) {
+      return
+    }
+
+    playerRef.current?.pause()
+    setIsPlaying(false)
+    const next = reorderComposition(composition, fromIndex, toIndex)
+    updateComposition(() => next)
+    setSelectedSceneIndex(toIndex)
+
+    const totalHints = next.scenes.reduce(
+      (sum, scene) => sum + Math.max(0, scene.duration_hint),
+      0,
+    ) || 1
+    const precedingHints = next.scenes
+      .slice(0, toIndex)
+      .reduce((sum, scene) => sum + Math.max(0, scene.duration_hint), 0)
+    const frame = Math.round((precedingHints / totalHints) * totalFrames)
+    playerRef.current?.seekTo(frame)
+    setPlayerFrame(frame)
+  }, [composition, totalFrames, updateComposition])
 
   const updateSubtitleStyle = useCallback((updates: Partial<SubtitleStyle>) => {
     updateComposition((prev) => ({
@@ -219,9 +350,9 @@ export function EditorProvider({ jobId, children }: { jobId: string; children: R
         ...prev,
         words: words as unknown as CompositionData['words'],
         audioUrl,
+        narrationStale: false,
       }
     })
-    setNarrationStale(false)
   }, [updateComposition])
 
   // Music update
@@ -295,8 +426,21 @@ export function EditorProvider({ jobId, children }: { jobId: string; children: R
     const newIndex = historyIndex - 1
     historyIndexRef.current = newIndex
     setHistoryIndex(newIndex)
-    setComposition(history[newIndex])
-    setNarrationStale(history[newIndex].scenes.some((s, i) => s.text !== baselineTextsRef.current[i]))
+    setComposition((current) => {
+      if (!current) return current
+      const next = nextEditRevision({
+        ...history[newIndex],
+        editRevision: current.editRevision,
+        renderedRevision: current.renderedRevision,
+        renderingRevision: current.renderingRevision,
+        renderedAt: current.renderedAt,
+        renderStartedAt: current.renderStartedAt,
+        renderedSnapshot: current.renderedSnapshot,
+        revisionHistory: current.revisionHistory,
+      })
+      compositionRef.current = next
+      return next
+    })
     setDirty(true)
   }, [canUndo, historyIndex, history])
 
@@ -305,15 +449,29 @@ export function EditorProvider({ jobId, children }: { jobId: string; children: R
     const newIndex = historyIndex + 1
     historyIndexRef.current = newIndex
     setHistoryIndex(newIndex)
-    setComposition(history[newIndex])
-    setNarrationStale(history[newIndex].scenes.some((s, i) => s.text !== baselineTextsRef.current[i]))
+    setComposition((current) => {
+      if (!current) return current
+      const next = nextEditRevision({
+        ...history[newIndex],
+        editRevision: current.editRevision,
+        renderedRevision: current.renderedRevision,
+        renderingRevision: current.renderingRevision,
+        renderedAt: current.renderedAt,
+        renderStartedAt: current.renderStartedAt,
+        renderedSnapshot: current.renderedSnapshot,
+        revisionHistory: current.revisionHistory,
+      })
+      compositionRef.current = next
+      return next
+    })
     setDirty(true)
   }, [canRedo, historyIndex, history])
 
   const value: EditorContextValue = {
     jobId, composition, loading, error, selectedSceneIndex, activePanel, panelCollapsed,
-    dirty, saving, saveError, retrySave: doSave, flushSave, playerFrame, isPlaying, playerRef, totalFrames, narrationStale,
-    selectScene, setActivePanel, updateScene, updateSubtitleStyle, updateVoiceConfig,
+    dirty, saving, saveError, retrySave: doSave, flushSave, playerFrame, isPlaying, playerRef, totalFrames,
+    narrationStale, hasUnrenderedChanges, prepareRender, completeRender, clearRenderTracking, restoreRevision,
+    selectScene, setActivePanel, updateScene, reorderScenes, updateSubtitleStyle, updateVoiceConfig,
     updateAudio, updateMusic, addOverlay, removeOverlay, updateOverlay, getSceneStartFrame,
     setPlayerFrame, seekToFrame, togglePlayback, togglePanel,
     undo, redo, canUndo, canRedo,

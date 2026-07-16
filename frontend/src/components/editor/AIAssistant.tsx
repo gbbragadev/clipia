@@ -4,6 +4,7 @@ import { useRef, useState, useEffect } from 'react'
 import { useEditor } from '@/contexts/EditorContext'
 import { getToken } from '@/lib/auth'
 import { readApiError } from '@/lib/http'
+import { withCacheBuster } from '@/lib/signed-media-url'
 import { useToast } from '@/components/ui/feedback'
 import { Modal } from '@/components/ui/Modal'
 import { useAuth } from '@/contexts/AuthContext'
@@ -148,7 +149,7 @@ export function AIAssistant() {
       })
       if (!res.ok) throw new Error(await readApiError(res, 'Falha ao regerar narração'))
       const data = await res.json()
-      const audioUrl = `${data.audio_url}?t=${Date.now()}`
+      const audioUrl = withCacheBuster(data.audio_url)
       updateAudio(data.words, audioUrl)
       setAppliedSuggestions(prev => new Set(prev).add(key))
       if (data.words_stale) {

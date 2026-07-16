@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { useEditor } from '@/contexts/EditorContext'
 import { getToken } from '@/lib/auth'
 import { readApiError } from '@/lib/http'
+import { withCacheBuster } from '@/lib/signed-media-url'
 import { fetchVoices, type VoiceInfo } from '@/lib/editor-api'
 import { useToast } from '@/components/ui/feedback'
 import { Modal } from '@/components/ui/Modal'
@@ -143,7 +144,7 @@ export function VoiceSelector() {
       })
       if (!res.ok) throw new Error(await readApiError(res, 'Falha ao regerar narração'))
       const data = await res.json()
-      const audioUrl = `${data.audio_url}?t=${Date.now()}`
+      const audioUrl = withCacheBuster(data.audio_url)
       updateAudio(data.words, audioUrl)
       setWordsStale(Boolean(data.words_stale))
       if (data.words_stale) {
@@ -273,7 +274,7 @@ export function VoiceSelector() {
             <input type="range" className="editor-slider" min={-30} max={30} value={voiceConfig.rate}
               onChange={(e) => updateVoiceConfig({ rate: Number(e.target.value) })} />
             <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 9, color: 'rgba(255,255,255,0.2)', marginTop: 3 }}>
-              <span>Lento</span><span>Normal</span><span>Rapido</span>
+              <span>Lento</span><span>Normal</span><span>Rápido</span>
             </div>
           </div>
 

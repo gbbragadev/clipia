@@ -200,6 +200,16 @@ class EditRequest(BaseModel):
             except (TypeError, ValueError) as exc:
                 raise ValueError(ErrorMessages.INVALID_INPUT) from exc
 
+        if "sceneOrder" in composition:
+            scene_order = composition["sceneOrder"]
+            if (
+                not isinstance(scene_order, list)
+                or len(scene_order) > 100
+                or any(type(index) is not int or index < 0 for index in scene_order)
+                or len(set(scene_order)) != len(scene_order)
+            ):
+                raise ValueError(ErrorMessages.INVALID_INPUT)
+
         voice_config = composition.get("voiceConfig")
         if isinstance(voice_config, dict):
             forbidden_keys = {"source_path", "sourcePath", "voicePath", "path", "url"}

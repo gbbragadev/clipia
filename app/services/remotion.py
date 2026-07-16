@@ -16,6 +16,11 @@ from pathlib import Path
 
 from app.config import BASE_DIR, settings
 from app.services.music import legacy_music_url_to_asset_id, validate_music_asset_id
+from app.services.scene_order import (
+    apply_scene_order,
+    identity_scene_order,
+    validate_scene_order,
+)
 from app.utils.media_url import sign_media_url
 
 logger = logging.getLogger(__name__)
@@ -159,6 +164,19 @@ def build_composition_props(
             props["voiceConfig"] = {
                 key: voice_config[key] for key in ("voiceId", "voiceProvider", "rate", "pitch") if key in voice_config
             }
+
+        raw_scene_order = comp.get("sceneOrder")
+        scene_order = validate_scene_order(raw_scene_order, len(scenes), strict=False)
+        if (
+            raw_scene_order is not None
+            and raw_scene_order != identity_scene_order(len(scenes))
+            and scene_order == identity_scene_order(len(scenes))
+        ):
+            logger.warning("Ignoring invalid legacy scene order for job %s", job_id)
+        props["mediaUrls"] = apply_scene_order(props["mediaUrls"], scene_order)
+        props["sceneOrder"] = scene_order
+    else:
+        props["sceneOrder"] = identity_scene_order(len(scenes))
 
     if settings.WATERMARK_ENABLED and settings.WATERMARK_TEXT:
         props["watermark"] = settings.WATERMARK_TEXT
