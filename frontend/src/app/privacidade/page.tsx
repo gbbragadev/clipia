@@ -18,7 +18,7 @@ export default function PrivacidadePage() {
   return (
     <div className="max-w-3xl mx-auto px-4 py-16 prose prose-invert prose-a:text-coral">
       <h1 className="text-3xl font-bold mb-8">Política de Privacidade</h1>
-      <p className="text-slate-400 mb-8">Data de vigência: 02/07/2026</p>
+      <p className="text-slate-400 mb-8">Data de vigência: 16/07/2026</p>
 
       <h2>1. Introdução</h2>
       <p>
@@ -30,6 +30,9 @@ export default function PrivacidadePage() {
       <ul>
         <li><strong>Dados de cadastro:</strong> Nome, e-mail e senha (armazenada em formato de hash criptografado irreversível).</li>
         <li><strong>Histórico de uso:</strong> Tópicos de vídeos gerados, preferência de voz e histórico de jobs.</li>
+        <li><strong>Atribuição de campanha e indicação:</strong> parâmetros UTM, código da oferta e código de indicação usados no cadastro, além da relação necessária para conceder recompensas elegíveis.</li>
+        <li><strong>Compartilhamento público:</strong> estado ativo ou revogado do link, vídeo associado e eventos necessários para operar e proteger o programa de recompensa.</li>
+        <li><strong>Visualização qualificada:</strong> processamos o tempo de página visível e o indicador de visibilidade; após 5 segundos, armazenamos um identificador anônimo durável da sessão, a classificação geral do navegador e a data da visita para evitar duplicidade e abuso.</li>
         <li><strong>Dados financeiros:</strong> Histórico de pacotes adquiridos, valores e status das transações. O processamento do pagamento é feito pelos provedores <strong>Stripe</strong> (primário) e <strong>Mercado Pago</strong> (secundário); o ClipIA não armazena e não tem acesso aos dados completos do seu cartão de crédito.</li>
         <li><strong>Dados técnicos:</strong> Endereço IP (usado apenas para segurança e limitação de taxa/rate limit).</li>
       </ul>
@@ -38,6 +41,7 @@ export default function PrivacidadePage() {
       <p>O tratamento de seus dados é realizado com base nas seguintes justificativas da LGPD:</p>
       <ul>
         <li><strong>Consentimento:</strong> Fornecido de forma <strong>expressa e inequívoca</strong> no momento do cadastro, por meio da marcação de um <em>checkbox</em> específico de aceitação desta Política de Privacidade ao criar a conta.</li>
+        <li><strong>Mensuração de marketing opcional:</strong> a autorização para mensurar resultados de campanhas da Meta aparece em um checkbox separado, começa desmarcada e não é necessária para criar a conta ou aceitar os termos. Quando marcada, registramos a data desse consentimento e condicionamos a ele qualquer uso de dados de campanha para essa finalidade.</li>
         <li><strong>Execução de Contrato:</strong> Para a prestação do serviço de geração de vídeos.</li>
         <li><strong>Interesse Legítimo:</strong> Para segurança, prevenção a fraudes e melhoria dos serviços.</li>
       </ul>
@@ -77,7 +81,10 @@ export default function PrivacidadePage() {
 
       <h2>6. Cookies e Tecnologias Semelhantes</h2>
       <p>
-        O ClipIA não utiliza cookies de rastreamento (tracking cookies). Utilizamos apenas o <code>localStorage</code> do seu navegador para manter a sessão (tokens JWT) ativa e garantir a segurança do acesso.
+        O ClipIA não instala cookies de publicidade da Meta sem a autorização aplicável. Usamos cookies e armazenamento
+        do navegador para manter a sessão e a proteção CSRF. Também guardamos temporariamente no <code>localStorage</code>
+        os parâmetros UTM, a indicação e o código da oferta até o cadastro ser concluído com sucesso. Para links públicos,
+        um identificador anônimo é mantido no navegador para impedir que a mesma sessão seja contada repetidamente.
       </p>
 
       <h2>7. Direitos do Titular</h2>

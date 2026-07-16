@@ -23,6 +23,7 @@ function RegisterForm() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [consentAccepted, setConsentAccepted] = useState(false);
+  const [marketingMeasurementConsent, setMarketingMeasurementConsent] = useState(false);
   // Bônus REAL de boas-vindas (backend é a fonte; nunca hardcodar oferta — DESIGN.md)
   const [welcomeBonus, setWelcomeBonus] = useState<number | null>(null);
   useEffect(() => {
@@ -47,7 +48,15 @@ function RegisterForm() {
     }
     setLoading(true);
     try {
-      await register(email, name, password, captchaToken, consentAccepted, selectedPackage ?? undefined);
+      await register(
+        email,
+        name,
+        password,
+        captchaToken,
+        consentAccepted,
+        marketingMeasurementConsent,
+        selectedPackage ?? undefined,
+      );
       const verifyParams = new URLSearchParams({ email });
       if (selectedPackage) verifyParams.set("selected_package", selectedPackage);
       router.push(`/auth/verify?${verifyParams.toString()}`);
@@ -163,6 +172,19 @@ function RegisterForm() {
                 Política de Privacidade
               </Link>
               .
+            </span>
+          </label>
+
+          <label className="flex items-start gap-3 cursor-pointer select-none rounded-xl border border-white/10 bg-white/[0.03] p-3">
+            <input
+              type="checkbox"
+              checked={marketingMeasurementConsent}
+              onChange={(e) => setMarketingMeasurementConsent(e.target.checked)}
+              className="mt-0.5 w-5 h-5 rounded border border-white/20 bg-white/5 accent-azure shrink-0 cursor-pointer"
+            />
+            <span className="text-xs sm:text-sm text-slate-300 leading-relaxed">
+              <strong className="text-white">Medição opcional:</strong> autorizo o uso dos dados da campanha
+              para medir resultados de anúncios da Meta. Posso criar minha conta sem marcar esta opção.
             </span>
           </label>
 

@@ -28,7 +28,9 @@ export default function ReferralCard() {
         </div>
         <div>
           <h3 className="text-white font-bold text-lg">Convide amigos</h3>
-          <p className="text-slate-400 text-sm">Vocês dois ganham 2 créditos extras</p>
+          <p className="text-slate-400 text-sm">
+            Você ganha +18 créditos quando a pessoa convidada verificar o e-mail e concluir o primeiro vídeo.
+          </p>
         </div>
       </div>
 

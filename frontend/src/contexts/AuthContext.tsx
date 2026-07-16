@@ -24,7 +24,7 @@ interface AuthContextType {
   user: User | null;
   loading: boolean;
   login: (email: string, password: string) => Promise<void>;
-  register: (email: string, name: string, password: string, turnstileToken?: string, consent?: boolean, selectedPackage?: SelectedPackage) => Promise<void>;
+  register: (email: string, name: string, password: string, turnstileToken?: string, consent?: boolean, marketingMeasurementConsent?: boolean, selectedPackage?: SelectedPackage) => Promise<void>;
   logout: () => void;
   refreshUser: () => Promise<User | null>;
 }
@@ -106,12 +106,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
-  const register = useCallback(async (email: string, name: string, password: string, turnstileToken?: string, consent?: boolean, selectedPackage?: SelectedPackage) => {
+  const register = useCallback(async (email: string, name: string, password: string, turnstileToken?: string, consent?: boolean, marketingMeasurementConsent?: boolean, selectedPackage?: SelectedPackage) => {
     const utm = getStoredUTM();
     const res = await authRegister(email, name, password, {
       ...utm,
       turnstile_token: turnstileToken,
       consent,
+      marketing_measurement_consent: marketingMeasurementConsent,
       selected_package: selectedPackage,
     });
     // Intenção de nicho (/criar/[nicho] → utm_campaign=nicho-{slug}): sobrevive ao

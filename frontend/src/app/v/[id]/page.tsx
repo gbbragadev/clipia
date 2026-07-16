@@ -1,14 +1,16 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import Logo from "@/components/brand/Logo";
-import { Button } from "@/components/landing/ui/Button";
-import showcase from "../../../../public/showcase/showcase.json";
-import { FREE_CLAIM } from "@/components/landing/lib/data";
+import { cache } from "react";
 
-// Página pública de compartilhamento (loop viral): vídeo + "crie o seu".
-// Hoje serve os vídeos do showcase; vídeos de usuário entram quando existir
-// endpoint público opt-in no backend (decisão de produto pendente).
+import Logo from "@/components/brand/Logo";
+import { FREE_CLAIM } from "@/components/landing/lib/data";
+import { Button } from "@/components/landing/ui/Button";
+import { ApiError } from "@/lib/http";
+import { getPublicShare } from "@/lib/public-shares";
+import { canonicalUrl } from "@/lib/site";
+import showcase from "../../../../public/showcase/showcase.json";
+import QualifiedViewTracker from "./QualifiedViewTracker";
 
 interface ShowcaseEntry {
   id: string;
@@ -19,40 +21,67 @@ interface ShowcaseEntry {
   poster?: string;
 }
 
+interface ResolvedVideo extends ShowcaseEntry {
+  kind: "showcase" | "public";
+}
+
 const VIDEOS: ShowcaseEntry[] = (showcase as { videos: ShowcaseEntry[] }).videos;
 
-export const dynamicParams = false;
-
 export function generateStaticParams() {
-  return VIDEOS.map((v) => ({ id: v.id }));
+  return VIDEOS.map((video) => ({ id: video.id }));
 }
+
+const resolveVideo = cache(async (id: string): Promise<ResolvedVideo | null> => {
+  // IDs editoriais continuam resolvidos pelo JSON local, sem depender da API.
+  const showcaseVideo = VIDEOS.find((video) => video.id === id);
+  if (showcaseVideo) return { ...showcaseVideo, kind: "showcase" };
+
+  try {
+    const publicShare = await getPublicShare(id);
+    if (!publicShare.active) return null;
+    return {
+      id,
+      title: publicShare.title,
+      template: "vídeo publicado",
+      niche: "conteúdo de criador",
+      // O navegador recebe apenas a rota pública; nenhum caminho de armazenamento é exposto.
+      video: `/api/v1/public-shares/${encodeURIComponent(id)}/video`,
+      kind: "public",
+    };
+  } catch (error) {
+    if (error instanceof ApiError && error.status === 404) return null;
+    throw error;
+  }
+});
 
 export async function generateMetadata({
   params,
-}: {
-  params: Promise<{ id: string }>;
-}): Promise<Metadata> {
+}: PageProps<"/v/[id]">): Promise<Metadata> {
   const { id } = await params;
-  const v = VIDEOS.find((x) => x.id === id);
-  if (!v) return {};
-  const title = `${v.title} — feito com ClipIA`;
+  const video = await resolveVideo(id);
+  if (!video) return {};
+
+  const title = `${video.title} — feito com ClipIA`;
   const description =
-    "Vídeo vertical gerado e editado no ClipIA: roteiro, narração em português e legendas sincronizadas. Crie o seu grátis.";
-  // No Next 16 a metadata mescla por chave de topo: redefinir openGraph SUBSTITUI o
-  // objeto global inteiro — sem images aqui, o WhatsApp mostrava card SEM imagem.
-  const ogImage = `https://clipia.com.br/showcase/og/${v.id}.jpg`;
+    video.kind === "showcase"
+      ? "Vídeo vertical gerado e editado no ClipIA: roteiro, narração em português e legendas sincronizadas. Crie o seu grátis."
+      : "Assista a um vídeo que um criador decidiu publicar com o ClipIA e transforme sua própria ideia em vídeo.";
+  const pageUrl = canonicalUrl(`/v/${id}`);
+  const ogImage = video.kind === "showcase" ? `/showcase/og/${video.id}.jpg` : "/og-image.png";
+
   return {
     title,
     description,
-    alternates: { canonical: `https://clipia.com.br/v/${v.id}` },
+    alternates: { canonical: pageUrl },
     openGraph: {
       title,
       description,
       type: "video.other",
-      url: `https://clipia.com.br/v/${v.id}`,
+      url: pageUrl,
       siteName: "ClipIA",
       locale: "pt_BR",
-      images: [{ url: ogImage, width: 1200, height: 630, alt: v.title }],
+      images: [{ url: ogImage, width: 1200, height: 630, alt: video.title }],
+      videos: [{ url: canonicalUrl(video.video), type: "video/mp4" }],
     },
     twitter: {
       card: "summary_large_image",
@@ -63,31 +92,30 @@ export async function generateMetadata({
   };
 }
 
-export default async function SharePage({
-  params,
-}: {
-  params: Promise<{ id: string }>;
-}) {
+export default async function SharePage({ params }: PageProps<"/v/[id]">) {
   const { id } = await params;
-  const v = VIDEOS.find((x) => x.id === id);
-  if (!v) notFound();
+  const video = await resolveVideo(id);
+  if (!video) notFound();
 
-  const cta = `/auth/register?utm_source=share&utm_medium=organic&utm_campaign=v-page&utm_content=${v.id}`;
+  const cta = `/auth/register?utm_source=share&utm_medium=organic&utm_campaign=v-page&utm_content=${encodeURIComponent(video.id)}`;
+  const isShowcase = video.kind === "showcase";
 
   return (
     <div className="flex min-h-screen flex-col bg-ink text-cloud antialiased">
+      {!isShowcase && <QualifiedViewTracker token={video.id} />}
       <script
         type="application/ld+json"
         dangerouslySetInnerHTML={{
           __html: JSON.stringify({
             "@context": "https://schema.org",
             "@type": "VideoObject",
-            name: v.title,
-            description: `Vídeo vertical de ${v.niche} gerado e editado no ClipIA (template ${v.template}).`,
-            thumbnailUrl: `https://clipia.com.br/showcase/og/${v.id}.jpg`,
-            contentUrl: `https://clipia.com.br${v.video}`,
-            // Data de publicação do showcase atual (arquivos de 04/2026).
-            uploadDate: "2026-04-04",
+            name: video.title,
+            description: isShowcase
+              ? `Vídeo vertical de ${video.niche} gerado e editado no ClipIA (template ${video.template}).`
+              : "Vídeo publicado pelo próprio criador por meio de um link público opt-in do ClipIA.",
+            thumbnailUrl: isShowcase ? canonicalUrl(`/showcase/og/${video.id}.jpg`) : canonicalUrl("/og-image.png"),
+            contentUrl: canonicalUrl(video.video),
+            ...(isShowcase ? { uploadDate: "2026-04-04" } : {}),
             inLanguage: "pt-BR",
           }),
         }}
@@ -105,14 +133,13 @@ export default async function SharePage({
         <div className="w-full max-w-[320px]">
           <div className="rounded-[2.4rem] border border-white/12 bg-panel/90 p-2 shadow-[0_30px_80px_-30px_rgba(0,0,0,0.9)]">
             <div className="relative aspect-[9/16] overflow-hidden rounded-[1.9rem] bg-ink">
-              {/* controles nativos: página de share precisa de play/pause/som simples */}
               <video
-                src={v.video}
-                poster={v.poster}
+                src={video.video}
+                poster={video.poster}
                 controls
                 playsInline
                 preload="metadata"
-                aria-label={v.title}
+                aria-label={video.title}
                 className="absolute inset-0 h-full w-full object-cover"
               />
             </div>
@@ -120,13 +147,13 @@ export default async function SharePage({
         </div>
 
         <h1 className="mt-6 max-w-md text-balance text-center text-2xl font-bold leading-tight">
-          {v.title}
+          {video.title}
         </h1>
         <p className="mt-2 flex items-center gap-2 text-sm text-mist">
           <span className="h-1.5 w-1.5 rounded-full bg-coral" />
-          Feito com ClipIA · template {v.template}
+          {isShowcase ? `Feito com ClipIA · template ${video.template}` : "Publicado pelo criador com ClipIA"}
         </p>
-        <p className="mt-1 text-[13px] text-mist-2">
+        <p className="mt-1 text-center text-[13px] text-mist-2">
           Roteiro, narração em português e legendas — gerados e editados na plataforma.
         </p>
 
@@ -138,9 +165,7 @@ export default async function SharePage({
             Ver mais exemplos
           </Button>
         </div>
-        <p className="mt-3 text-[13px] text-mist-2">
-          {FREE_CLAIM}
-        </p>
+        <p className="mt-3 text-[13px] text-mist-2">{FREE_CLAIM}</p>
       </main>
 
       <footer className="px-5 py-6 text-center text-[12px] text-mist-2">
