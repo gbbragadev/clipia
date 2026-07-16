@@ -24,6 +24,7 @@ from app.errors import (
     request_validation_exception_handler,
     unhandled_exception_handler,
 )
+from app.marketing.routes import router as marketing_router
 from app.observability import access_log_middleware, get_deep_health, render_metrics
 from app.payments.routes import router as payments_router
 from app.public_shares.routes import router as public_shares_router
@@ -133,6 +134,7 @@ def create_app() -> FastAPI:
     app.include_router(payments_router, prefix="/api/v1")
     app.include_router(analytics_router, prefix="/api/v1")
     app.include_router(public_shares_router, prefix="/api/v1")
+    app.include_router(marketing_router, prefix="/api/v1")
 
     jobs_dir = settings.STORAGE_DIR / "jobs"
     jobs_dir.mkdir(parents=True, exist_ok=True)

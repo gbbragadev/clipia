@@ -40,6 +40,7 @@ from app.auth.turnstile import verify_turnstile
 from app.config import settings
 from app.db.engine import get_db
 from app.db.models import CreditPurchase, Job, MarketingOffer, PasswordResetToken, User
+from app.marketing.meta_capi import enqueue_meta_conversion_safely
 from app.observability import record_credit_metric
 from app.payments.states import canonical_payment_state
 from app.services.acquisition_rewards import (
@@ -283,6 +284,12 @@ async def verify_email(
                 occurred_at=verified_at,
             )
         campaign_bonus = await claim_campaign_reward(db, user, verified_at)
+        await enqueue_meta_conversion_safely(
+            db,
+            user=user,
+            event_name="CompleteRegistration",
+            event_id=f"complete-registration:{user.id}",
+        )
         await db.commit()
         await db.refresh(user)
         if settings.WELCOME_CREDIT_BONUS > 0:

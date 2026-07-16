@@ -223,6 +223,12 @@ class Settings(BaseSettings):
     # NEXT_PUBLIC_ANALYTICS_ENABLED=true. The 14-day gate requires both flags.
     ANALYTICS_FRONTEND_ENABLED: bool = False
     ANALYTICS_RATE_LIMIT: str = "30/minute"
+    MARKETING_EXPORT_TOKEN: str = ""
+    MARKETING_PSEUDONYM_SECRET: str = ""
+    META_CAPI_ENABLED: bool = False
+    META_CAPI_PIXEL_ID: str = ""
+    META_CAPI_ACCESS_TOKEN: str = ""
+    META_CAPI_API_VERSION: str = ""
     # Ledger append-only permanece em shadow ate sete reconciliacoes diarias
     # consecutivas sem diferenca. `enforce` e bloqueado no startup sem esse gate.
     CREDIT_LEDGER_MODE: Literal["shadow", "enforce"] = "shadow"

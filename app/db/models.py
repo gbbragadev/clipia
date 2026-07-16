@@ -223,6 +223,31 @@ class ProcessedPaymentEvent(Base):
     processed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
+class MetaConversionOutbox(Base):
+    """Consent-gated, identifier-hashed Meta conversion awaiting delivery."""
+
+    __tablename__ = "meta_conversion_outbox"
+    __table_args__ = (
+        CheckConstraint("status IN ('pending', 'retry', 'sent', 'failed')", name="ck_meta_outbox_status"),
+        CheckConstraint("attempts >= 0", name="ck_meta_outbox_attempts_nonnegative"),
+        Index("ix_meta_outbox_dispatch", "status", "next_attempt_at"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(GUID(), primary_key=True, default=uuid.uuid4)
+    event_id: Mapped[str] = mapped_column(String(100), unique=True, nullable=False)
+    event_name: Mapped[str] = mapped_column(String(50), nullable=False)
+    payload: Mapped[dict] = mapped_column(JsonType, nullable=False)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="pending", server_default="pending")
+    attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    next_attempt_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    last_attempt_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_error: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
 class CreditAdjustment(Base):
     """Auditoria de ajuste manual de creditos pelo admin (e dinheiro: quem, quanto, por que)."""
 
