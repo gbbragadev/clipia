@@ -237,8 +237,62 @@ class CreditAdjustment(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
+class MarketingOffer(Base):
+    """A durable acquisition offer resolved at registration time."""
+
+    __tablename__ = "marketing_offers"
+    __table_args__ = (
+        CheckConstraint("bonus_credits > 0", name="ck_marketing_offer_bonus_positive"),
+        Index("ix_marketing_offers_active_code", "is_active", "code"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(GUID(), primary_key=True, default=uuid.uuid4)
+    code: Mapped[str] = mapped_column(String(100), unique=True, nullable=False)
+    bonus_credits: Mapped[int] = mapped_column(Integer, nullable=False)
+    is_active: Mapped[bool] = mapped_column(default=True, server_default="true", nullable=False)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+class AcquisitionReward(Base):
+    """One append-only acquisition or sharing reward for a user."""
+
+    __tablename__ = "acquisition_rewards"
+    __table_args__ = (
+        CheckConstraint(
+            "reward_type IN ('campaign_signup', 'referral_activation', 'social_share')",
+            name="ck_acquisition_reward_type",
+        ),
+        CheckConstraint("credits > 0", name="ck_acquisition_reward_credits_positive"),
+        UniqueConstraint("user_id", "reward_type", name="uq_acquisition_reward_user_type"),
+        Index(
+            "uq_acquisition_reward_user_acquisition",
+            "user_id",
+            unique=True,
+            postgresql_where=text("reward_type IN ('campaign_signup', 'referral_activation')"),
+            sqlite_where=text("reward_type IN ('campaign_signup', 'referral_activation')"),
+        ),
+        Index("ix_acquisition_rewards_type_occurred", "reward_type", "occurred_at"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(GUID(), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(GUID(), ForeignKey("users.id", ondelete="RESTRICT"), nullable=False)
+    reward_type: Mapped[str] = mapped_column(String(30), nullable=False)
+    credits: Mapped[int] = mapped_column(Integer, nullable=False)
+    marketing_offer_id: Mapped[uuid.UUID | None] = mapped_column(
+        GUID(), ForeignKey("marketing_offers.id", ondelete="RESTRICT"), nullable=True
+    )
+    source_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        GUID(), ForeignKey("users.id", ondelete="RESTRICT"), nullable=True
+    )
+    completed_job_id: Mapped[uuid.UUID | None] = mapped_column(
+        GUID(), ForeignKey("jobs.id", ondelete="RESTRICT"), nullable=True
+    )
+    occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
 class ReferralCreditAward(Base):
-    """One durable, idempotent credit award for a verified referred user."""
+    """Historical record of the retired verified-referral credit policy."""
 
     __tablename__ = "referral_credit_awards"
     __table_args__ = (
@@ -488,6 +542,10 @@ class User(Base):
         String(12), unique=True, nullable=False, default=lambda: uuid.uuid4().hex[:8]
     )
     referred_by: Mapped[uuid.UUID | None] = mapped_column(GUID(), ForeignKey("users.id"), nullable=True)
+    acquisition_offer_id: Mapped[uuid.UUID | None] = mapped_column(
+        GUID(), ForeignKey("marketing_offers.id", ondelete="RESTRICT"), nullable=True
+    )
+    marketing_measurement_consented_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     password_reset_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     # LGPD: comprovante de consentimento expresso no cadastro (Termos + Política de Privacidade).
     consented_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

@@ -162,7 +162,7 @@ def _server_acquisition_source(utm_source: str | None, utm_medium: str | None, u
 async def append_server_event(
     db: AsyncSession,
     *,
-    event_name: ServerEventName | str,
+    event_name: ServerEventName,
     user: User,
     properties: dict,
     idempotency_key: str,
@@ -226,7 +226,7 @@ async def append_server_event(
 async def append_server_event_safely(
     db: AsyncSession,
     *,
-    event_name: ServerEventName | str,
+    event_name: ServerEventName,
     user: User,
     properties: dict,
     idempotency_key: str,

@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.analytics.service import append_server_event_safely
 from app.db.models import Job, JobDispatch, User
+from app.services.acquisition_rewards import claim_referral_activation_reward
 from app.services.credit_ledger import set_credit_ledger_context
 from app.services.refine_balance import adjust_refine_balance
 
@@ -302,13 +303,20 @@ async def finalize_generation(
         )
         analytics_user = await _analytics_user(session, job.user_id)
         if analytics_user is not None:
+            generation_ordinal = await _generation_ordinal(session, job)
+            await claim_referral_activation_reward(
+                session,
+                analytics_user,
+                job,
+                job.completed_at,
+            )
             await append_server_event_safely(
                 session,
                 event_name="generation_completed",
                 user=analytics_user,
                 properties={
                     "operation_kind": "generation",
-                    "generation_ordinal": await _generation_ordinal(session, job),
+                    "generation_ordinal": generation_ordinal,
                 },
                 idempotency_key=f"job:{job.id}:generation-completed",
                 occurred_at=job.completed_at,

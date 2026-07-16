@@ -19,7 +19,6 @@ from app.auth.email import (
     send_verification_email,
     send_welcome_email,
 )
-from app.auth.referrals import award_verified_referral
 from app.auth.reset_tokens import consume_password_reset_token, invalidate_password_reset_tokens
 from app.auth.schemas import (
     ChangePasswordRequest,
@@ -40,9 +39,10 @@ from app.auth.session import clear_auth_cookies, new_csrf_token, set_auth_cookie
 from app.auth.turnstile import verify_turnstile
 from app.config import settings
 from app.db.engine import get_db
-from app.db.models import CreditPurchase, Job, PasswordResetToken, User
+from app.db.models import CreditPurchase, Job, MarketingOffer, PasswordResetToken, User
 from app.observability import record_credit_metric
 from app.payments.states import canonical_payment_state
+from app.services.acquisition_rewards import claim_campaign_reward
 from app.services.credit_ledger import set_credit_ledger_context
 from app.utils.locks import get_lock
 from app.utils.ratelimit import client_ip
@@ -91,9 +91,20 @@ async def register(request: Request, response: Response, body: RegisterRequest, 
         if result.scalar_one_or_none() is not None:
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Email ja cadastrado")
 
-        # Resolve referrer if referral code provided
+        registered_at = datetime.now(timezone.utc)
+        offer = None
+        if body.offer_code:
+            offer = await db.scalar(
+                select(MarketingOffer).where(
+                    MarketingOffer.code == body.offer_code,
+                    MarketingOffer.is_active.is_(True),
+                    (MarketingOffer.expires_at.is_(None) | (MarketingOffer.expires_at > registered_at)),
+                )
+            )
+
+        # A valid campaign offer owns acquisition attribution over a referral code.
         referrer_id = None
-        if body.referral_code:
+        if offer is None and body.referral_code:
             ref_result = await db.execute(select(User).where(User.referral_code == body.referral_code))
             referrer = ref_result.scalar_one_or_none()
             if referrer:
@@ -103,7 +114,6 @@ async def register(request: Request, response: Response, body: RegisterRequest, 
         # O backend exige o aceite e congela as versoes legais vigentes para auditoria.
         consented_at = datetime.now(timezone.utc)
         consent_ip = client_ip(request)
-        registered_at = datetime.now(timezone.utc)
         user = User(
             email=body.email,
             name=body.name,
@@ -118,6 +128,8 @@ async def register(request: Request, response: Response, body: RegisterRequest, 
             selected_package=body.selected_package,
             referral_code=uuid.uuid4().hex[:8],
             referred_by=referrer_id,
+            acquisition_offer_id=offer.id if offer is not None else None,
+            marketing_measurement_consented_at=registered_at if body.marketing_measurement_consent else None,
             consented_at=consented_at,
             consent_ip=consent_ip,
             consent_terms_version=settings.TERMS_VERSION,
@@ -264,19 +276,19 @@ async def verify_email(
                 idempotency_key=f"user:{user.id}:welcome-credit",
                 occurred_at=verified_at,
             )
-        referral_bonus = await award_verified_referral(db, user)
+        campaign_bonus = await claim_campaign_reward(db, user, verified_at)
         await db.commit()
         await db.refresh(user)
         if settings.WELCOME_CREDIT_BONUS > 0:
             record_credit_metric("credit", settings.WELCOME_CREDIT_BONUS)
-        if referral_bonus > 0:
-            record_credit_metric("referral_bonus", referral_bonus)
+        if campaign_bonus > 0:
+            record_credit_metric("campaign_signup", campaign_bonus)
 
         # Boas-vindas fire-and-forget: roda APOS a resposta (threadpool); falha de SMTP
         # e engolida dentro de send_welcome_email e nunca quebra a verificacao.
         background_tasks.add_task(send_welcome_email, user.email, user.name, user.credits)
 
-        return {"status": "verified", "credits": settings.WELCOME_CREDIT_BONUS}
+        return {"status": "verified", "credits": settings.WELCOME_CREDIT_BONUS + campaign_bonus}
 
 
 @router.post(
