@@ -18,6 +18,7 @@ finalTEMP_MPY_wvf_snd.mp4
 
 # Local agent / QA artifacts
 .claude/
+.worktrees/
 evidence/
 excalidraw.log
 
