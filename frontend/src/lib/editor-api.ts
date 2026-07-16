@@ -4,7 +4,7 @@ import { getToken } from '@/lib/auth'
 import { fetchAuthenticatedBlobUrl } from '@/lib/download'
 import { fetchJson, readApiError } from '@/lib/http'
 import { normalizeSceneOrder } from '@/lib/editor-timeline'
-import { normalizeRenderRevision } from '@/lib/editor-render-revision'
+import { normalizeRenderRevision, normalizeRevisionTimeline } from '@/lib/editor-render-revision'
 
 const API_BASE = '/api/v1'
 
@@ -47,34 +47,63 @@ export async function fetchComposition(jobId: string): Promise<CompositionData> 
     transition: scene.transition as TransitionType | undefined,
   }))
 
+  const sceneOrder = normalizeSceneOrder(saved?.sceneOrder, scenes.length)
+  const baseSubtitleStyle = {
+    ...DEFAULT_SUBTITLE_STYLE,
+    ...(data.subtitle_style as Partial<typeof DEFAULT_SUBTITLE_STYLE>),
+  }
+  const subtitleStyle = {
+    ...baseSubtitleStyle,
+    ...(saved?.subtitleStyle ?? {}),
+  }
+  const voiceConfig = saved?.voiceConfig ?? DEFAULT_VOICE_CONFIG
+  const musicAssetId = saved ? (saved.musicAssetId ?? null) : (data.music_asset_id ?? null)
+  const musicVolume = saved?.musicVolume ?? data.music_volume ?? 0.12
+  const overlays = saved?.overlays ?? []
+  const currentSnapshot = {
+    scenes,
+    sceneOrder,
+    subtitleStyle,
+    voiceConfig,
+    musicAssetId,
+    musicVolume,
+    overlays,
+  }
+  const revisionTimeline = normalizeRevisionTimeline(saved, {
+    scenes,
+    sceneOrder: scenes.map((_, index) => index),
+    subtitleStyle: baseSubtitleStyle,
+    voiceConfig: DEFAULT_VOICE_CONFIG,
+    musicAssetId: data.music_asset_id ?? null,
+    musicVolume: data.music_volume ?? 0.12,
+    overlays: [],
+  }, renderRevision, currentSnapshot)
+
   return {
     title: data.script.title || '',
     // Normaliza cenas: templates de IA (ai_video/novelinha) vem com visual_hint e
     // SEM keywords_en — o editor (SceneGrid) faz .map/.join em keywords_en
     // e crashava ("Cannot read properties of undefined (reading 'map')"). Garante array.
     scenes,
-    sceneOrder: normalizeSceneOrder(saved?.sceneOrder, scenes.length),
+    sceneOrder,
     narrationStale: Boolean(saved?.narrationStale),
     words: data.words ?? [],
     audioUrl: data.audio_url,
     mediaUrls: data.media_urls,
-    subtitleStyle: {
-      ...DEFAULT_SUBTITLE_STYLE,
-      ...(data.subtitle_style as Partial<typeof DEFAULT_SUBTITLE_STYLE>),
-      ...(saved?.subtitleStyle ?? {}),
-    },
-    voiceConfig: saved?.voiceConfig ?? DEFAULT_VOICE_CONFIG,
+    subtitleStyle,
+    voiceConfig,
     fps: data.fps,
     width: data.width,
     height: data.height,
-    overlays: saved?.overlays ?? [],
-    musicAssetId: saved ? (saved.musicAssetId ?? null) : (data.music_asset_id ?? null),
-    musicVolume: saved?.musicVolume ?? data.music_volume ?? 0.12, // alinha com AUTO_MUSIC_VOLUME do backend
+    overlays,
+    musicAssetId,
+    musicVolume, // alinha com AUTO_MUSIC_VOLUME do backend
     isRendering: false,
     templateId: data.template_id || 'stock_narration',
     layoutType: (data.layout_type as import('@/remotion/types').LayoutType) || 'fullscreen',
     pendingCredits: data.pending_credits || 0,
     ...renderRevision,
+    ...revisionTimeline,
   }
 }
 
@@ -369,7 +398,7 @@ export interface JobStatusResponse {
 }
 
 export async function fetchJobStatus(jobId: string): Promise<JobStatusResponse> {
-  return fetchJSON<JobStatusResponse>(`${API_BASE}/jobs/${jobId}`, {
+  return fetchJSON<JobStatusResponse>(`${API_BASE}/jobs/${jobId}/status`, {
     headers: getAuthHeaders(),
   })
 }

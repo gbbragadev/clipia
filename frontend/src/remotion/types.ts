@@ -46,6 +46,28 @@ export interface VoiceConfig {
   pitch: number
 }
 
+export interface RevisionSnapshot {
+  scenes: Scene[]
+  sceneOrder: number[]
+  subtitleStyle: SubtitleStyle
+  voiceConfig: VoiceConfig
+  musicAssetId: import('./music-assets').MusicAssetId | null
+  musicVolume: number
+  overlays: VideoOverlay[]
+}
+
+export interface RenderRevisionEntry {
+  revision: number
+  author: string
+  startedAt: string | null
+  renderedAt: string | null
+  status: 'rendering' | 'completed'
+  /** False when a legacy revision has no trustworthy persisted snapshot. */
+  restorable: boolean
+  changes: string[]
+  snapshot: RevisionSnapshot
+}
+
 export const DEFAULT_VOICE_CONFIG: VoiceConfig = {
   voiceId: 'pt-BR-AntonioNeural',
   voiceProvider: 'edge',
@@ -85,6 +107,12 @@ export interface CompositionData {
   renderingRevision: number | null
   /** Instante ISO observado quando o MP4 desta revisão ficou pronto. */
   renderedAt: string | null
+  /** Instante persistido em que o worker desta revisao foi acionado. */
+  renderStartedAt: string | null
+  /** Ajustes exatos incorporados ao MP4 atual. */
+  renderedSnapshot: RevisionSnapshot
+  /** Cinco recibos mais recentes, incluindo snapshot restauravel. */
+  revisionHistory: RenderRevisionEntry[]
 }
 
 export const DEFAULT_SUBTITLE_STYLE: SubtitleStyle = {

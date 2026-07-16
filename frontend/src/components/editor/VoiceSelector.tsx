@@ -274,7 +274,7 @@ export function VoiceSelector() {
             <input type="range" className="editor-slider" min={-30} max={30} value={voiceConfig.rate}
               onChange={(e) => updateVoiceConfig({ rate: Number(e.target.value) })} />
             <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 9, color: 'rgba(255,255,255,0.2)', marginTop: 3 }}>
-              <span>Lento</span><span>Normal</span><span>Rapido</span>
+              <span>Lento</span><span>Normal</span><span>Rápido</span>
             </div>
           </div>
 

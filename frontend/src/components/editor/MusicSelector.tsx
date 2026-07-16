@@ -13,28 +13,28 @@ interface MusicTrack {
 
 const TRACKS: MusicTrack[] = [
   { id: 'lofi-chill', name: 'Lo-Fi Chill', mood: 'Relaxante' },
-  { id: 'upbeat-energy', name: 'Upbeat Energy', mood: 'Energetico' },
-  { id: 'dramatic-epic', name: 'Dramatic Epic', mood: 'Dramatico' },
+  { id: 'upbeat-energy', name: 'Upbeat Energy', mood: 'Energético' },
+  { id: 'dramatic-epic', name: 'Dramatic Epic', mood: 'Dramático' },
   { id: 'ambient-calm', name: 'Ambient Calm', mood: 'Tranquilo' },
-  { id: 'cinematic-tension', name: 'Cinematic Tension', mood: 'Cinematico' },
+  { id: 'cinematic-tension', name: 'Cinematic Tension', mood: 'Cinemático' },
   { id: 'happy-pop', name: 'Happy Pop', mood: 'Alegre' },
   { id: 'dark-ambient', name: 'Dark Ambient', mood: 'Sombrio' },
   { id: 'inspirational', name: 'Inspirational', mood: 'Motivacional' },
-  { id: 'dreamy-space', name: 'Dreamy Space', mood: 'Onirico' },
-  { id: 'tech-pulse', name: 'Tech Pulse', mood: 'Tecnologico' },
+  { id: 'dreamy-space', name: 'Dreamy Space', mood: 'Onírico' },
+  { id: 'tech-pulse', name: 'Tech Pulse', mood: 'Tecnológico' },
 ]
 
 const MOOD_COLORS: Record<string, string> = {
   Relaxante: 'var(--color-coral)',
-  Energetico: '#f59e0b',
-  Dramatico: '#ef4444',
+  Energético: '#f59e0b',
+  Dramático: '#ef4444',
   Tranquilo: '#10b981',
-  Cinematico: '#3b82f6',
+  Cinemático: '#3b82f6',
   Alegre: '#f472b6',
   Sombrio: '#6b7280',
   Motivacional: '#fb923c',
-  Onirico: '#06b6d4',
-  Tecnologico: '#22d3ee',
+  Onírico: '#06b6d4',
+  Tecnológico: '#22d3ee',
 }
 
 export function MusicSelector() {
@@ -109,7 +109,7 @@ export function MusicSelector() {
   return (
     <div style={{ padding: '0 4px' }}>
       <h4 style={{ color: '#E8E8E8', fontSize: 13, fontWeight: 600, margin: '0 0 12px' }}>
-        Musica de Fundo
+        Música de fundo
       </h4>
 
       <div

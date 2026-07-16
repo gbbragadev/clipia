@@ -1150,6 +1150,43 @@ async def download_job(
 
 
 @router.get(
+    "/jobs/{job_id}/revisions/{revision}/download",
+    summary="Download render revision",
+    description="Downloads one immutable archived render revision owned by the current user.",
+    responses={200: {"description": "Revision video stream"}, 404: {"description": "Not found"}},
+)
+async def download_job_revision(
+    job_id: str,
+    revision: int,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    if revision < 0:
+        raise not_found_error()
+    job = await get_owned_job(db, user, job_id)
+    output_dir = Path(settings.STORAGE_DIR) / "output"
+    archived_path = output_dir / "revisions" / str(job.id) / f"revision-{revision}.mp4"
+
+    # Prefer the immutable archive. During the short interval between worker
+    # publication and the editor persisting completion, editor_state can still
+    # point at the previous revision while the canonical file is already newer.
+    file_path = archived_path if archived_path.exists() else None
+    if file_path is None:
+        composition = (job.editor_state or {}).get("composition", {})
+        rendered_revision = composition.get("renderedRevision") if isinstance(composition, dict) else None
+        canonical_path = output_dir / f"{job.id}.mp4"
+        if type(rendered_revision) is int and rendered_revision == revision and canonical_path.exists():
+            file_path = canonical_path
+    if file_path is None:
+        raise not_found_error()
+    return FileResponse(
+        str(file_path),
+        media_type="video/mp4",
+        filename=f"clipia-{str(job.id)[:8]}-revision-{revision}.mp4",
+    )
+
+
+@router.get(
     "/jobs/{job_id}/thumbnail",
     summary="Job thumbnail",
     description="Poster JPEG do video final (frame extraido no finalize).",

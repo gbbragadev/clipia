@@ -880,6 +880,14 @@ def test_rerender_prepares_video_and_thumbnail_before_publication_row_lock(tmp_p
     operation_output.write_bytes(b"rendered")
     output_dir = env.storage_dir / "output"
     output_dir.mkdir()
+    canonical_output = output_dir / f"{job.id}.mp4"
+    canonical_output.write_bytes(b"previous-revision")
+    job_dir = env.storage_dir / "jobs" / str(job.id)
+    job_dir.mkdir(parents=True)
+    (job_dir / "editor_state.json").write_text(
+        json.dumps({"composition": {"renderedRevision": 3}}),
+        encoding="utf-8",
+    )
 
     async def begin_and_claim():
         async with env.session_factory() as session:
@@ -914,6 +922,7 @@ def test_rerender_prepares_video_and_thumbnail_before_publication_row_lock(tmp_p
     monkeypatch.setattr(job_operations, "lock_rerender_for_publication", recording_lock)
     monkeypatch.setattr(worker_tasks, "append_outro", recording_outro)
     monkeypatch.setattr(worker_tasks, "_write_thumbnail", recording_thumbnail)
+    monkeypatch.setattr(worker_tasks, "get_job_dir", lambda _job_id: job_dir)
 
     published = worker_tasks._publish_rerender_operation(
         str(job.id),
@@ -926,6 +935,9 @@ def test_rerender_prepares_video_and_thumbnail_before_publication_row_lock(tmp_p
     assert published is not None
     assert events.index("append_outro") < events.index("lock")
     assert events.index("thumbnail") < events.index("lock")
+    archived = output_dir / "revisions" / str(job.id) / "revision-3.mp4"
+    assert archived.read_bytes() == b"previous-revision"
+    assert canonical_output.read_bytes() == b"rendered"
 
 
 def _prepare_finalize_env(tmp_path, monkeypatch, *, status: str):

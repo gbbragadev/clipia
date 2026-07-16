@@ -7,10 +7,11 @@ import type { MusicAssetId } from '@/remotion/music-assets'
 import { fetchComposition, saveEditorState } from '@/lib/editor-api'
 import { reorderComposition } from '@/lib/editor-timeline'
 import {
-  beginRenderRevision,
-  completeRenderRevision,
+  finishRenderRevision,
   hasUnrenderedChanges as hasPendingRender,
   nextEditRevision,
+  restoreRevision as restoreRevisionState,
+  startRenderRevision,
 } from '@/lib/editor-render-revision'
 
 type PanelKey = 'scenes' | 'voice' | 'subtitles' | 'elements' | 'ai'
@@ -59,11 +60,13 @@ interface EditorContextValue {
   canUndo: boolean
   canRedo: boolean
   /** Persiste a revisão exata que será enviada ao worker. */
-  prepareRender: () => Promise<boolean>
+  prepareRender: (author?: string) => Promise<boolean>
   /** Marca e persiste a revisão incorporada ao MP4 publicado. */
   completeRender: (renderedAt?: string) => Promise<boolean>
   /** Limpa a revisão em voo após uma falha terminal confirmada. */
   clearRenderTracking: () => Promise<boolean>
+  /** Restaura os ajustes de uma revisao arquivada como uma nova edicao pendente. */
+  restoreRevision: (revision: number) => boolean
 }
 
 const EditorContext = createContext<EditorContextValue | null>(null)
@@ -206,7 +209,7 @@ export function EditorProvider({ jobId, children }: { jobId: string; children: R
     )))
   }, [])
 
-  const prepareRender = useCallback(async (): Promise<boolean> => {
+  const prepareRender = useCallback(async (author = 'Você'): Promise<boolean> => {
     const current = compositionRef.current
     if (!current || !hasPendingRender(current)) return false
     if (saveTimerRef.current) {
@@ -214,7 +217,10 @@ export function EditorProvider({ jobId, children }: { jobId: string; children: R
       saveTimerRef.current = null
     }
 
-    const started = beginRenderRevision(current)
+    const started = startRenderRevision(current, {
+      author,
+      startedAt: new Date().toISOString(),
+    })
     replaceCurrentComposition(started)
     const saved = await persistSnapshot(started)
     if (!saved) {
@@ -228,7 +234,7 @@ export function EditorProvider({ jobId, children }: { jobId: string; children: R
   const completeRender = useCallback(async (renderedAt = new Date().toISOString()): Promise<boolean> => {
     const current = compositionRef.current
     if (!current) return false
-    const completed = completeRenderRevision(current, renderedAt)
+    const completed = finishRenderRevision(current, renderedAt)
     replaceCurrentComposition(completed)
     const saved = await persistSnapshot(completed)
     if (!saved) setDirty(true)
@@ -238,12 +244,32 @@ export function EditorProvider({ jobId, children }: { jobId: string; children: R
   const clearRenderTracking = useCallback(async (): Promise<boolean> => {
     const current = compositionRef.current
     if (!current || current.renderingRevision === null) return true
-    const cleared = { ...current, renderingRevision: null }
+    const failedRevision = current.renderingRevision
+    const cleared = {
+      ...current,
+      renderingRevision: null,
+      renderStartedAt: null,
+      revisionHistory: current.revisionHistory.filter((entry) => (
+        !(entry.revision === failedRevision && entry.status === 'rendering')
+      )),
+    }
     replaceCurrentComposition(cleared)
     const saved = await persistSnapshot(cleared)
     if (!saved) setDirty(true)
     return saved
   }, [persistSnapshot, replaceCurrentComposition])
+
+  const restoreRevision = useCallback((revision: number): boolean => {
+    const current = compositionRef.current
+    if (!current || current.renderingRevision !== null) return false
+    const restored = restoreRevisionState(current, revision)
+    if (restored === current) return false
+    compositionRef.current = restored
+    setComposition(restored)
+    pushHistory(restored)
+    setDirty(true)
+    return true
+  }, [pushHistory])
 
   // Composition updater (with history)
   const updateComposition = useCallback((updater: (prev: CompositionData) => CompositionData) => {
@@ -408,6 +434,9 @@ export function EditorProvider({ jobId, children }: { jobId: string; children: R
         renderedRevision: current.renderedRevision,
         renderingRevision: current.renderingRevision,
         renderedAt: current.renderedAt,
+        renderStartedAt: current.renderStartedAt,
+        renderedSnapshot: current.renderedSnapshot,
+        revisionHistory: current.revisionHistory,
       })
       compositionRef.current = next
       return next
@@ -428,6 +457,9 @@ export function EditorProvider({ jobId, children }: { jobId: string; children: R
         renderedRevision: current.renderedRevision,
         renderingRevision: current.renderingRevision,
         renderedAt: current.renderedAt,
+        renderStartedAt: current.renderStartedAt,
+        renderedSnapshot: current.renderedSnapshot,
+        revisionHistory: current.revisionHistory,
       })
       compositionRef.current = next
       return next
@@ -438,7 +470,7 @@ export function EditorProvider({ jobId, children }: { jobId: string; children: R
   const value: EditorContextValue = {
     jobId, composition, loading, error, selectedSceneIndex, activePanel, panelCollapsed,
     dirty, saving, saveError, retrySave: doSave, flushSave, playerFrame, isPlaying, playerRef, totalFrames,
-    narrationStale, hasUnrenderedChanges, prepareRender, completeRender, clearRenderTracking,
+    narrationStale, hasUnrenderedChanges, prepareRender, completeRender, clearRenderTracking, restoreRevision,
     selectScene, setActivePanel, updateScene, reorderScenes, updateSubtitleStyle, updateVoiceConfig,
     updateAudio, updateMusic, addOverlay, removeOverlay, updateOverlay, getSceneStartFrame,
     setPlayerFrame, seekToFrame, togglePlayback, togglePanel,

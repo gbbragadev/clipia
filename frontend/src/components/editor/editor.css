@@ -403,6 +403,8 @@
 }
 .export-progress__label { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
 .export-progress__label strong { flex-shrink: 0; font-variant-numeric: tabular-nums; }
+.export-render-meta { display: flex; flex-wrap: wrap; gap: 4px 12px; margin-top: 5px; color: rgba(255,255,255,0.62); font-size: 11px; }
+.export-background-link { margin-top: 9px; padding: 0; border: none; background: transparent; color: #93c5fd; font: inherit; font-size: 12px; font-weight: 700; cursor: pointer; text-decoration: underline; text-underline-offset: 3px; }
 .export-progress__fill {
   height: 100%; width: 100%; border-radius: 999px;
   background: linear-gradient(90deg, var(--color-coral), var(--color-azure, #3e9bff));
@@ -426,6 +428,19 @@
 .export-cost-free {
   margin: 0 0 10px; color: #6ee7b7; font-size: 12px; font-weight: 600; text-align: center;
 }
+.export-restore-message { margin: 0 0 10px; border-radius: 8px; padding: 9px 11px; background: rgba(16,185,129,0.1); color: #a7f3d0; font-size: 12px; }
+.export-receipt, .export-history { margin: 12px 0; border: 1px solid rgba(255,255,255,0.1); border-radius: 10px; background: rgba(255,255,255,0.035); padding: 12px; }
+.export-receipt h3, .export-history h3 { margin: 0 0 8px; color: #f3f4f6; font-size: 13px; }
+.export-receipt ul, .export-history ul { margin: 0; padding-left: 18px; color: rgba(255,255,255,0.7); font-size: 11px; line-height: 1.55; }
+.export-history__list { display: grid; gap: 9px; }
+.export-history__item { border-top: 1px solid rgba(255,255,255,0.08); padding-top: 9px; }
+.export-history__item:first-child { border-top: none; padding-top: 0; }
+.export-history__head { display: flex; justify-content: space-between; gap: 8px; color: #e5e7eb; font-size: 12px; }
+.export-history__head span { color: rgba(255,255,255,0.55); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.export-history__item p { margin: 3px 0 6px; color: rgba(255,255,255,0.45); font-size: 10px; }
+.export-history__actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.export-history__actions button { display: inline-flex; align-items: center; gap: 5px; min-height: 32px; border: 1px solid rgba(255,255,255,0.12); border-radius: 7px; background: rgba(255,255,255,0.06); color: #d1d5db; padding: 6px 8px; font-size: 10px; cursor: pointer; }
+.export-history__actions button:disabled { cursor: not-allowed; opacity: 0.5; }
 
 .export-stale {
   border: 1px solid rgba(245,158,11,0.3); background: rgba(245,158,11,0.1);

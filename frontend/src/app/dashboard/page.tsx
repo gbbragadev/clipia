@@ -4,7 +4,8 @@ import { Mail } from 'lucide-react'
 import { strings } from '@/lib/strings';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { fetchJobs, cancelJob, ACTIVE_JOB_STATUSES, type JobSummary } from '@/lib/editor-api'
+import Link from 'next/link'
+import { fetchJobs, fetchJobStatus, cancelJob, ACTIVE_JOB_STATUSES, type JobSummary } from '@/lib/editor-api'
 import { useAuth } from '@/contexts/AuthContext'
 import GenerateForm from '@/components/dashboard/GenerateForm'
 import TrendingPanel, { type TrendSelection } from '@/components/dashboard/TrendingPanel'
@@ -14,6 +15,13 @@ import { InlineError, useToast } from '@/components/ui/feedback'
 import { PretextHeading } from '@/components/ui/PretextHeading'
 import { fetchPublicConfig } from '@/lib/config'
 import { getNicheBySlug } from '@/lib/niches'
+import {
+  dismissBackgroundRender,
+  readBackgroundRenders,
+  reconcileBackgroundRenders,
+  writeBackgroundRenders,
+  type BackgroundRenderNotice,
+} from '@/lib/render-background'
 
 export default function DashboardPage() {
   const router = useRouter()
@@ -23,6 +31,7 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [prefill, setPrefill] = useState<TrendSelection | null>(null)
+  const [backgroundRenders, setBackgroundRenders] = useState<BackgroundRenderNotice[]>([])
   const formRef = useRef<HTMLDivElement>(null)
   // Intenção de nicho gravada no cadastro (via /criar/[nicho]): aplica template/
   // estilo/tema recomendados UMA vez após o OTP e descarta a chave.
@@ -58,6 +67,45 @@ export default function DashboardPage() {
   }, [])
 
   useEffect(() => { loadJobs() }, [loadJobs])
+
+  useEffect(() => {
+    setBackgroundRenders(readBackgroundRenders())
+  }, [])
+
+  const renderingNoticeKey = useMemo(() => backgroundRenders
+    .filter((notice) => notice.status === 'rendering')
+    .map((notice) => notice.jobId)
+    .sort()
+    .join('|'), [backgroundRenders])
+
+  useEffect(() => {
+    if (!renderingNoticeKey) return
+    let cancelled = false
+    const jobIds = renderingNoticeKey.split('|')
+
+    const refreshRenderNotices = async () => {
+      const statuses = (await Promise.all(jobIds.map(async (jobId) => {
+        try {
+          return await fetchJobStatus(jobId)
+        } catch {
+          return null
+        }
+      }))).filter((status): status is Awaited<ReturnType<typeof fetchJobStatus>> => status !== null)
+      if (cancelled) return
+      setBackgroundRenders((current) => {
+        const reconciled = reconcileBackgroundRenders(current, statuses)
+        writeBackgroundRenders(reconciled)
+        return reconciled
+      })
+    }
+
+    void refreshRenderNotices()
+    const timer = window.setInterval(() => void refreshRenderNotices(), 4000)
+    return () => {
+      cancelled = true
+      window.clearInterval(timer)
+    }
+  }, [renderingNoticeKey])
 
   // ── Grid reativa: enquanto houver job ativo, re-busca a lista com backoff.
   // O efeito só liga/desliga quando a "atividade" muda (não a cada poll), então o
@@ -161,6 +209,52 @@ export default function DashboardPage() {
           </div>
         )}
       </div>
+
+      {backgroundRenders.length > 0 && (
+        <section className="mb-8 space-y-3" aria-label="Atualizações de renderização">
+          {backgroundRenders.map((notice) => (
+            <div
+              key={`${notice.jobId}-${notice.revision}`}
+              role="status"
+              aria-live="polite"
+              className={`rounded-xl border p-4 sm:flex sm:items-center sm:justify-between sm:gap-4 ${
+                notice.status === 'ready'
+                  ? 'border-mint/30 bg-mint/10'
+                  : notice.status === 'error'
+                    ? 'border-red-400/30 bg-red-400/10'
+                    : 'border-azure/30 bg-azure/10'
+              }`}
+            >
+              <div>
+                <p className="font-semibold text-white">
+                  Revisão {notice.revision}{' '}
+                  {notice.status === 'ready' ? 'pronta' : notice.status === 'error' ? 'com erro' : 'em andamento'}
+                </p>
+                <p className="mt-1 text-sm text-[var(--text-secondary)]">
+                  {notice.topic} · o processamento continua mesmo fora do editor.
+                </p>
+              </div>
+              <div className="mt-3 flex flex-wrap gap-2 sm:mt-0 sm:shrink-0">
+                <Link
+                  href={`/editor/${notice.jobId}`}
+                  className="rounded-lg bg-white/10 px-3 py-2 text-sm font-semibold text-white transition hover:bg-white/15"
+                >
+                  {notice.status === 'ready' ? 'Abrir revisão' : 'Voltar ao editor'}
+                </Link>
+                {notice.status !== 'rendering' && (
+                  <button
+                    type="button"
+                    onClick={() => setBackgroundRenders(dismissBackgroundRender(notice.jobId))}
+                    className="rounded-lg border border-white/10 px-3 py-2 text-sm text-[var(--text-secondary)] transition hover:bg-white/5"
+                  >
+                    Dispensar
+                  </button>
+                )}
+              </div>
+            </div>
+          ))}
+        </section>
+      )}
 
       {user && !user.email_verified && (
         <div className="bg-yellow-500/10 border border-yellow-500/20 rounded-xl p-5 mb-8 flex flex-col md:flex-row items-center justify-between gap-4 backdrop-blur-md">
